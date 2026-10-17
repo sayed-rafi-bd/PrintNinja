@@ -721,18 +721,20 @@ export function DesignerPage() {
           )}
 
           {activeTab === "code" && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">HTML</CardTitle>
+                  <CardTitle className="text-sm">HTML — {templateName}</CardTitle>
                 </CardHeader>
-                <CardContent className="p-0">
+                <CardContent className="p-0 border rounded-md overflow-hidden">
                   <CodeMirror
                     value={htmlCode}
-                    height="500px"
+                    height="520px"
                     extensions={[html()]}
                     onChange={setHtmlCode}
                     theme="dark"
+                    style={{ fontSize: "13px" }}
+                    basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: true }}
                   />
                 </CardContent>
               </Card>
@@ -740,13 +742,15 @@ export function DesignerPage() {
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm">CSS</CardTitle>
                 </CardHeader>
-                <CardContent className="p-0">
+                <CardContent className="p-0 border rounded-md overflow-hidden">
                   <CodeMirror
                     value={cssCode}
-                    height="500px"
+                    height="520px"
                     extensions={[css()]}
                     onChange={setCssCode}
                     theme="dark"
+                    style={{ fontSize: "13px" }}
+                    basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: true }}
                   />
                 </CardContent>
               </Card>
