@@ -60,8 +60,8 @@ jobs:
         with:
           workspaces: src-tauri
       - run: pnpm install --frozen-lockfile
-      # MSI only (per plan)
-      - run: pnpm tauri:build --target x86_64-pc-windows-msvc -- --bundles msi
+      # MSI only (per plan) — no extra -- before --bundles (it is a Tauri arg, not cargo)
+      - run: pnpm exec tauri build --target x86_64-pc-windows-msvc --bundles msi
       - uses: actions/upload-artifact@v4
         with:
           name: windows-msi
