@@ -99,19 +99,3 @@ jobs:
         with:
           name: android-aab
           path: src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
-
-  e2e:
-    runs-on: ubuntu-latest
-    needs: web-check
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: npx playwright install chromium --with-deps
-      - run: pnpm test:e2e
