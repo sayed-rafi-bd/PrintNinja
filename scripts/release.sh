@@ -70,9 +70,29 @@ fi
 echo "=== Release: $APP_NAME v$VERSION ==="
 
 # 1. Update Cargo.toml
-sed -i -E "s/^name = \"[^\"]+\"/name = \"$(echo "$APP_NAME" | tr '[:upper:]' '[:lower:]')\"/" src-tauri/Cargo.toml
-sed -i -E "s/^version = \"[^\"]+\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+# Only touch the [package] table: [lib] also has a `name =` line that must
+# stay in sync with src/main.rs (`printninja::run()`), so a blanket sed on
+# `^name =` would rename the library too.
+CRATE_NAME="$(echo "$APP_NAME" | tr '[:upper:]' '[:lower:]')"
+sed -i -E "/^\[package\]/,/^\[(lib|build-dependencies|dependencies)\]/{s/^name = \"[^\"]+\"/name = \"$CRATE_NAME\"/;s/^version = \"[^\"]+\"/version = \"$VERSION\"/}" src-tauri/Cargo.toml
 echo "[ok] Cargo.toml -> $VERSION"
+
+# Keep Cargo.lock in step so `cargo build --locked` does not fail on a tag build.
+python3 - "$VERSION" "$CRATE_NAME" <<'PY'
+import re, sys
+version, name = sys.argv[1], sys.argv[2]
+path = "src-tauri/Cargo.lock"
+with open(path) as f:
+    lock = f.read()
+pattern = r'(\[\[package\]\]\nname = "' + re.escape(name) + r'"\nversion = ")[^"]+(")'
+lock, n = re.subn(pattern, lambda m: m.group(1) + version + m.group(2), lock)
+if n != 1:
+    print(f"[warn] Cargo.lock: package {name} not found; run `cargo update -w`", file=sys.stderr)
+else:
+    with open(path, "w") as f:
+        f.write(lock)
+    print(f"[ok] Cargo.lock -> {version}")
+PY
 
 # 2. Update tauri.conf.json
 python3 - "$VERSION" "$APP_NAME" <<'PY'
@@ -82,7 +102,8 @@ with open(path) as f:
     cfg = json.load(f)
 cfg["productName"] = sys.argv[2]
 cfg["version"] = sys.argv[1]
-cfg["identifier"] = "com." + sys.argv[2].lower() + ".app"
+# Not ".app": a bundle id ending in .app clashes with the macOS bundle extension.
+cfg["identifier"] = "com." + sys.argv[2].lower() + ".desktop"
 with open(path, "w") as f:
     json.dump(cfg, f, indent=2)
     f.write("\n")
@@ -104,7 +125,7 @@ print(f"[ok] package.json -> v{sys.argv[1]}")
 PY
 
 # 4. Commit with version in message, tag with version
-git add -A
+git add package.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
 git commit -m "release: v$VERSION" -m "Release $APP_NAME $VERSION" || echo "[info] no changes to commit"
 
 if $CREATE_TAG; then
@@ -116,5 +137,5 @@ fi
 echo "=== Done: $APP_NAME v$VERSION ==="
 echo "Next:"
 echo "  git push origin main && git push origin v$VERSION"
-echo "  Windows: pnpm tauri:build --target x86_64-pc-windows-msvc"
-echo "  Android: pnpm tauri android build --target aarch64"
+echo "Pushing the tag triggers the CI release workflow, which builds the"
+echo "Windows MSI and Android artifacts and attaches them to a GitHub Release."

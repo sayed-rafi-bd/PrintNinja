@@ -63,29 +63,26 @@ pnpm tauri android build --target x86_64
 
 By default, **CI does not sign anything**. Code signing is intentionally local-only for now. The GitHub Actions workflow only *builds* unsigned artifacts and uploads them as workflow artifacts. Distribute signed binaries from your local machine via the GitHub Releases page.
 
-## 4. Trigger CI build (unsigned)
+## 4. Trigger the CI release
 
 ```bash
 git push origin main
 git push origin v1.0.0
 ```
 
-This triggers:
-- **web-check**: lint + type-check + vite build
-- **rust-check**: cargo fmt + clippy + tests
-- **windows-build**: MSI only (`x86_64-pc-windows-msvc`, `--bundles msi`)
-- **android-build**: `aarch64` (arm64-v8a) only
-- **cargo test**: unit tests
+Pushing a `v*` tag runs the `CI` workflow (a `create` trigger cannot filter by tag, so it uses `push`):
+- **web-check**: lint + type-check + vite build + vitest
+- **rust-check**: cargo fmt (blocking), clippy and cargo test (advisory)
+- **version-check**: the tag must match `package.json`, `Cargo.toml` and `tauri.conf.json`
+- **windows-build**: MSI only (`--bundles msi`, output in `src-tauri/target/release/bundle/msi`)
+- **android-build**: `aarch64` (arm64-v8a) unsigned APK + AAB
+- **github-release**: creates a **draft** GitHub Release with the MSI/APK/AAB attached
 
-Artifacts are uploaded for 30 days.
+Artifacts are also kept as workflow artifacts for 30 days.
 
-## 5. Publish to GitHub Releases
+## 5. Publish
 
-```bash
-gh release create v1.0.0 --title "PrintNinja v1.0.0" --notes-file release-notes.md
-gh release upload v1.0.0 ./src-tauri/target/release/bundle/msi/*.msi
-gh release upload v1.0.0 ./src-tauri/gen/android/.../*.apk
-```
+Open the draft release on GitHub. If you sign locally, replace the unsigned files with your signed builds, then publish.
 
 ## 6. Architecture targets summary
 
@@ -100,5 +97,3 @@ gh release upload v1.0.0 ./src-tauri/gen/android/.../*.apk
 cd src-tauri && cargo clean
 pnpm store prune
 ```
-EOF
-mkdir -p /root/projects/PrintNinja/docs && mv /root/projects/PrintNinja/docs/RELEASE.md /tmp/scratchpad 2>/dev/null; mkdir -p /root/projects/PrintNinja/docs && mv /tmp/scratchpad /root/projects/PrintNinja/docs/RELEASE.md 2>/dev/null; ls /root/projects/PrintNinja/docs/ 2>/dev/null || echo "docs dir not present - creating"

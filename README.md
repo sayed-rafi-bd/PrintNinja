@@ -85,7 +85,7 @@ pnpm tauri:build              # Windows MSI (x86_64-pc-windows-msvc)
 pnpm tauri:build -- --target aarch64-linux-android   # Android (arm64)
 ```
 
-CI builds MSI only and Android `aarch64` only; signing is local-only (`docs/RELEASE.md`, `scripts/release.sh`).
+CI builds MSI only and Android `aarch64` only (unsigned, attached to a draft GitHub Release on `v*` tags); signing is local-only (`docs/RELEASE.md`, `scripts/release.sh`).
 
 ## REST API
 
