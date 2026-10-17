@@ -151,8 +151,9 @@ jobs:
           if [ ! -d src-tauri/gen/android ]; then pnpm exec tauri android init --ci; fi
       - name: Make gradlew executable
         run: chmod +x src-tauri/gen/android/gradlew || true
-      # arm64-v8a only (new mobiles). Unsigned: sign locally before distributing.
-      - run: pnpm exec tauri android build --target aarch64 --apk --aab
+      # arm64-v8a only (new mobiles). Debug APK is signed with debug keystore and installable for testing;
+      # release AAB/unsigned APK stays local-only (sign before Play Store). Build debug for installable artifact.
+      - run: pnpm exec tauri android build --target aarch64 --debug --apk --aab
       - uses: actions/upload-artifact@v4
         with:
           name: android
