@@ -120,10 +120,13 @@ pub fn create_transport(
         #[cfg(windows)]
         PrinterType::Usb => Some(Box::new(windows_usb::WindowsUsbPrinter::new(
             name.to_string(),
+            0,
+            0,
         ))),
         #[cfg(windows)]
         PrinterType::Bluetooth => Some(Box::new(windows_bluetooth::WindowsBluetoothPrinter::new(
             name.to_string(),
+            address.to_string(),
         ))),
         // Off Windows there is no spooler and no USB/Bluetooth transport, so
         // every other variant is unsupported here.

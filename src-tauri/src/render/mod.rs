@@ -86,7 +86,6 @@ impl PdfRenderer {
         self.fallback_pdf(w * 25.4, h * 25.4, orientation)
     }
 
-    #[cfg(not(windows))]
     fn fallback_pdf(
         &self,
         page_width_mm: f64,

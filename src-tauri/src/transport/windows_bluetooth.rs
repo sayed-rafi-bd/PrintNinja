@@ -1,4 +1,4 @@
-use crate::transport::{PrinterInfo, PrinterTransport, RenderedJob};
+use crate::transport::{PrinterInfo, PrinterLanguage, PrinterTransport, PrinterType, RenderedJob};
 use async_trait::async_trait;
 
 /// Windows Bluetooth transport via COM port (paired Bluetooth printer)

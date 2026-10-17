@@ -1,5 +1,5 @@
 #[cfg(windows)]
-use crate::transport::{PrinterInfo, PrinterTransport, RenderedJob};
+use crate::transport::{PrinterInfo, PrinterLanguage, PrinterTransport, PrinterType, RenderedJob};
 #[cfg(windows)]
 use async_trait::async_trait;
 #[cfg(windows)]
@@ -155,34 +155,33 @@ impl WindowsSpooler {
             let stride = std::mem::size_of::<PRINTER_INFO_2A>();
             let capacity = bytes_needed as usize / stride;
 
-            if let Ok(infos) = buffer.as_slice().align_to::<PRINTER_INFO_2A>() {
-                for info in infos.iter().take(capacity.min(num_printers as usize)) {
-                    if info.pPrinterName.is_null() {
-                        continue;
-                    }
-                    let name = CStr::from_ptr(info.pPrinterName as *const i8)
-                        .to_string_lossy()
-                        .to_string();
-                    let port = if info.pPortName.is_null() {
-                        name.clone()
-                    } else {
-                        CStr::from_ptr(info.pPortName as *const i8)
-                            .to_string_lossy()
-                            .to_string()
-                    };
-
-                    // PRINTER_STATUS_OFFLINE (0x02) / PRINTER_STATUS_PAPEROUT (0x04)
-                    let offline = info.Status & 0x06 != 0;
-
-                    printers.push(PrinterInfo {
-                        id: name.clone(),
-                        name,
-                        address: port,
-                        printer_type: PrinterType::System,
-                        language: PrinterLanguage::Pdf,
-                        status: if offline { "offline" } else { "online" }.to_string(),
-                    });
+            let (_prefix, infos, _suffix) = buffer.as_slice().align_to::<PRINTER_INFO_2A>();
+            for info in infos.iter().take(capacity.min(num_printers as usize)) {
+                if info.pPrinterName.is_null() {
+                    continue;
                 }
+                let name = CStr::from_ptr(info.pPrinterName as *const i8)
+                    .to_string_lossy()
+                    .to_string();
+                let port = if info.pPortName.is_null() {
+                    name.clone()
+                } else {
+                    CStr::from_ptr(info.pPortName as *const i8)
+                        .to_string_lossy()
+                        .to_string()
+                };
+
+                // PRINTER_STATUS_OFFLINE (0x02) / PRINTER_STATUS_PAPEROUT (0x04)
+                let offline = info.Status & 0x06 != 0;
+
+                printers.push(PrinterInfo {
+                    id: name.clone(),
+                    name,
+                    address: port,
+                    printer_type: PrinterType::System,
+                    language: PrinterLanguage::Pdf,
+                    status: if offline { "offline" } else { "online" }.to_string(),
+                });
             }
         }
 

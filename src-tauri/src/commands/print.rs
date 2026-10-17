@@ -3,6 +3,8 @@ use crate::error::{AppError, AppResult};
 use crate::queue::PrintQueue;
 use crate::render::handlebars::TemplateEngine;
 use crate::render::PdfRenderer;
+#[cfg(windows)]
+use crate::transport::windows_spooler::WindowsSpooler;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 use tauri::{AppHandle, Manager, State};
