@@ -77,6 +77,11 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               {currentStep.action}
             </Button>
           </div>
+          <div className="text-center">
+            <button type="button" onClick={onComplete} className="text-xs text-muted-foreground hover:text-foreground underline">
+              Skip onboarding — don’t show again
+            </button>
+          </div>
         </CardContent>
       </Card>
     </div>

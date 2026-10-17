@@ -10,17 +10,17 @@ import { SettingsPage } from "./pages/Settings";
 import { diagnostics } from "./lib/diagnostics";
 
 export default function App() {
-  const [onboardingComplete, setOnboardingComplete] = useState(() => {
-    return localStorage.getItem("printninja-onboarding-complete") === "true";
+  const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(() => {
+    try { return localStorage.getItem("printninja-onboarding-complete") === "true"; } catch { return null; }
   });
+  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
     diagnostics.info("App started", { platform: navigator.platform });
   }, []);
 
-  // Onboarding persistence: DB is source of truth, localStorage is cache.
-  // On reinstall the DB is cleared but localStorage may remain, so we
-  // reconcile on mount: if DB says not done, show onboarding regardless.
+  // DB is source of truth, localStorage is cache. Wait for DB before deciding
+  // to avoid flashing onboarding on every reload.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -29,22 +29,35 @@ export default function App() {
         const v = await invoke<string | null>("get_setting", { key: "onboarding_done" }).catch(() => null);
         if (cancelled) return;
         if (v === "true") {
-          localStorage.setItem("printninja-onboarding-complete", "true");
+          try { localStorage.setItem("printninja-onboarding-complete", "true"); } catch {}
           setOnboardingComplete(true);
-        } else {
-          // DB says not done (null/false/missing) — respect it even if localStorage says true (reinstall)
-          const lsDone = localStorage.getItem("printninja-onboarding-complete") === "true";
-          if (lsDone) {
-            localStorage.removeItem("printninja-onboarding-complete");
+        } else if (v === "false" || v === null) {
+          // DB says not done — respect it even if localStorage says true (reinstall/cleared DB)
+          const lsDone = (() => { try { return localStorage.getItem("printninja-onboarding-complete") === "true"; } catch { return false; }})();
+          if (lsDone && v === null) {
+            // DB cleared but LS says done — reinstall, clear LS and re-show
+            try { localStorage.removeItem("printninja-onboarding-complete"); } catch {}
             setOnboardingComplete(false);
-          }
-          if (!lsDone || v === null) {
+          } else if (lsDone && v === "false") {
+            try { localStorage.removeItem("printninja-onboarding-complete"); } catch {}
+            setOnboardingComplete(false);
+          } else if (!lsDone) {
+            setOnboardingComplete(false);
             diagnostics.info("First run detected, showing onboarding");
           }
         }
-      } catch {}
+      } catch {
+        // Web mode: rely on localStorage only
+        const lsDone = (() => { try { return localStorage.getItem("printninja-onboarding-complete") === "true"; } catch { return false; }})();
+        setOnboardingComplete(lsDone);
+        if (!lsDone) diagnostics.info("First run detected, showing onboarding");
+      } finally {
+        if (!cancelled) setChecking(false);
+      }
     })();
-    return () => { cancelled = true; };
+    // Also handle case where invoke never resolves (web mode) — fallback after 500ms
+    const timer = setTimeout(() => { if (!cancelled) setChecking(false); }, 600);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, []);
 
   const handleOnboardingComplete = async () => {
@@ -57,6 +70,9 @@ export default function App() {
     diagnostics.info("Onboarding completed");
   };
 
+  if (checking && onboardingComplete === null) {
+    return <div className="min-h-screen flex items-center justify-center bg-background"><div className="h-6 w-6 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
+  }
   if (!onboardingComplete) {
     return <Onboarding onComplete={handleOnboardingComplete} />;
   }

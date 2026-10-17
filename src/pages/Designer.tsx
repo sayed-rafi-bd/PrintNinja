@@ -659,7 +659,7 @@ export function DesignerPage() {
         {/* Main Canvas + Code */}
         <div className="lg:col-span-2 space-y-4">
           <div className="flex items-center justify-between">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-[420px]">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full max-w-[420px] overflow-x-auto">
               <TabsList className="grid w-full grid-cols-5">
                 <TabsTrigger value="canvas" className="text-xs">{t("designer.canvas")}</TabsTrigger>
                 <TabsTrigger value="visual" className="text-xs">Visual</TabsTrigger>

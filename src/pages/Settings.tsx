@@ -249,7 +249,7 @@ export function SettingsPage() {
       <h1 className="text-3xl font-bold">{t("settings_page.title")}</h1>
 
       <Tabs defaultValue="general" className="w-full">
-        <TabsList>
+        <TabsList className="w-full overflow-x-auto flex-nowrap justify-start gap-1 h-auto p-1">
           <TabsTrigger value="general" className="gap-2">
             <Palette className="h-4 w-4" />
             General

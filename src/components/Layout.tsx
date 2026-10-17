@@ -32,11 +32,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("printninja-sidebar-collapsed") === "true"; } catch { return false; }
+  });
 
   // Close mobile drawer whenever route changes
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    try { localStorage.setItem("printninja-sidebar-collapsed", String(collapsed)); } catch {}
+  }, [collapsed]);
 
   const handleNavigate = (path: string) => {
     navigate(path);
@@ -47,7 +54,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <nav
       className={cn(
         "flex flex-col gap-1",
-        variant === "desktop" ? "p-4" : "p-2",
+        variant === "desktop" ? (collapsed ? "p-2" : "p-4") : "p-2",
       )}
     >
       {navItems.map((item) => {
@@ -57,15 +64,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
             key={item.path}
             variant={active ? "secondary" : "ghost"}
             className={cn(
-              "w-full justify-start gap-3 touch-target min-h-11",
+              "w-full touch-target min-h-11",
+              collapsed && variant === "desktop" ? "justify-center px-2" : "justify-start gap-3",
               active && "bg-secondary font-medium",
             )}
             onClick={() => handleNavigate(item.path)}
             aria-current={active ? "page" : undefined}
             type="button"
+            title={collapsed && variant === "desktop" ? String(t(item.labelKey)) : undefined}
           >
-            <item.icon className="h-5 w-5" />
-            {t(item.labelKey)}
+            <item.icon className="h-5 w-5 shrink-0" />
+            {(!collapsed || variant !== "desktop") && t(item.labelKey)}
           </Button>
         );
       })}
@@ -74,13 +83,30 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      {/* Desktop Sidebar */}
-      <aside className="hidden md:flex w-64 flex-col border-r bg-card">
-        <div className="flex h-16 items-center gap-2 border-b px-6">
-          <Printer className="h-6 w-6 text-primary" />
-          <span className="text-lg font-bold">PrintNinja</span>
+      {/* Desktop / Tablet Sidebar — toggleable */}
+      <aside className={cn("hidden md:flex flex-col border-r bg-card transition-all duration-200", collapsed ? "w-16" : "w-64")}>
+        <div className={cn("flex h-16 items-center border-b", collapsed ? "justify-center px-2" : "gap-2 px-6")}>
+          <Printer className="h-6 w-6 text-primary shrink-0" />
+          {!collapsed && <span className="text-lg font-bold truncate">PrintNinja</span>}
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("ml-auto h-8 w-8 shrink-0", collapsed && "ml-0")}
+            onClick={() => setCollapsed((v) => !v)}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand" : "Collapse"}
+          >
+            <ChevronRight className={cn("h-4 w-4 transition-transform", !collapsed && "rotate-180")} />
+          </Button>
         </div>
-        <NavList variant="desktop" />
+        <div className="flex-1 overflow-y-auto">
+          <NavList variant="desktop" />
+        </div>
+        {!collapsed && (
+          <div className="p-3 border-t text-xs text-muted-foreground">
+            <p>Tip: collapse for more canvas.</p>
+          </div>
+        )}
       </aside>
 
       {/* Mobile Bottom Navigation */}
