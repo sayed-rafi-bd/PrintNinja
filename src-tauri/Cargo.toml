@@ -1,12 +1,12 @@
 [package]
 name = "printninja"
-version = "0.1.0"
+version = "0.0.1"
 description = "Cross-platform silent print app"
 authors = ["PrintNinja"]
 edition = "2021"
 
 [lib]
-name = "printninja_lib"
+name = "printninja"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
