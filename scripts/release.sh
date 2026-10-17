@@ -103,14 +103,14 @@ with open(path, "w") as f:
 print(f"[ok] package.json -> v{sys.argv[1]}")
 PY
 
-# 4. Push? Optional — we just commit + tag locally
+# 4. Commit with version in message, tag with version
 git add -A
-git commit -m "Release $APP_NAME v$VERSION" || echo "[info] no changes to commit"
+git commit -m "release: v$VERSION" -m "Release $APP_NAME $VERSION" || echo "[info] no changes to commit"
 
 if $CREATE_TAG; then
     TAG="v$VERSION"
-    git tag -a "$TAG" -m "Release $APP_NAME $TAG" 2>/dev/null || echo "[info] tag $TAG exists"
-    echo "[ok] tagged $TAG"
+    git tag -a "$TAG" -m "release: v$VERSION" -m "Release $APP_NAME $TAG" 2>/dev/null || echo "[info] tag $TAG exists"
+    echo "[ok] tagged $TAG with 'release: v$VERSION'"
 fi
 
 echo "=== Done: $APP_NAME v$VERSION ==="
