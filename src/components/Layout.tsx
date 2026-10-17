@@ -7,11 +7,9 @@ import {
   Settings,
   History,
   Pencil,
-  Menu,
   ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { useTranslation } from "react-i18next";
 
 const navItems = [
@@ -31,15 +29,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem("printninja-sidebar-collapsed") === "true"; } catch { return false; }
   });
-
-  // Close mobile drawer whenever route changes
-  useEffect(() => {
-    setMobileMenuOpen(false);
-  }, [location.pathname]);
 
   useEffect(() => {
     try { localStorage.setItem("printninja-sidebar-collapsed", String(collapsed)); } catch {}
@@ -47,7 +39,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   const handleNavigate = (path: string) => {
     navigate(path);
-    setMobileMenuOpen(false);
   };
 
   const NavList = ({ variant = "desktop" as "desktop" | "mobile" }) => (
@@ -84,7 +75,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Desktop / Tablet Sidebar — toggleable */}
-      <aside className={cn("hidden md:flex flex-col border-r bg-card transition-all duration-200", collapsed ? "w-16" : "w-64")}>
+      <aside className={cn("hidden md:flex flex-col border-r bg-card shadow-sm transition-all duration-200", collapsed ? "w-16" : "w-64")}>
         <div className={cn("flex h-16 items-center border-b", collapsed ? "justify-center px-2" : "gap-2 px-6")}>
           <Printer className="h-6 w-6 text-primary shrink-0" />
           {!collapsed && <span className="text-lg font-bold truncate">PrintNinja</span>}
@@ -111,7 +102,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
       {/* Mobile Bottom Navigation */}
       <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t bg-card"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t bg-card shadow-[0_-1px_8px_rgba(0,0,0,0.06)]"
         aria-label="Primary"
       >
         <div className="flex items-stretch h-16">
@@ -141,40 +132,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </div>
       </nav>
 
-      {/* Mobile Header */}
-      <header className="md:hidden fixed top-0 left-0 right-0 z-50 flex h-16 items-center justify-between border-b bg-card px-4">
+      {/* Mobile Header — no hamburger, bottom nav is the navigation */}
+      <header className="md:hidden fixed top-0 left-0 right-0 z-50 flex h-16 items-center border-b bg-card px-4 shadow-sm">
         <div className="flex items-center gap-2">
           <Printer className="h-6 w-6 text-primary" />
           <span className="text-lg font-bold">PrintNinja</span>
         </div>
-        <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-          <SheetTrigger asChild>
-            <Button variant="ghost" size="icon" type="button" aria-label="Open menu">
-              <Menu className="h-5 w-5" />
-            </Button>
-          </SheetTrigger>
-          <SheetContent side="right" className="w-72 max-w-[80vw]">
-            <div className="mt-4 flex flex-col gap-2">
-              {navItems.map((item) => {
-                const active = isActivePath(location.pathname, item.path);
-                return (
-                  <Button
-                    key={item.path}
-                    variant={active ? "secondary" : "ghost"}
-                    className={cn("w-full justify-start gap-3", active && "font-medium")}
-                    onClick={() => handleNavigate(item.path)}
-                    type="button"
-                    aria-current={active ? "page" : undefined}
-                  >
-                    <item.icon className="h-5 w-5" />
-                    {t(item.labelKey)}
-                    {active && <ChevronRight className="ml-auto h-4 w-4" />}
-                  </Button>
-                );
-              })}
-            </div>
-          </SheetContent>
-        </Sheet>
       </header>
 
       {/* Main Content */}

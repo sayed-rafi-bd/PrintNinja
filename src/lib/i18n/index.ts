@@ -29,6 +29,7 @@ const resources = {
         copies: "Copies",
         page: "Page",
         of: "of",
+        all: "All",
       },
       nav: {
         designer: "Designer",
