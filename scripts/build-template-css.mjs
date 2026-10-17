@@ -28,14 +28,26 @@ const INPUT = resolve(ROOT, "src/styles/templates.src.css");
 const CONFIG = resolve(ROOT, "tailwind.templates.config.ts");
 const OUT = resolve(ROOT, "src/lib/templates/templates.generated.ts");
 
-const cli = resolve(ROOT, "node_modules/.bin/tailwindcss");
 const RAW = `${OUT}.raw`;
 
 process.stdout.write("[templates:css] compiling Tailwind print bundle...\n");
-execFileSync(cli, ["-c", CONFIG, "-i", INPUT, "-o", RAW, "--minify"], {
-  cwd: ROOT,
-  stdio: ["ignore", "ignore", "pipe"],
-});
+// Windows: node_modules/.bin/tailwindcss is a .cmd shim, not a JS file —
+// execFileSync without shell fails with ENOENT. Use pnpm exec which is
+// cross-platform and already available in CI (pnpm/action-setup).
+try {
+  execFileSync("pnpm", ["exec", "tailwindcss", "-c", CONFIG, "-i", INPUT, "-o", RAW, "--minify"], {
+    cwd: ROOT,
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+} catch (e) {
+  // Fallback for environments without pnpm exec (e.g. npx)
+  const npx = process.platform === "win32" ? "npx.cmd" : "npx";
+  execFileSync(npx, ["tailwindcss", "-c", CONFIG, "-i", INPUT, "-o", RAW, "--minify"], {
+    cwd: ROOT,
+    stdio: ["ignore", "ignore", "pipe"],
+    shell: process.platform === "win32",
+  });
+}
 
 const css = readFileSync(RAW, "utf8").trim();
 rmSync(RAW, { force: true });
