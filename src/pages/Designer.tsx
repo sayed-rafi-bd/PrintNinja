@@ -46,6 +46,7 @@ import { BARCODE_TYPES, validateBarcode, buildBarcodeHtml } from "@/lib/utils/ba
 import { DEFAULT_TEMPLATE_HTML, DEFAULT_TEMPLATE_CSS, DEFAULT_MOCK_DATA, STARTER_TEMPLATES } from "@/lib/templates/defaultTemplate";
 import { VisualDesigner } from "@/components/VisualDesigner";
 import { renderTemplate } from "@/lib/render/renderTemplate";
+import { formatCss, formatHtml } from "@/lib/utils/format";
 
 const PAGE_PRESETS = [
   { label: "A4", width: 210, height: 297 },
@@ -111,8 +112,8 @@ export function DesignerPage() {
   const loadTemplate = (tpl: { id: number; name: string; html: string; css: string; page_w_mm?: number; page_h_mm?: number; orientation?: string }) => {
     setCurrentTemplateId(tpl.id);
     setTemplateName(tpl.name);
-    setHtmlCode(tpl.html);
-    setCssCode(tpl.css);
+    setHtmlCode(formatHtml(tpl.html));
+    setCssCode(formatCss(tpl.css));
     if (tpl.page_w_mm) setPageWidth(tpl.page_w_mm);
     if (tpl.page_h_mm) setPageHeight(tpl.page_h_mm);
     if (tpl.orientation) setOrientation(tpl.orientation as "portrait" | "landscape");
@@ -255,8 +256,8 @@ export function DesignerPage() {
           setTemplates(hydrated);
           setCurrentTemplateId(hydrated[0].id);
           setTemplateName(hydrated[0].name);
-          setHtmlCode(hydrated[0].html);
-          setCssCode(hydrated[0].css);
+          setHtmlCode(formatHtml(hydrated[0].html));
+          setCssCode(formatCss(hydrated[0].css));
           setPageWidth(hydrated[0].page_w_mm ?? 80);
           setPageHeight(hydrated[0].page_h_mm ?? 200);
           setOrientation((hydrated[0].orientation as "portrait" | "landscape") ?? "portrait");
@@ -384,8 +385,8 @@ export function DesignerPage() {
       setVersions(list ?? []);
       const latest = list?.[0];
       if (latest) {
-        setHtmlCode(latest.html);
-        setCssCode(latest.css);
+        setHtmlCode(formatHtml(latest.html));
+        setCssCode(formatCss(latest.css));
       }
     } catch {
       // Backend not available (web mode) — keep the in-editor content.
@@ -399,12 +400,12 @@ export function DesignerPage() {
         id: version.id,
       });
       setVersions((prev) => [created, ...prev]);
-      setHtmlCode(created.html);
-      setCssCode(created.css);
+      setHtmlCode(formatHtml(created.html));
+      setCssCode(formatCss(created.css));
       toast.success(`Restored v${version.version_no} as v${created.version_no}`);
     } catch {
-      setHtmlCode(version.html);
-      setCssCode(version.css);
+      setHtmlCode(formatHtml(version.html));
+      setCssCode(formatCss(version.css));
       toast.success(`Restored version ${version.version_no}`);
     }
   };
@@ -482,13 +483,13 @@ export function DesignerPage() {
               const isHtml = file.name.toLowerCase().endsWith(".html") || text.trim().toLowerCase().startsWith("<!doctype") || text.trim().toLowerCase().startsWith("<html");
               if (isHtml) {
                 setTemplateName(file.name.replace(/\.html$/i, ""));
-                setHtmlCode(text);
+                setHtmlCode(formatHtml(text));
                 toast.success("HTML template imported");
               } else {
                 const data = JSON.parse(text);
                 setTemplateName(data.name || file.name.replace(/\.(json|html)$/, ""));
-                if (data.html) setHtmlCode(data.html);
-                if (data.css) setCssCode(data.css);
+                if (data.html) setHtmlCode(formatHtml(data.html));
+                if (data.css) setCssCode(formatCss(data.css));
                 toast.success("Template imported");
               }
             } catch {
