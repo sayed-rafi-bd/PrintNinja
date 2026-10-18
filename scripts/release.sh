@@ -124,8 +124,14 @@ with open(path, "w") as f:
 print(f"[ok] package.json -> v{sys.argv[1]}")
 PY
 
+# 3b. Update Settings.tsx fallback version
+if grep -q 'PrintNinja {appVersion' src/pages/Settings.tsx 2>/dev/null; then
+  sed -i -E "s/\"v[0-9]+\.[0-9]+\.[0-9]+\"/\"v$VERSION\"/" src/pages/Settings.tsx
+  echo "[ok] Settings.tsx -> v$VERSION"
+fi
+
 # 4. Commit with version in message, tag with version
-git add package.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
+git add package.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json src/pages/Settings.tsx
 git commit -m "release: v$VERSION" -m "Release $APP_NAME $VERSION" || echo "[info] no changes to commit"
 
 if $CREATE_TAG; then
