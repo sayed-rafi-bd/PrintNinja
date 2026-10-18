@@ -30,6 +30,7 @@ import {
   Monitor,
   Trash2,
   TestTube,
+  Scan,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -93,6 +94,7 @@ export function PrinterSetupPage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("all");
   const [testing, setTesting] = useState<number | null>(null);
+  const [scanning, setScanning] = useState(false);
 
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({
@@ -131,6 +133,50 @@ export function PrinterSetupPage() {
       toast.success(`Found ${list.length} system printer(s)`);
     } catch (e) {
       toast.error(`Discovery failed: ${e}`);
+    }
+  };
+
+  const scanAndAddSystem = async () => {
+    setScanning(true);
+    try {
+      const list = await invoke<SystemPrinter[]>("enumerate_system_printers");
+      if (!list || list.length === 0) {
+        toast.info("No system printers found");
+        return;
+      }
+      let added = 0;
+      let skipped = 0;
+      for (const sp of list) {
+        if (printers.some((p) => p.name === sp.name)) {
+          skipped++;
+          continue;
+        }
+        try {
+          await invoke("add_printer", {
+            req: {
+              name: sp.name,
+              printer_type: "system",
+              address: sp.address || sp.name,
+              language: "pdf",
+              paper_width_mm: 80,
+              dpi: 203,
+            },
+          });
+          added++;
+        } catch {
+          // ignore duplicate / validation errors per-printer
+        }
+      }
+      await load();
+      // refresh discovered list too
+      setSystemPrinters(list);
+      if (added > 0) toast.success(`Added ${added} system printer(s)${skipped ? `, ${skipped} already existed` : ""}`);
+      else if (skipped) toast.info(`All ${skipped} system printer(s) already added`);
+      else toast.info("No new system printers to add");
+    } catch (e) {
+      toast.error(`Scan failed: ${e}`);
+    } finally {
+      setScanning(false);
     }
   };
 
@@ -211,6 +257,10 @@ export function PrinterSetupPage() {
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={load}>
             Refresh
+          </Button>
+          <Button variant="outline" size="sm" onClick={scanAndAddSystem} disabled={scanning}>
+            <Scan className="h-4 w-4" />
+            {scanning ? "Scanning…" : "Scan System"}
           </Button>
           <Button size="sm" onClick={() => setShowAdd(true)}>
             <Plus className="h-4 w-4" />
