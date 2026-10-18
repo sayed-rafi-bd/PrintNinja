@@ -77,6 +77,8 @@ pub fn run() {
             commands::template::create_template,
             commands::template::get_template,
             commands::template::update_readme,
+            commands::template::set_publish_info,
+            commands::template::clear_publish_info,
             commands::template::delete_template,
             commands::history::list_jobs,
             commands::history::get_job,

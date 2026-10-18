@@ -239,3 +239,51 @@ pub fn delete_template(db: State<DbState>, id: i64) -> AppResult<()> {
     }
     Ok(())
 }
+
+#[derive(Debug, Deserialize)]
+pub struct SetPublishInfoRequest {
+    pub id: i64,
+    pub remote_id: String,
+    pub published_at: String,
+}
+
+#[tauri::command]
+pub fn set_publish_info(db: State<DbState>, req: SetPublishInfoRequest) -> AppResult<Template> {
+    // Validate UUID
+    if uuid::Uuid::parse_str(&req.remote_id).is_err() {
+        return Err(AppError::Validation("Invalid remote_id (must be UUID)".into()));
+    }
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    let conn = guard.connection()?;
+    let affected = conn.execute(
+        "UPDATE templates SET remote_id = ?1, published_at = ?2, updated_at = ?2 WHERE id = ?3",
+        rusqlite::params![req.remote_id, req.published_at, req.id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("Template {} not found", req.id)));
+    }
+    tx_guard_to_template(&conn, req.id).map_err(Into::into)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ClearPublishInfoRequest {
+    pub id: i64,
+}
+
+#[tauri::command]
+pub fn clear_publish_info(db: State<DbState>, req: ClearPublishInfoRequest) -> AppResult<Template> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    let conn = guard.connection()?;
+    let affected = conn.execute(
+        "UPDATE templates SET remote_id = NULL, published_at = NULL WHERE id = ?1",
+        [req.id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("Template {} not found", req.id)));
+    }
+    tx_guard_to_template(&conn, req.id).map_err(Into::into)
+}

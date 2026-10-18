@@ -1,0 +1,172 @@
+/**
+ * Share service client — thin HTTP wrapper for the hosted service (V2.md §10).
+ * The app never sees TURSO_AUTH_TOKEN; it only talks to the service over HTTPS
+ * with a Bearer token stored in local settings.
+ */
+
+const SETTINGS_KEYS = {
+  serviceUrl: "share_service_url",
+  token: "share_session_token",
+} as const;
+
+async function getSetting(key: string): Promise<string | null> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return await invoke<string | null>("get_setting", { key });
+  } catch {
+    try {
+      return localStorage.getItem(`printninja-setting:${key}`);
+    } catch {
+      return null;
+    }
+  }
+}
+
+async function setSetting(key: string, value: string | null): Promise<void> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    if (value === null) {
+      // No delete_setting command; set to empty and treat as missing on read
+      await invoke("set_setting", { key, value: "" });
+    } else {
+      await invoke("set_setting", { key, value });
+    }
+  } catch {
+    try {
+      if (value === null) {
+        localStorage.removeItem(`printninja-setting:${key}`);
+      } else {
+        localStorage.setItem(`printninja-setting:${key}`, value);
+      }
+    } catch {}
+  }
+}
+
+export async function getServiceUrl(): Promise<string | null> {
+  const v = await getSetting(SETTINGS_KEYS.serviceUrl);
+  return v && v.trim() ? v.trim().replace(/\/$/, "") : null;
+}
+
+export async function setServiceUrl(url: string | null): Promise<void> {
+  await setSetting(SETTINGS_KEYS.serviceUrl, url);
+}
+
+export async function getSessionToken(): Promise<string | null> {
+  const v = await getSetting(SETTINGS_KEYS.token);
+  return v && v.trim() ? v.trim() : null;
+}
+
+export async function setSessionToken(token: string | null): Promise<void> {
+  await setSetting(SETTINGS_KEYS.token, token);
+}
+
+export async function isSignedIn(): Promise<boolean> {
+  return (await getSessionToken()) != null;
+}
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = await getSessionToken();
+  const h: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) h["Authorization"] = `Bearer ${token}`;
+  return h;
+}
+
+export async function register(handle: string, password: string): Promise<{ token: string; user: { id: string; handle: string } }> {
+  const base = await getServiceUrl();
+  if (!base) throw new Error("Share service not configured");
+  const res = await fetch(`${base}/v1/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ handle, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || `Register failed: ${res.status}`);
+  }
+  const data = await res.json();
+  await setSessionToken(data.token);
+  return data;
+}
+
+export async function login(handle: string, password: string): Promise<{ token: string; user: { id: string; handle: string } }> {
+  const base = await getServiceUrl();
+  if (!base) throw new Error("Share service not configured");
+  const res = await fetch(`${base}/v1/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ handle, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || `Login failed: ${res.status}`);
+  }
+  const data = await res.json();
+  await setSessionToken(data.token);
+  return data;
+}
+
+export async function logout(): Promise<void> {
+  const base = await getServiceUrl();
+  const token = await getSessionToken();
+  if (base && token) {
+    try {
+      await fetch(`${base}/v1/auth/logout`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {}
+  }
+  await setSessionToken(null);
+}
+
+export interface PublishPayload {
+  id: string; // UUID, client-generated
+  name: string;
+  summary: string;
+  page_w_mm: number;
+  page_h_mm: number;
+  language: string;
+  body: string;
+  readme: string;
+}
+
+export async function publishTemplate(payload: PublishPayload): Promise<any> {
+  const base = await getServiceUrl();
+  if (!base) throw new Error("Share service not configured");
+  const headers = await authHeaders();
+  const res = await fetch(`${base}/v1/templates/${payload.id}`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || `Publish failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function unpublishTemplate(id: string): Promise<void> {
+  const base = await getServiceUrl();
+  if (!base) throw new Error("Share service not configured");
+  const headers = await authHeaders();
+  const res = await fetch(`${base}/v1/templates/${id}`, {
+    method: "DELETE",
+    headers,
+  });
+  if (!res.ok && res.status !== 404) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || `Unpublish failed: ${res.status}`);
+  }
+}
+
+// For the Designer state chip / strip
+export function isPublished(template: { remote_id: string | null; published_at: string | null }): boolean {
+  return !!template.remote_id;
+}
+
+export function hasUnpublishedChanges(template: { remote_id: string | null; published_at: string | null; updated_at: string }): boolean {
+  if (!template.remote_id || !template.published_at) return false;
+  // published_at and updated_at are ISO strings; lexical compare works for RFC3339, but parse to be safe
+  return new Date(template.updated_at) > new Date(template.published_at);
+}

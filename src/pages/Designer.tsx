@@ -49,6 +49,7 @@ import { renderTemplate } from "@/lib/render/renderTemplate";
 import { formatCss, formatHtml } from "@/lib/utils/format";
 import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
 import { ReadmeEditor } from "@/components/ReadmeEditor";
+import * as share from "@/lib/share/client";
 
 const PAGE_PRESETS = [
   { label: "A4", width: 210, height: 297 },
@@ -84,6 +85,10 @@ export function DesignerPage() {
   const [activeTab, setActiveTab] = useState("canvas");
   const [readme, setReadme] = useState("");
   const [readmeSaving, setReadmeSaving] = useState(false);
+  const [remoteId, setRemoteId] = useState<string | null>(null);
+  const [publishedAt, setPublishedAt] = useState<string | null>(null);
+  const [templateUpdatedAt, setTemplateUpdatedAt] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
   const [debouncedHtml, setDebouncedHtml] = useState(htmlCode);
   const [debouncedCss, setDebouncedCss] = useState(cssCode);
   useEffect(() => {
@@ -124,16 +129,25 @@ export function DesignerPage() {
     setCurrentTemplateDbId(tpl.id);
     setDiff(null);
     setShowDiff(false);
-    // Load readme if provided, otherwise fetch from DB
+    // Load readme and publish info if provided, otherwise fetch from DB
     if (tpl.readme !== undefined) {
       setReadme(tpl.readme);
+      setRemoteId((tpl as any).remote_id ?? null);
+      setPublishedAt((tpl as any).published_at ?? null);
+      setTemplateUpdatedAt((tpl as any).updated_at ?? null);
     } else {
       (async () => {
         try {
-          const full = await invoke<{ readme: string }>("get_template", { id: tpl.id });
+          const full = await invoke<any>("get_template", { id: tpl.id });
           setReadme(full.readme ?? "");
+          setRemoteId(full.remote_id ?? null);
+          setPublishedAt(full.published_at ?? null);
+          setTemplateUpdatedAt(full.updated_at ?? null);
         } catch {
           setReadme("");
+          setRemoteId(null);
+          setPublishedAt(null);
+          setTemplateUpdatedAt(null);
         }
       })();
     }
@@ -149,6 +163,67 @@ export function DesignerPage() {
       }
     })();
     toast.success(`Loaded "${tpl.name}"`);
+  };
+
+  const handlePublish = async () => {
+    if (!currentTemplateDbId) {
+      toast.error("No template selected");
+      return;
+    }
+    const serviceUrl = await share.getServiceUrl();
+    if (!serviceUrl) {
+      toast.error("Share service not configured — set it in Settings");
+      return;
+    }
+    const token = await share.getSessionToken();
+    if (!token) {
+      toast.error("Not signed in — sign in via Settings");
+      return;
+    }
+    setPublishing(true);
+    try {
+      const id = remoteId ?? crypto.randomUUID();
+      const isUpdate = !!remoteId;
+      const payload = {
+        id,
+        name: templateName,
+        summary: "",
+        page_w_mm: pageWidth,
+        page_h_mm: pageHeight,
+        language: "html",
+        body: htmlCode,
+        readme,
+      };
+      const res = await share.publishTemplate(payload);
+      // Persist remote_id and published_at locally
+      const publishedAt = res.updated_at ?? res.published_at ?? new Date().toISOString();
+      await invoke("set_publish_info", { req: { id: currentTemplateDbId, remote_id: id, published_at: publishedAt } });
+      setRemoteId(id);
+      setPublishedAt(publishedAt);
+      setTemplateUpdatedAt(publishedAt);
+      toast.success(isUpdate ? "Published update" : "Published");
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const handleUnpublish = async () => {
+    if (!currentTemplateDbId || !remoteId) return;
+    if (!confirm("Unpublish this template? It will remain locally but disappear from Community.")) return;
+    setPublishing(true);
+    try {
+      await share.unpublishTemplate(remoteId);
+      await invoke("clear_publish_info", { req: { id: currentTemplateDbId } });
+      setRemoteId(null);
+      setPublishedAt(null);
+      toast.success("Unpublished");
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setPublishing(false);
+    }
   };
 
   const createNewTemplate = async () => {
@@ -281,12 +356,18 @@ export function DesignerPage() {
           setPageHeight(hydrated[0].page_h_mm ?? 200);
           setOrientation((hydrated[0].orientation as "portrait" | "landscape") ?? "portrait");
           setCurrentTemplateDbId(hydrated[0].id);
-          // Load README for the first template
+          // Load README and publish info for the first template
           try {
-            const full = await invoke<{ readme: string }>("get_template", { id: hydrated[0].id });
+            const full = await invoke<any>("get_template", { id: hydrated[0].id });
             setReadme(full.readme ?? "");
+            setRemoteId(full.remote_id ?? null);
+            setPublishedAt(full.published_at ?? null);
+            setTemplateUpdatedAt(full.updated_at ?? null);
           } catch {
             setReadme("");
+            setRemoteId(null);
+            setPublishedAt(null);
+            setTemplateUpdatedAt(null);
           }
         } else {
           const starters = STARTER_TEMPLATES.map((t, i) => ({
@@ -713,6 +794,44 @@ export function DesignerPage() {
               </Button>
             </div>
           </div>
+
+          {/* Publish header — state chip + publish actions (V2.md §9.5) */}
+          <div className="flex items-center justify-between gap-2 py-2">
+            <div className="flex items-center gap-2">
+              {remoteId ? (
+                <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white border-transparent">Published</Badge>
+              ) : (
+                <Badge variant="outline" className="border-amber-500 text-amber-700 bg-amber-50">Draft</Badge>
+              )}
+              {remoteId && publishedAt && templateUpdatedAt && new Date(templateUpdatedAt) > new Date(publishedAt) && (
+                <span className="text-xs text-amber-700">You have changes that aren&apos;t published.</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {remoteId ? (
+                <>
+                  <Button size="sm" onClick={handlePublish} disabled={publishing} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                    {publishing ? "Publishing…" : "Update published copy"}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={handleUnpublish} disabled={publishing} className="text-destructive border-destructive/30">
+                    Unpublish
+                  </Button>
+                </>
+              ) : (
+                <Button size="sm" onClick={handlePublish} disabled={publishing} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                  {publishing ? "Publishing…" : "Publish"}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Amber strip for unpublished changes (V2.md §7) */}
+          {remoteId && publishedAt && templateUpdatedAt && new Date(templateUpdatedAt) > new Date(publishedAt) && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              You have changes that aren&apos;t published. Other people still see the version from{" "}
+              {new Date(publishedAt).toLocaleDateString()}.
+            </div>
+          )}
 
           {activeTab === "canvas" && (
             <Card>

@@ -32,6 +32,7 @@ import {
 import { toast } from "sonner";
 import { useTheme } from "@/lib/theme/ThemeProvider";
 import { diagnostics } from "@/lib/diagnostics";
+import * as share from "@/lib/share/client";
 
 interface ApiStatus {
   running: boolean;
@@ -104,6 +105,12 @@ export function SettingsPage() {
   const [fonts, setFonts] = useState<FontRow[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const [shareUrl, setShareUrl] = useState("");
+  const [shareHandle, setShareHandle] = useState("");
+  const [sharePassword, setSharePassword] = useState("");
+  const [shareUser, setShareUser] = useState<{ handle: string } | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
+
   const loadFonts = useCallback(async () => {
     try {
       setFonts((await invoke<FontRow[]>("list_fonts")) ?? []);
@@ -173,6 +180,21 @@ export function SettingsPage() {
       } catch {
         setTrusted([]);
       }
+      // Share service
+      try {
+        const url = await share.getServiceUrl();
+        if (url) setShareUrl(url);
+        const token = await share.getSessionToken();
+        if (token && url) {
+          try {
+            const res = await fetch(`${url}/v1/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+            if (res.ok) {
+              const u = await res.json();
+              setShareUser({ handle: u.handle });
+            }
+          } catch {}
+        }
+      } catch {}
     })();
     loadApiStatus();
     loadFonts();
@@ -260,6 +282,60 @@ export function SettingsPage() {
     }
   };
 
+  const saveShareUrl = async () => {
+    await share.setServiceUrl(shareUrl.trim() || null);
+    toast.success("Service URL saved");
+  };
+
+  const doRegister = async () => {
+    if (!shareUrl.trim() || !shareHandle.trim() || !sharePassword) {
+      toast.error("Service URL, handle and password required");
+      return;
+    }
+    setShareBusy(true);
+    try {
+      const res = await share.register(shareHandle.trim(), sharePassword);
+      setShareUser({ handle: res.user.handle });
+      setSharePassword("");
+      toast.success(`Registered as ${res.user.handle}`);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const doLogin = async () => {
+    if (!shareUrl.trim() || !shareHandle.trim() || !sharePassword) {
+      toast.error("Service URL, handle and password required");
+      return;
+    }
+    setShareBusy(true);
+    try {
+      const res = await share.login(shareHandle.trim(), sharePassword);
+      setShareUser({ handle: res.user.handle });
+      setSharePassword("");
+      toast.success(`Signed in as ${res.user.handle}`);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const doLogout = async () => {
+    setShareBusy(true);
+    try {
+      await share.logout();
+      setShareUser(null);
+      toast.success("Signed out");
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <h1 className="text-3xl font-bold">{t("settings_page.title")}</h1>
@@ -285,6 +361,10 @@ export function SettingsPage() {
           <TabsTrigger value="security" className="gap-2">
             <Shield className="h-4 w-4" />
             Security
+          </TabsTrigger>
+          <TabsTrigger value="share" className="gap-2">
+            <Globe className="h-4 w-4" />
+            Share
           </TabsTrigger>
         </TabsList>
 
@@ -629,6 +709,80 @@ export function SettingsPage() {
                 />
                 <Label htmlFor="block-private">Block private IP ranges</Label>
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Share (B3/B4) ───────────────────────────────────────── */}
+        <TabsContent value="share" className="mt-4 space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Share Service</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-1">
+                <Label htmlFor="share-url">Service URL</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="share-url"
+                    placeholder="https://share.printninja.example"
+                    value={shareUrl}
+                    onChange={(e) => setShareUrl(e.target.value)}
+                  />
+                  <Button variant="outline" onClick={saveShareUrl}>
+                    Save
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Leave empty to hide sharing features (V1 behaviour). No token is ever bundled — the service holds TURSO_AUTH_TOKEN.
+                </p>
+              </div>
+
+              {!shareUser ? (
+                <div className="space-y-3 border-t pt-4">
+                  <p className="text-sm font-medium">Sign in to publish</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="share-handle">Handle</Label>
+                      <Input
+                        id="share-handle"
+                        placeholder="alice"
+                        value={shareHandle}
+                        onChange={(e) => setShareHandle(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="share-password">Password</Label>
+                      <Input
+                        id="share-password"
+                        type="password"
+                        value={sharePassword}
+                        onChange={(e) => setSharePassword(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button onClick={doLogin} disabled={shareBusy}>
+                      {shareBusy ? "…" : "Sign in"}
+                    </Button>
+                    <Button variant="outline" onClick={doRegister} disabled={shareBusy}>
+                      {shareBusy ? "…" : "Register"}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Handle: 1–32 chars, alphanumeric + _ -. Password ≥ 8 chars. Throttled 5/min per handle/IP.</p>
+                </div>
+              ) : (
+                <div className="space-y-3 border-t pt-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm">
+                      Signed in as <span className="font-medium">{shareUser.handle}</span>
+                    </p>
+                    <Button variant="outline" size="sm" onClick={doLogout} disabled={shareBusy}>
+                      Sign out
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
