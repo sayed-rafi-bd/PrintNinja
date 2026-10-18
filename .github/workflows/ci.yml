@@ -116,7 +116,11 @@ jobs:
           workspaces: src-tauri
       # Icon changed via `tauri icon` — Rust cache would restore old
       # target/release/build/printninja-*/out/resource.rc with stale ICO.
+      # Windows runners default to pwsh, where `rm -rf` is `Remove-Item -rf`
+      # and fails with "A parameter cannot be found that matches parameter
+      # name 'rf'". Use bash explicitly.
       - name: Clear stale icon build cache
+        shell: bash
         run: rm -rf src-tauri/target/release/build/printninja-* src-tauri/target/release/bundle || true
       - run: pnpm install --frozen-lockfile
       # MSI only. Without --target, output lands in target/release/bundle.
