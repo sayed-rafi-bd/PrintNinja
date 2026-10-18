@@ -27,6 +27,7 @@ import {
   Trash2,
   Upload,
   Plus,
+  Info,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useTheme } from "@/lib/theme/ThemeProvider";
@@ -82,6 +83,7 @@ async function writeSetting(key: string, value: string): Promise<boolean> {
 export function SettingsPage() {
   const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
+  const [appVersion, setAppVersion] = useState<string>("");
 
   const [apiPort, setApiPort] = useState("17717");
   const [lanAccess, setLanAccess] = useState(false);
@@ -127,6 +129,20 @@ export function SettingsPage() {
     } catch {
       /* backend unavailable */
     }
+  }, []);
+
+  // Load app version
+  useEffect(() => {
+    (async () => {
+      try {
+        const { getVersion } = await import("@tauri-apps/api/app");
+        const v = await getVersion();
+        setAppVersion(v);
+      } catch {
+        // web mode: Tauri not available
+        setAppVersion("");
+      }
+    })();
   }, []);
 
   // Load persisted settings on mount.
@@ -617,6 +633,14 @@ export function SettingsPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Version footer */}
+      <div className="flex items-center justify-center gap-2 pt-4 text-xs text-muted-foreground border-t">
+        <Info className="h-3 w-3" />
+        <span>PrintNinja {appVersion ? `v${appVersion}` : "v0.0.15"}</span>
+        <span className="opacity-50">·</span>
+        <span className="hidden sm:inline">com.printninja.desktop</span>
+      </div>
     </div>
   );
 }
