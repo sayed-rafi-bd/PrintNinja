@@ -27,6 +27,7 @@ import { useSystemPrinters } from "@/lib/hooks/useSystemPrinters";
 import { toast } from "sonner";
 import { usePrintStore } from "@/lib/store/printStore";
 import { DEFAULT_MOCK_DATA } from "@/lib/templates/defaultTemplate";
+import { ensureStarterTemplates, type TemplateRow } from "@/lib/templates/seedTemplates";
 interface PrintResponse {
   success: boolean;
   job_id: string;
@@ -41,14 +42,6 @@ interface PrinterInfo {
   printer_type: string;
   language: string;
   status?: string;
-}
-
-interface TemplateRow {
-  id: number;
-  name: string;
-  page_w_mm: number;
-  page_h_mm: number;
-  orientation: string;
 }
 
 const MM_TO_PX = 3.7795;
@@ -76,7 +69,7 @@ export function PrintPage() {
       try {
         const [p, tpl] = await Promise.all([
           invoke<PrinterInfo[]>("enumerate_system_printers").catch(() => []),
-          invoke<TemplateRow[]>("list_templates").catch(() => []),
+          ensureStarterTemplates(),
         ]);
         if (cancelled) return;
         setTemplates(tpl);

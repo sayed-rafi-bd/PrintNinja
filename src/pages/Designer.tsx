@@ -47,6 +47,7 @@ import { DEFAULT_TEMPLATE_HTML, DEFAULT_TEMPLATE_CSS, DEFAULT_MOCK_DATA, STARTER
 import { VisualDesigner } from "@/components/VisualDesigner";
 import { renderTemplate } from "@/lib/render/renderTemplate";
 import { formatCss, formatHtml } from "@/lib/utils/format";
+import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
 
 const PAGE_PRESETS = [
   { label: "A4", width: 210, height: 297 },
@@ -222,7 +223,9 @@ export function DesignerPage() {
     let cancelled = false;
     (async () => {
       try {
-        const rows = await invoke<Array<{ id: number; name: string; page_w_mm: number; page_h_mm: number; orientation: string; current_version_id?: number | null }>>("list_templates");
+        // Seeds the bundled starters into SQLite on first run, so the Designer
+        // and the Print tab both see real rows instead of an empty list.
+        const rows = await ensureStarterTemplates();
         if (cancelled) return;
         if (rows && rows.length > 0) {
           // For each persisted template, fetch its current version to get html/css.
