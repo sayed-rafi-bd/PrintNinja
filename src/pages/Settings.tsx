@@ -637,7 +637,7 @@ export function SettingsPage() {
       {/* Version footer */}
       <div className="flex items-center justify-center gap-2 pt-4 text-xs text-muted-foreground border-t">
         <Info className="h-3 w-3" />
-        <span>PrintNinja {appVersion ? `v${appVersion}` : "v0.1.3"}</span>
+        <span>PrintNinja {appVersion ? `v${appVersion}` : "v0.1.4"}</span>
         <span className="opacity-50">·</span>
         <span className="hidden sm:inline">com.printninja.desktop</span>
       </div>
