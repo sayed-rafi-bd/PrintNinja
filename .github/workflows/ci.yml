@@ -114,6 +114,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      # Icon changed via `tauri icon` — Rust cache would restore old
+      # target/release/build/printninja-*/out/resource.rc with stale ICO.
+      - name: Clear stale icon build cache
+        run: rm -rf src-tauri/target/release/build/printninja-* src-tauri/target/release/bundle || true
       - run: pnpm install --frozen-lockfile
       # MSI only. Without --target, output lands in target/release/bundle.
       - run: pnpm exec tauri build --bundles msi
@@ -143,6 +147,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - name: Clear stale launcher icon cache
+        run: rm -rf src-tauri/target/aarch64-linux-android src-tauri/gen/android/app/build || true
       - name: Install Java
         uses: actions/setup-java@v4
         with:
