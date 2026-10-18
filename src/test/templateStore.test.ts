@@ -30,14 +30,14 @@ describe("templateStore", () => {
   });
 
   it("updateTemplate modifies existing template", () => {
-    const template = { id: 1, name: "Test", current_version_id: null, page_w_mm: 210, page_h_mm: 297, orientation: "portrait" as const, created_at: "", updated_at: "" };
+    const template = { id: 1, name: "Test", current_version_id: null, page_w_mm: 210, page_h_mm: 297, orientation: "portrait" as const, readme: "", summary: "", remote_id: null, published_at: null, origin: "own", origin_owner: null, withdrawn: false, created_at: "", updated_at: "" };
     useTemplateStore.getState().setTemplates([template]);
     useTemplateStore.getState().updateTemplate(1, { name: "Updated" });
     expect(useTemplateStore.getState().templates[0].name).toBe("Updated");
   });
 
   it("setCurrentTemplate updates current template", () => {
-    const template = { id: 1, name: "Test", current_version_id: null, page_w_mm: 210, page_h_mm: 297, orientation: "portrait" as const, created_at: "", updated_at: "" };
+    const template = { id: 1, name: "Test", current_version_id: null, page_w_mm: 210, page_h_mm: 297, orientation: "portrait" as const, readme: "", summary: "", remote_id: null, published_at: null, origin: "own", origin_owner: null, withdrawn: false, created_at: "", updated_at: "" };
     useTemplateStore.getState().setCurrentTemplate(template);
     expect(useTemplateStore.getState().currentTemplate?.name).toBe("Test");
   });

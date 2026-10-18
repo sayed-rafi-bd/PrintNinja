@@ -11,6 +11,13 @@ pub struct Template {
     pub page_w_mm: i64,
     pub page_h_mm: i64,
     pub orientation: String,
+    pub readme: String,
+    pub summary: String,
+    pub remote_id: Option<String>,
+    pub published_at: Option<String>,
+    pub origin: String,
+    pub origin_owner: Option<String>,
+    pub withdrawn: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -26,7 +33,8 @@ pub fn list_templates(db: State<DbState>) -> AppResult<Vec<Template>> {
 
     let mut stmt = conn.prepare(
         "SELECT id, name, current_version_id, page_w_mm, page_h_mm,
-                orientation, created_at, updated_at
+                orientation, readme, summary, remote_id, published_at,
+                origin, origin_owner, withdrawn, created_at, updated_at
          FROM templates ORDER BY name COLLATE NOCASE",
     )?;
 
@@ -39,8 +47,15 @@ pub fn list_templates(db: State<DbState>) -> AppResult<Vec<Template>> {
                 page_w_mm: row.get(3)?,
                 page_h_mm: row.get(4)?,
                 orientation: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
+                readme: row.get(6)?,
+                summary: row.get(7)?,
+                remote_id: row.get(8)?,
+                published_at: row.get(9)?,
+                origin: row.get(10)?,
+                origin_owner: row.get(11)?,
+                withdrawn: row.get::<_, i64>(12)? != 0,
+                created_at: row.get(13)?,
+                updated_at: row.get(14)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -56,6 +71,8 @@ pub struct CreateTemplateRequest {
     pub orientation: Option<String>,
     pub html: Option<String>,
     pub css: Option<String>,
+    pub readme: Option<String>,
+    pub summary: Option<String>,
 }
 
 #[tauri::command]
@@ -81,6 +98,24 @@ pub fn create_template(db: State<DbState>, req: CreateTemplateRequest) -> AppRes
         ));
     }
 
+    let html = req.html.clone().unwrap_or_default();
+    let css = req.css.clone().unwrap_or_default();
+    if let Some(issues) = crate::render::handlebars::find_remote_refs(&html, &css) {
+        return Err(AppError::Validation(format!(
+            "Template contains remote references ({}). Use data: URIs instead.",
+            issues.join("; ")
+        )));
+    }
+    let readme = match req.readme {
+        Some(r) if !r.trim().is_empty() => {
+            crate::readme::validate_readme(&r)?;
+            r
+        }
+        _ => crate::readme::readme_scaffold_with_placeholders(name, &html),
+    };
+    crate::readme::validate_readme(&readme)?;
+    let summary = req.summary.unwrap_or_default();
+
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
@@ -100,9 +135,9 @@ pub fn create_template(db: State<DbState>, req: CreateTemplateRequest) -> AppRes
     }
 
     tx.execute(
-        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation)
-         VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![name, page_w_mm, page_h_mm, orientation],
+        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, readme, summary)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![name, page_w_mm, page_h_mm, orientation, readme, summary],
     )?;
     let template_id = tx.last_insert_rowid();
 
@@ -110,11 +145,7 @@ pub fn create_template(db: State<DbState>, req: CreateTemplateRequest) -> AppRes
     tx.execute(
         "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
          VALUES (?1, 1, ?2, ?3, 'manual')",
-        rusqlite::params![
-            template_id,
-            req.html.clone().unwrap_or_default(),
-            req.css.clone().unwrap_or_default(),
-        ],
+        rusqlite::params![template_id, html, css,],
     )?;
     let version_id = tx.last_insert_rowid();
 
@@ -125,14 +156,15 @@ pub fn create_template(db: State<DbState>, req: CreateTemplateRequest) -> AppRes
 
     tx.commit()?;
 
-    let template = tx_guard_to_template(&mut conn, template_id)?;
+    let template = tx_guard_to_template(&conn, template_id)?;
     Ok(template)
 }
 
 fn tx_guard_to_template(conn: &rusqlite::Connection, id: i64) -> rusqlite::Result<Template> {
     conn.query_row(
         "SELECT id, name, current_version_id, page_w_mm, page_h_mm,
-                orientation, created_at, updated_at
+                orientation, readme, summary, remote_id, published_at,
+                origin, origin_owner, withdrawn, created_at, updated_at
          FROM templates WHERE id = ?1",
         [id],
         |row| {
@@ -143,11 +175,55 @@ fn tx_guard_to_template(conn: &rusqlite::Connection, id: i64) -> rusqlite::Resul
                 page_w_mm: row.get(3)?,
                 page_h_mm: row.get(4)?,
                 orientation: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
+                readme: row.get(6)?,
+                summary: row.get(7)?,
+                remote_id: row.get(8)?,
+                published_at: row.get(9)?,
+                origin: row.get(10)?,
+                origin_owner: row.get(11)?,
+                withdrawn: row.get::<_, i64>(12)? != 0,
+                created_at: row.get(13)?,
+                updated_at: row.get(14)?,
             })
         },
     )
+}
+
+#[tauri::command]
+pub fn get_template(db: State<DbState>, id: i64) -> AppResult<Template> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    let conn = guard.connection()?;
+    tx_guard_to_template(&conn, id).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => {
+            AppError::NotFound(format!("Template {} not found", id))
+        }
+        other => other.into(),
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateReadmeRequest {
+    pub id: i64,
+    pub readme: String,
+}
+
+#[tauri::command]
+pub fn update_readme(db: State<DbState>, req: UpdateReadmeRequest) -> AppResult<Template> {
+    crate::readme::validate_readme(&req.readme)?;
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    let conn = guard.connection()?;
+    let affected = conn.execute(
+        "UPDATE templates SET readme = ?1, updated_at = datetime('now') WHERE id = ?2",
+        rusqlite::params![req.readme, req.id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("Template {} not found", req.id)));
+    }
+    tx_guard_to_template(&conn, req.id).map_err(Into::into)
 }
 
 #[tauri::command]

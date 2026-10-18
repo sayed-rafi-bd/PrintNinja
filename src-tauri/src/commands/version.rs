@@ -71,6 +71,12 @@ pub fn create_version(db: State<DbState>, req: CreateVersionRequest) -> AppResul
             created_by, VALID_CREATED_BY
         )));
     }
+    if let Some(issues) = crate::render::handlebars::find_remote_refs(&req.html, &req.css) {
+        return Err(AppError::Validation(format!(
+            "Template contains remote references ({}). Use data: URIs instead.",
+            issues.join("; ")
+        )));
+    }
 
     let guard = db
         .lock()

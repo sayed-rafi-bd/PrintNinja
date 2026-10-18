@@ -48,6 +48,7 @@ import { VisualDesigner } from "@/components/VisualDesigner";
 import { renderTemplate } from "@/lib/render/renderTemplate";
 import { formatCss, formatHtml } from "@/lib/utils/format";
 import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
+import { ReadmeEditor } from "@/components/ReadmeEditor";
 
 const PAGE_PRESETS = [
   { label: "A4", width: 210, height: 297 },
@@ -81,6 +82,8 @@ export function DesignerPage() {
   const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait");
   const [zoom, setZoom] = useState(1);
   const [activeTab, setActiveTab] = useState("canvas");
+  const [readme, setReadme] = useState("");
+  const [readmeSaving, setReadmeSaving] = useState(false);
   const [debouncedHtml, setDebouncedHtml] = useState(htmlCode);
   const [debouncedCss, setDebouncedCss] = useState(cssCode);
   useEffect(() => {
@@ -110,7 +113,7 @@ export function DesignerPage() {
     },
   ]);
 
-  const loadTemplate = (tpl: { id: number; name: string; html: string; css: string; page_w_mm?: number; page_h_mm?: number; orientation?: string }) => {
+  const loadTemplate = (tpl: { id: number; name: string; html: string; css: string; page_w_mm?: number; page_h_mm?: number; orientation?: string; readme?: string }) => {
     setCurrentTemplateId(tpl.id);
     setTemplateName(tpl.name);
     setHtmlCode(formatHtml(tpl.html));
@@ -121,6 +124,19 @@ export function DesignerPage() {
     setCurrentTemplateDbId(tpl.id);
     setDiff(null);
     setShowDiff(false);
+    // Load readme if provided, otherwise fetch from DB
+    if (tpl.readme !== undefined) {
+      setReadme(tpl.readme);
+    } else {
+      (async () => {
+        try {
+          const full = await invoke<{ readme: string }>("get_template", { id: tpl.id });
+          setReadme(full.readme ?? "");
+        } catch {
+          setReadme("");
+        }
+      })();
+    }
     // Load the persisted versions for the newly selected template.
     (async () => {
       try {
@@ -265,6 +281,13 @@ export function DesignerPage() {
           setPageHeight(hydrated[0].page_h_mm ?? 200);
           setOrientation((hydrated[0].orientation as "portrait" | "landscape") ?? "portrait");
           setCurrentTemplateDbId(hydrated[0].id);
+          // Load README for the first template
+          try {
+            const full = await invoke<{ readme: string }>("get_template", { id: hydrated[0].id });
+            setReadme(full.readme ?? "");
+          } catch {
+            setReadme("");
+          }
         } else {
           const starters = STARTER_TEMPLATES.map((t, i) => ({
             id: i + 1,
@@ -312,6 +335,13 @@ export function DesignerPage() {
       page_w_mm: pageWidth,
       page_h_mm: pageHeight,
       orientation,
+      readme: "",
+      summary: "",
+      remote_id: null,
+      published_at: null,
+      origin: "own",
+      origin_owner: null,
+      withdrawn: false,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -664,10 +694,11 @@ export function DesignerPage() {
         <div className="lg:col-span-2 space-y-4">
           <div className="flex items-center justify-between">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full max-w-[420px] overflow-x-auto">
-              <TabsList className="grid w-full grid-cols-5">
+              <TabsList className="grid w-full grid-cols-6">
                 <TabsTrigger value="canvas" className="text-xs">{t("designer.canvas")}</TabsTrigger>
                 <TabsTrigger value="visual" className="text-xs">Visual</TabsTrigger>
                 <TabsTrigger value="code" className="text-xs">{t("designer.code")}</TabsTrigger>
+                <TabsTrigger value="readme" className="text-xs">README</TabsTrigger>
                 <TabsTrigger value="preview" className="text-xs">{t("designer.preview")}</TabsTrigger>
                 <TabsTrigger value="variables" className="text-xs">{t("designer.variables")}</TabsTrigger>
               </TabsList>
@@ -705,6 +736,7 @@ export function DesignerPage() {
                           }
                         })(),
                       )}
+                      sandbox=""
                       className="pointer-events-none"
                       title="Canvas preview"
                       style={{ width: "100%", height: "100%", border: 0 }}
@@ -761,6 +793,45 @@ export function DesignerPage() {
             </div>
           )}
 
+          {activeTab === "readme" && (
+            <Card>
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm">README — {templateName}</CardTitle>
+                  <Button
+                    size="sm"
+                    onClick={async () => {
+                      if (!currentTemplateDbId) {
+                        toast.error("No template selected");
+                        return;
+                      }
+                      const bytes = new TextEncoder().encode(readme).length;
+                      if (bytes > 64 * 1024) {
+                        toast.error("README exceeds 64 KiB");
+                        return;
+                      }
+                      setReadmeSaving(true);
+                      try {
+                        await invoke("update_readme", { req: { id: currentTemplateDbId, readme } });
+                        toast.success("README saved");
+                      } catch (e) {
+                        toast.error(String(e));
+                      } finally {
+                        setReadmeSaving(false);
+                      }
+                    }}
+                    disabled={readmeSaving}
+                  >
+                    {readmeSaving ? "Saving…" : "Save README"}
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <ReadmeEditor value={readme} onChange={setReadme} templateName={templateName} />
+              </CardContent>
+            </Card>
+          )}
+
           {activeTab === "preview" && (
             <Card>
               <CardContent className="p-0">
@@ -768,6 +839,7 @@ export function DesignerPage() {
                   <div className="bg-white shadow-lg border overflow-auto" style={{ width: pageWidth * MM_TO_PX, minHeight: pageHeight * MM_TO_PX }}>
                     <iframe
                       srcDoc={renderTemplate(htmlCode, cssCode, DEFAULT_MOCK_DATA as any)}
+                      sandbox=""
                       className="w-full border-0"
                       style={{ height: pageHeight * MM_TO_PX, width: "100%" }}
                       title="Preview"

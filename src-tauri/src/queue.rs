@@ -228,7 +228,7 @@ mod tests {
             sems.push(h.await.unwrap());
         }
         for s in &sems {
-            assert!(Arc::ptr_eq(&s, &sems[0]), "all callers share one gate");
+            assert!(Arc::ptr_eq(s, &sems[0]), "all callers share one gate");
         }
         assert_eq!(q.tracked_printers().await, 1);
     }
@@ -305,8 +305,7 @@ mod tests {
         assert_eq!(first.await.unwrap_err(), "printer offline");
 
         // A later job must not be stuck behind the failed one.
-        let second = q
-            .with_permit("p1", async { Ok::<(), String>(()) })
+        q.with_permit("p1", async { Ok::<(), String>(()) })
             .await
             .unwrap();
     }

@@ -1,4 +1,4 @@
-/// Label printer command language encoders
+//! Label printer command language encoders
 
 /// TSPL/TSPL2 encoder for thermal label printers
 pub mod tspl {
@@ -15,11 +15,9 @@ pub mod tspl {
         label_w_mm: f64,
         label_h_mm: f64,
         gap_mm: f64,
-        dpi: u32,
+        _dpi: u32,
     ) -> String {
-        let dots_per_mm = dpi as f64 / 25.4;
-        let width_dots = (label_w_mm * dots_per_mm) as usize;
-        let bytes_per_row = (image.width + 7) / 8;
+        let bytes_per_row = image.width.div_ceil(8);
 
         let mut cmd = String::new();
         cmd.push_str(&format!("SIZE {} mm, {} mm\n", label_w_mm, label_h_mm));
@@ -30,12 +28,11 @@ pub mod tspl {
         cmd.push_str(&format!("BITMAP 0,0,{},{}\n", bytes_per_row, image.height));
 
         // Append bitmap data as hex-like bytes (TSPL expects raw bytes after BITMAP command with \r\n terminator)
-        let bytes_per_row = image.width.div_ceil(8);
         for row in image.dots.chunks(bytes_per_row) {
             for byte in row {
                 cmd.push_str(&format!("{:02X}", byte));
             }
-            cmd.push_str("\n");
+            cmd.push('\n');
         }
         cmd.push_str("\nPRINT 1\n");
         cmd
@@ -54,16 +51,16 @@ pub mod zpl {
         image: &RasterImage,
         _label_w_mm: f64,
         _label_h_mm: f64,
-        dpi: u32,
+        _dpi: u32,
     ) -> String {
-        let bytes_per_row = (image.width + 7) / 8;
+        let bytes_per_row = image.width.div_ceil(8);
         let total_bytes = bytes_per_row * image.height;
 
         let mut cmd = String::new();
         cmd.push_str("^XA\n"); // Start format
-        cmd.push_str(&format!("^MMT\n")); // Media tracking
-        cmd.push_str(&format!("^PR6\n")); // Print rate
-                                          // Graphic field command
+        cmd.push_str("^MMT\n"); // Media tracking
+        cmd.push_str("^PR6\n"); // Print rate
+                                // Graphic field command
         cmd.push_str(&format!(
             "^FO0,0^GFA,{},{}",
             total_bytes,
@@ -92,7 +89,7 @@ pub mod cpcl {
     pub fn print_bitmap(image: &RasterImage, label_w_mm: f64, dpi: u32) -> String {
         let dots_per_mm = dpi as f64 / 25.4;
         let width_dots = (label_w_mm * dots_per_mm) as usize;
-        let bytes_per_row = (width_dots + 7) / 8;
+        let bytes_per_row = width_dots.div_ceil(8);
 
         let mut cmd = String::new();
         cmd.push_str(&format!("! 0 200 200 {} 1\r\n", image.height));

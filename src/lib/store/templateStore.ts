@@ -7,6 +7,13 @@ export interface Template {
   page_w_mm: number;
   page_h_mm: number;
   orientation: "portrait" | "landscape";
+  readme: string;
+  summary: string;
+  remote_id: string | null;
+  published_at: string | null;
+  origin: string;
+  origin_owner: string | null;
+  withdrawn: boolean;
   created_at: string;
   updated_at: string;
 }

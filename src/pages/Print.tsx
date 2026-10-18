@@ -749,6 +749,7 @@ export function PrintPage() {
             >
               <iframe
                 srcDoc={previewHtml}
+                sandbox=""
                 className="w-full border-0"
                 style={{
                   height: (selectedTemplate?.page_h_mm ?? 200) * MM_TO_PX,

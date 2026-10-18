@@ -105,7 +105,7 @@ pub fn create_batch(db: State<DbState>, req: CreateBatchRequest) -> AppResult<Ba
     match req.mode.as_str() {
         "per_record" => {
             // One queued job per record (PLANNING.md 7.8: best for thermal).
-            for (idx, record) in records.iter().enumerate() {
+            for (idx, _record) in records.iter().enumerate() {
                 tx.execute(
                     "INSERT INTO print_jobs
                        (batch_id, record_index, template_id, template_version_id,
