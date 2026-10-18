@@ -194,8 +194,8 @@ export function HistoryPage() {
       {/* Filters */}
       <Card>
         <CardContent className="pt-6">
-          <div className="flex flex-wrap gap-3">
-            <div className="relative flex-1 min-w-[200px]">
+          <div className="flex flex-wrap gap-2 sm:gap-3">
+            <div className="relative w-full sm:flex-1 sm:min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder={t("common.search")}
@@ -205,7 +205,7 @@ export function HistoryPage() {
               />
             </div>
             <Select value={store.filter.status} onValueChange={(v) => store.setFilter({ status: v })}>
-              <SelectTrigger className="w-[140px]">
+              <SelectTrigger className="w-full sm:w-[140px]">
                 <SelectValue placeholder={t("history.filter_status")} />
               </SelectTrigger>
               <SelectContent>
@@ -218,7 +218,7 @@ export function HistoryPage() {
               </SelectContent>
             </Select>
             <Select value={store.filter.source} onValueChange={(v) => store.setFilter({ source: v })}>
-              <SelectTrigger className="w-[140px]">
+              <SelectTrigger className="w-full sm:w-[140px]">
                 <SelectValue placeholder={t("history.source")} />
               </SelectTrigger>
               <SelectContent>
@@ -231,7 +231,7 @@ export function HistoryPage() {
               </SelectContent>
             </Select>
             <Select value={store.filter.printer} onValueChange={(v) => store.setFilter({ printer: v })}>
-              <SelectTrigger className="w-[160px]">
+              <SelectTrigger className="w-full sm:w-[160px]">
                 <SelectValue placeholder={t("history.filter_printer")} />
               </SelectTrigger>
               <SelectContent>
@@ -241,29 +241,29 @@ export function HistoryPage() {
                 <SelectItem value="3">Label Printer 1</SelectItem>
               </SelectContent>
             </Select>
-            <Input type="date" className="w-[150px]" value={store.filter.dateFrom} onChange={(e) => store.setFilter({ dateFrom: e.target.value })} placeholder="From" />
-            <Input type="date" className="w-[150px]" value={store.filter.dateTo} onChange={(e) => store.setFilter({ dateTo: e.target.value })} placeholder="To" />
-            <Button variant="ghost" size="sm" onClick={store.clearFilter}>
+            <Input type="date" className="w-full sm:w-[150px]" value={store.filter.dateFrom} onChange={(e) => store.setFilter({ dateFrom: e.target.value })} placeholder="From" />
+            <Input type="date" className="w-full sm:w-[150px]" value={store.filter.dateTo} onChange={(e) => store.setFilter({ dateTo: e.target.value })} placeholder="To" />
+            <Button variant="ghost" size="sm" onClick={store.clearFilter} className="w-full sm:w-auto">
               Clear
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* History Table */}
-      <Card>
-        <CardContent className="p-0">
+      {/* History — desktop table, mobile cards */}
+      <Card className="hidden md:block">
+        <CardContent className="p-0 overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>ID</TableHead>
                 <TableHead>Time</TableHead>
-                <TableHead>Template</TableHead>
+                <TableHead className="hidden lg:table-cell">Template</TableHead>
                 <TableHead>Printer</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Duration</TableHead>
-                <TableHead>Source</TableHead>
-                <TableHead>Version</TableHead>
+                <TableHead className="hidden xl:table-cell">Duration</TableHead>
+                <TableHead className="hidden lg:table-cell">Source</TableHead>
+                <TableHead className="hidden xl:table-cell">Version</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -296,7 +296,7 @@ export function HistoryPage() {
                             <span>{expandedBatches.has(batchId) ? "▼" : "▶"}</span> Batch #{batchId} · {jobs.length} job(s) · {jobs.filter((j) => j.status === "success").length} ok, {jobs.filter((j) => j.status === "failed").length} failed
                           </button>
                         </TableCell>
-                        <TableCell colSpan={4} className="text-right text-xs text-muted-foreground">
+                        <TableCell colSpan={4} className="text-right text-xs text-muted-foreground hidden lg:table-cell">
                           {jobs[0]?.finished_at || jobs[0]?.started_at || ""}
                         </TableCell>
                       </TableRow>
@@ -306,7 +306,7 @@ export function HistoryPage() {
                           <TableCell className="text-muted-foreground">
                             {job.finished_at || job.started_at || "—"}
                           </TableCell>
-                          <TableCell className="font-medium">
+                          <TableCell className="font-medium hidden lg:table-cell">
                             {job.template_id ? `Template ${job.template_id}` : "—"}
                           </TableCell>
                           <TableCell>{job.printer_id ? `Printer ${job.printer_id}` : "—"}</TableCell>
@@ -315,11 +315,11 @@ export function HistoryPage() {
                               {job.status}
                             </Badge>
                           </TableCell>
-                          <TableCell>{job.duration_ms ? `${job.duration_ms}ms` : "—"}</TableCell>
-                          <TableCell>
+                          <TableCell className="hidden xl:table-cell">{job.duration_ms ? `${job.duration_ms}ms` : "—"}</TableCell>
+                          <TableCell className="hidden lg:table-cell">
                             <Badge variant="outline">{job.source}</Badge>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="hidden xl:table-cell">
                             {job.template_version_id ? `v${job.template_version_id}` : "—"}
                           </TableCell>
                           <TableCell className="text-right">
@@ -350,7 +350,7 @@ export function HistoryPage() {
                       <TableCell className="text-muted-foreground">
                         {job.finished_at || job.started_at || "—"}
                       </TableCell>
-                      <TableCell className="font-medium">
+                      <TableCell className="font-medium hidden lg:table-cell">
                         {job.template_id ? `Template ${job.template_id}` : "—"}
                       </TableCell>
                       <TableCell>{job.printer_id ? `Printer ${job.printer_id}` : "—"}</TableCell>
@@ -359,11 +359,11 @@ export function HistoryPage() {
                           {job.status}
                         </Badge>
                       </TableCell>
-                      <TableCell>{job.duration_ms ? `${job.duration_ms}ms` : "—"}</TableCell>
-                      <TableCell>
+                      <TableCell className="hidden xl:table-cell">{job.duration_ms ? `${job.duration_ms}ms` : "—"}</TableCell>
+                      <TableCell className="hidden lg:table-cell">
                         <Badge variant="outline">{job.source}</Badge>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden xl:table-cell">
                         {job.template_version_id ? `v${job.template_version_id}` : "—"}
                       </TableCell>
                       <TableCell className="text-right">
@@ -392,6 +392,66 @@ export function HistoryPage() {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Mobile cards */}
+      <div className="md:hidden space-y-3">
+        {loading ? (
+          <Card><CardContent className="py-8 text-center text-muted-foreground text-sm">Loading history…</CardContent></Card>
+        ) : filteredJobs.length === 0 ? (
+          <Card><CardContent className="py-8 text-center text-muted-foreground text-sm">No print jobs yet. Print something to see it here.</CardContent></Card>
+        ) : (
+          <>
+            {Array.from(grouped.batches.entries()).map(([batchId, jobs]) => (
+              <Card key={`m-batch-${batchId}`} className="overflow-hidden">
+                <div className="bg-muted/50 px-3 py-2 flex items-center justify-between">
+                  <button type="button" onClick={() => toggleBatch(batchId)} className="flex items-center gap-2 text-sm font-medium">
+                    <span>{expandedBatches.has(batchId) ? "▼" : "▶"}</span> Batch #{batchId}
+                  </button>
+                  <span className="text-xs text-muted-foreground">{jobs.length} jobs · {jobs.filter(j=>j.status==="success").length} ok</span>
+                </div>
+                {expandedBatches.has(batchId) && (
+                  <div className="divide-y">
+                    {jobs.map((job) => (
+                      <div key={job.id} className="p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium">#{job.id}</span>
+                          <Badge variant={STATUS_VARIANTS[job.status] || "secondary"}>{job.status}</Badge>
+                        </div>
+                        <div className="text-xs text-muted-foreground">{job.finished_at || job.started_at || "—"} · {job.printer_id ? `Printer ${job.printer_id}` : "—"}</div>
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="sm" className="flex-1" onClick={() => store.setSelectedJob(job)}><Eye className="h-3 w-3" /> View</Button>
+                          <Button variant="ghost" size="sm" className="flex-1" onClick={() => handleReprint(job)}><RotateCcw className="h-3 w-3" /> Reprint</Button>
+                          <Button variant="ghost" size="sm" onClick={() => handleDelete(job)}><Trash2 className="h-3 w-3" /></Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            ))}
+            {grouped.singles.map((job) => (
+              <Card key={`m-${job.id}`}>
+                <CardContent className="p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">#{job.id}</span>
+                    <Badge variant={STATUS_VARIANTS[job.status] || "secondary"}>{job.status}</Badge>
+                  </div>
+                  <div className="text-xs text-muted-foreground space-y-1">
+                    <div>{job.finished_at || job.started_at || "—"}</div>
+                    <div>{job.printer_id ? `Printer ${job.printer_id}` : "—"} {job.template_id ? `· Template ${job.template_id}` : ""}</div>
+                    {job.error && <div className="text-destructive truncate">{job.error}</div>}
+                  </div>
+                  <div className="flex gap-1">
+                    <Button variant="ghost" size="sm" className="flex-1" onClick={() => store.setSelectedJob(job)}><Eye className="h-3 w-3" /> View</Button>
+                    <Button variant="ghost" size="sm" className="flex-1" onClick={() => handleReprint(job)}><RotateCcw className="h-3 w-3" /> Reprint</Button>
+                    <Button variant="ghost" size="sm" onClick={() => handleDelete(job)}><Trash2 className="h-3 w-3" /></Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </>
+        )}
+      </div>
 
       {/* Job Detail Dialog */}
       <Dialog open={!!store.selectedJob} onOpenChange={() => store.setSelectedJob(null)}>
