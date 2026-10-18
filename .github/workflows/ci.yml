@@ -67,25 +67,35 @@ jobs:
         continue-on-error: true
 
   # Tag builds must match the version in every manifest, otherwise the
-  # artifacts get published under the wrong version.
+  # artifacts get published under the wrong version. Runs for every
+  # release tag (push tags v*), blocking windows/android/github-release.
   version-check:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Compare tag with package.json, Cargo.toml and tauri.conf.json
+      - name: Compare tag with all manifests
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           PKG=$(jq -r .version package.json)
           TAURI=$(jq -r .version src-tauri/tauri.conf.json)
           CARGO=$(awk '/^\[package\]/{p=1;next} /^\[/{p=0} p && /^version *=/{gsub(/[" ]/,"",$3); print $3; exit}' src-tauri/Cargo.toml)
-          echo "tag=$TAG_VERSION package.json=$PKG tauri.conf.json=$TAURI Cargo.toml=$CARGO"
-          for v in "$PKG" "$TAURI" "$CARGO"; do
+          # Cargo.lock stores the same version for the crate
+          LOCK=$(awk '/^\[\[package\]\]/{p=0} /name = "printninja"/{p=1;next} p && /^version =/{gsub(/"/,"",$3); print $3; exit}' src-tauri/Cargo.lock)
+          # Settings.tsx fallback literal "vX.Y.Z"
+          SETTINGS=$(grep -o '"v[0-9]\+\.[0-9]\+\.[0-9]\+"' src/pages/Settings.tsx | head -n1 | tr -d '"' | sed 's/^v//')
+          echo "tag=$TAG_VERSION package.json=$PKG tauri.conf.json=$TAURI Cargo.toml=$CARGO Cargo.lock=$LOCK Settings.tsx=$SETTINGS"
+          for v in "$PKG" "$TAURI" "$CARGO" "$LOCK" "$SETTINGS"; do
+            if [ -z "$v" ]; then
+              echo "::error::Could not read a version (empty). Check manifests."
+              exit 1
+            fi
             if [ "$v" != "$TAG_VERSION" ]; then
-              echo "::error::Version mismatch: tag is v$TAG_VERSION but a manifest says $v. Run scripts/release.sh and re-tag."
+              echo "::error::Version mismatch: tag is v$TAG_VERSION but a manifest says $v. Run scripts/release.sh --version $TAG_VERSION --tag and re-push."
               exit 1
             fi
           done
+          echo "[ok] all versions match v$TAG_VERSION"
 
   windows-build:
     if: startsWith(github.ref, 'refs/tags/v')
