@@ -287,3 +287,29 @@ pub fn clear_publish_info(db: State<DbState>, req: ClearPublishInfoRequest) -> A
     }
     tx_guard_to_template(&conn, req.id).map_err(Into::into)
 }
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateOriginRequest {
+    pub id: i64,
+    pub origin: String,
+    pub origin_owner: Option<String>,
+}
+
+#[tauri::command]
+pub fn update_template_origin(db: State<DbState>, req: UpdateOriginRequest) -> AppResult<Template> {
+    if req.origin != "own" && req.origin != "saved" {
+        return Err(AppError::Validation("origin must be 'own' or 'saved'".into()));
+    }
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    let conn = guard.connection()?;
+    let affected = conn.execute(
+        "UPDATE templates SET origin = ?1, origin_owner = ?2 WHERE id = ?3",
+        rusqlite::params![req.origin, req.origin_owner, req.id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("Template {} not found", req.id)));
+    }
+    tx_guard_to_template(&conn, req.id).map_err(Into::into)
+}

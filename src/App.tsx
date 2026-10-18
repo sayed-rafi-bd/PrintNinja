@@ -7,6 +7,7 @@ import { PrintPage } from "./pages/Print";
 import { PrinterSetupPage } from "./pages/PrinterSetup";
 import { HistoryPage } from "./pages/History";
 import { SettingsPage } from "./pages/Settings";
+import { TemplatesPage } from "./pages/Templates";
 import { diagnostics } from "./lib/diagnostics";
 
 export default function App() {
@@ -83,6 +84,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<DesignerPage />} />
           <Route path="/template/:id" element={<DesignerPage />} />
+          <Route path="/templates" element={<TemplatesPage />} />
           <Route path="/print" element={<PrintPage />} />
           <Route path="/printers" element={<PrinterSetupPage />} />
           <Route path="/history" element={<HistoryPage />} />

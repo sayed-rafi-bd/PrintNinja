@@ -8,12 +8,14 @@ import {
   History,
   Pencil,
   ChevronRight,
+  Library,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 
 const navItems = [
   { path: "/", icon: Pencil, labelKey: "nav.designer" },
+  { path: "/templates", icon: Library, labelKey: "nav.templates" },
   { path: "/print", icon: Printer, labelKey: "nav.print" },
   { path: "/printers", icon: FileText, labelKey: "nav.printers" },
   { path: "/history", icon: History, labelKey: "nav.history" },
