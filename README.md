@@ -6,11 +6,13 @@ Silent print for Windows and Android — design HTML templates, fetch JSON data,
 
 ## Features
 
-- **Designer** — HTML/CSS (CodeMirror) + visual canvas, page presets (A4, 80 mm roll, 4×6 label…), zoom, Handlebars helpers (`currency`, `date`, `padLeft`…), `bwip-js` barcodes (14 symbologies → inline SVG), custom fonts, version history with diff/restore
-- **Print** — printer + template selectors, data URL / test-data switch, orientation / margins / fit mode / copies, live preview, batch (JSON array or CSV upload with column mapping), per-printer profiles
+- **Designer** — HTML/CSS (CodeMirror) + visual canvas, page presets (A4, 80 mm roll, 4×6 label…), zoom, Handlebars helpers (`currency`, `date`, `padLeft`…), `bwip-js` barcodes (14 symbologies → inline SVG), custom fonts, version history with diff/restore, **README** tab (markdown `react-markdown` + `remark-gfm`, no `rehype-raw`, toolbar, split preview, 64 KiB cap) and **Publish** (Draft amber / Published emerald chip, `Publish`/`Update` emerald, `Unpublish` destructive, unpublished-changes strip)
+- **Templates** — `/templates` library (Community with search `q` + sort `updated|used|name` + cards + offline state, Mine with Draft/Published, ★ Saved with violet star + slate withdrawn, 1 col mobile / 2 md / 3 xl), optimistic save (`PUT /v1/saved/{id}` idempotent), local read-only copies (`origin='saved'`), `POST /v1/templates/{id}/use` atomic `use_count`
+- **Print** — printer + template selectors, data URL / test-data switch, orientation / margins / fit mode / copies, live preview (sandboxed `iframe` + CSP `default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:` + `<script>`/`on*` stripping), batch (JSON array or CSV upload with column mapping), per-printer profiles
 - **Printer Setup** — Wi-Fi/LAN (IPP / raw TCP 9100), USB, Bluetooth, system spooler; test print, validation, language/paper/DPI
 - **History** — filters (status/source/printer/search + date range), batch-grouped expandable rows, reprint/retry/delete, CSV export (RFC 4180), retention
 - **Automation** — local REST API (`axum`, `127.0.0.1:17717`, Bearer + idempotency, CORS scoped, LAN off by default) and `printninja://` deep links with trust list and confirmation sheet
+- **Share** — hosted `server/` (`axum` + Turso/`rusqlite`, `scrypt` + sha256 sessions, throttle 5/min) at `share_service_url` + `share_session_token` (Settings → Share: Register/Login/Logout, handle `alphanumeric+_-` 1–32, password ≥8), `PUT/DELETE /v1/templates/{id}` (client UUID, owner 403, 404, size caps 512K/64K, remote-ref `data: URIs`), `GET /v1/templates` public, `POST /v1/templates/{id}/use`, `PUT/DELETE/GET /v1/saved`
 - **Queue** — per-printer `Semaphore` (no byte interleaving), bounded admission, `POST /v1/print` runs the same pipeline as the UI
 
 ## Tech Stack
@@ -22,15 +24,19 @@ Silent print for Windows and Android — design HTML templates, fetch JSON data,
 | DB | SQLite (`tauri-plugin-sql` migrations + `rusqlite` commands) — 11 tables |
 | Template | Handlebars (singleton registry), `buildTemplateCss` inlines a committed minified Tailwind bundle (`pnpm build:templates:css`) |
 | Barcodes | `bwip-js` `toSVG()` (inline SVG, no canvas data-URI) |
-| API | `axum` + `tower-http` |
+| Markdown | `react-markdown` + `remark-gfm` (no `rehype-raw` → XSS as text, links `http/https/mailto` only) |
+| Sanitize | `sanitize.ts` + `handlebars.rs` strip `<script>`/`on*`, `find_remote_refs` → `data: URIs`, CSP `default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:`, `sandbox=""` iframes |
+| API | `axum` + `tower-http` (local `127.0.0.1:17717` + share `server/` at `share_service_url`) |
+| Share service | `server/` (`axum`, Turso/`rusqlite`, `scrypt` + sha256 sessions, throttle) |
 | Secrets | `keyring` (redacted from `print_jobs` / diagnostics) |
 | Android | Kotlin plugins: WebView → PDF, `UsbManager`, RFCOMM |
 
 ## Architecture
 
 ```
-UI (Designer / Print / PrinterSetup / History) ──invoke()──► Rust core
-                                                          Data fetcher → Handlebars → Layout (@page) → PDF → Queue (per-printer) → Transport (ipp/raw_tcp/usb/bt/spooler) → History
+UI (Designer + README + Templates / Print / PrinterSetup / History) ──invoke()──► Rust core
+  Designer: canvas/visual/code/readme/preview + Publish (remote_id/published_at)        Data fetcher → Handlebars (sanitize + CSP) → Layout (@page) → PDF → Queue (per-printer) → Transport → History
+  Templates: Community (search/sort, offline) / Mine (Draft amber / Published emerald) / Saved (violet ★, slate withdrawn)  Share client ──fetch──► server (`share_service_url` + Bearer)
 REST API ──┐
 Deep link ─┼──► same queue/pipeline (idempotency, copies, redaction)
 Batch ─────┘
@@ -40,20 +46,23 @@ Batch ─────┘
 
 ## Data Model
 
-`printers` · `templates` + `template_versions` · `sample_datasets` · `fonts` · `printer_profiles` (unique `printer_id, template_id`) · `presets` · `batches` · `print_jobs` (`batch_id` + `idempotency_key`) · `api_clients` · `settings` · see `src-tauri/src/db/schema.sql`.
+App SQLite (`src-tauri/src/db/schema.sql` + `db::ensure_v2_schema`): `printers` · `templates` (`readme`, `summary`, `remote_id` UUID, `published_at`, `origin` `own`/`saved`, `origin_owner`, `withdrawn`, `idx_templates_remote`) + `template_versions` · `sample_datasets` · `fonts` · `printer_profiles` · `presets` · `batches` · `print_jobs` · `api_clients` · `settings` (`share_service_url`, `share_session_token`, `onboarding_done` etc.).
+
+Server Turso (`server/src/db.rs`): `users` (`handle` `UNIQUE COLLATE NOCASE`, `password_hash` scrypt) · `sessions` (`token_hash` sha256, `expires_at`) · `templates` (`id` UUID PK, `owner_id`, `name`, `summary`, `page_w_mm`, `page_h_mm`, `language`, `body` 512K, `readme` 64K, `use_count`, `published_at`, `updated_at`, `idx_tpl_owner/updated`) · `saved_templates` (`user_id`, `template_id` PK).
 
 ## Project Structure
 
 ```
 src/                         # React
-  pages/Designer  Print  PrinterSetup  History  Settings
-  components/ui  Layout  VisualDesigner
-  lib/{store,render,templates,hooks,utils}
+  pages/Designer (canvas/visual/code/readme/preview + Publish)  Templates (Community/Mine/Saved)  Print  PrinterSetup  History  Settings (Share)
+  components/ui  Layout  VisualDesigner  ReadmeEditor
+  lib/{store,render{renderTemplate,sanitize},templates,share/client,hooks,utils}
   styles/templates.src.css   # print stylesheet source → templates.generated.ts
 src-tauri/src/
-  commands/{print,printer,template,version,history,batch,font,profile,settings,api}
-  api/{routes,auth,openapi}  queue.rs  transport/{ipp,raw_tcp,windows_*,android_bridge}
-  data/fetcher.rs  deeplink.rs  render/handlebars.rs
+  commands/{print,printer,template{readme, publish info, origin},version,history,batch,font,profile,settings,api}
+  api/{routes,auth,openapi}  queue.rs  transport/{...}  data/fetcher.rs  deeplink.rs  render/handlebars.rs (sanitize)  db (ensure_v2_schema)  readme.rs
+server/                      # share service (axum, Turso/rusqlite, scrypt)
+  src/{main.rs (v1 auth/templates/saved), db.rs, auth.rs (throttle, sessions), error.rs}
 ```
 
 ## Getting Started
