@@ -169,6 +169,15 @@ jobs:
       - name: Generate Android project if not committed
         run: |
           if [ ! -d src-tauri/gen/android ]; then pnpm exec tauri android init --ci; fi
+      # `tauri android init` regenerates res/mipmap-* from tauri.conf bundle.icon.
+      # Copy the launchers that `tauri icon` actually generated (432px adaptive
+      # foreground, anydpi-v26 xml + background colour) over them, otherwise the
+      # APK ships Tauri placeholder art instead of the app icon.
+      - name: Apply generated launcher icons
+        run: |
+          RES=src-tauri/gen/android/app/src/main/res
+          cp -r src-tauri/icons/android/. "$RES"/
+          find "$RES" -name 'ic_launcher*.png' -printf '%p %s\n' | sort
       - name: Make gradlew executable
         run: chmod +x src-tauri/gen/android/gradlew || true
       # arm64-v8a only (new mobiles). Debug APK is signed with debug keystore and installable for testing;
