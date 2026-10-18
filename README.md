@@ -75,7 +75,6 @@ Prerequisites: Node 22, Rust stable, pnpm 10; for Android: Java 17, Android SDK/
 | `pnpm build:templates:css` | Tailwind → `src/lib/templates/templates.generated.ts` (commit the output) |
 | `pnpm lint` / `pnpm format` | Biome (`src/**/*.{ts,tsx}` + `index.html` + `vite.config.ts`) |
 | `pnpm test` | Vitest (jsdom) |
-| `pnpm test:e2e` | Playwright (`http://localhost:1420`, `localStorage["printninja-onboarding-complete"]="true"` bypass) |
 | `cargo test` (in `src-tauri`) | Rust (lib + integration) — `CARGO_INCREMENTAL=0 cargo test` on low-disk hosts |
 
 ## Building
@@ -99,7 +98,6 @@ Disabled by default, `127.0.0.1:17717`. `Authorization: Bearer pn_live_…`, opt
 
 - `vitest` — barcode SVG vs data-URI, encoder-name mapping, template helpers, Tailwind bundle safelist drift, history CSV/date logic
 - `cargo test` — queue serialisation/parallelism, `Box<dyn PrinterTransport>` dispatch, idempotency, `print_runs_the_real_pipeline` (was lying `202 queued`)
-- `playwright` — nav at 280–430 px, barcode dialog, batch, font, onboarding bypass
 
 ## License
 
