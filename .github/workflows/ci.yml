@@ -2,11 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
     # `create` events do not support tag filters, so tag builds must use `push`.
     tags: ["v*"]
   pull_request:
-    branches: [main, develop]
+    branches: [main]
 
 permissions:
   contents: read
