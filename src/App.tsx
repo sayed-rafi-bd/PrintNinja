@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, useEffect } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AuthGate } from "./components/AuthGate";
 import { Layout } from "./components/Layout";
 import { Onboarding } from "./components/Onboarding";
@@ -21,6 +21,21 @@ export default function App() {
       <AppContent />
     </AuthGate>
   );
+}
+
+/**
+ * Open the Print page when the app starts. Only the initial "/" is redirected,
+ * so the Designer (also at "/") stays reachable from the sidebar afterwards.
+ */
+function StartOnPrint() {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  useEffect(() => {
+    if (pathname === "/") navigate("/print", { replace: true });
+    // Run once on launch, not on every later visit to "/".
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return null;
 }
 
 function AppContent() {
@@ -95,6 +110,7 @@ function AppContent() {
 
   return (
     <BrowserRouter>
+      <StartOnPrint />
       <Layout>
         <Routes>
           <Route path="/" element={<DesignerPage />} />
