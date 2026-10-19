@@ -38,6 +38,8 @@ export function useShareStatus(): ShareStatus {
                 next = { state: "online", handle: u.handle ?? "" };
               } else if (res.status === 401) {
                 next = { state: "signed_out" };
+                // The server no longer accepts this session: back to sign-in.
+                void share.endSession("expired");
               } else {
                 next = { state: "offline" };
               }

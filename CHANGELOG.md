@@ -2,6 +2,17 @@
 
 All notable changes to PrintNinja are documented here. The format is based on Keep a Changelog.
 
+## [Unreleased] — Online-only server migration
+
+### Added
+- **Sign-in gate (migration phase 2).** The app opens on a sign-in and register screen until the server accepts a session. The screen includes the server address, so a new PC can be set up without visiting Settings first.
+- **"Cannot reach the server" screen** with Retry and Change server address, shown when the server is down as the app starts.
+- A 401 from the server, or signing out, returns to sign-in. The app stays loaded behind the sign-in screen, so edits that are not saved yet are still there after signing in again.
+- Once the app is open the gate never blocks on the network, so printing keeps working if the server goes away.
+
+### Changed
+- Share client requests go through one `authedFetch` helper that ends the session on 401 and reports an unreachable server as `ServerUnreachableError`.
+
 ## [0.5.0] - 2026-10-19 — Corporate UI (phases 0–6)
 
 ### Changed

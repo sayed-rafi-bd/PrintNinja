@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthGate } from "./components/AuthGate";
 import { Layout } from "./components/Layout";
 import { Onboarding } from "./components/Onboarding";
 import { DesignerPage } from "./pages/Designer";
@@ -13,7 +14,16 @@ import { diagnostics } from "./lib/diagnostics";
 // Reference page for shared components. Not bundled into production builds.
 const UiKitPage = import.meta.env.DEV ? lazy(() => import("./pages/UiKit")) : null;
 
+/** Nothing renders until there is a session the server accepts. */
 export default function App() {
+  return (
+    <AuthGate>
+      <AppContent />
+    </AuthGate>
+  );
+}
+
+function AppContent() {
   const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(() => {
     try { return localStorage.getItem("printninja-onboarding-complete") === "true"; } catch { return null; }
   });
