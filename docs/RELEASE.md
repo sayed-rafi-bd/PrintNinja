@@ -48,6 +48,24 @@ To rename the app, use the older script instead:
 `./scripts/release.sh --name "NewName" --version 1.0.0 --tag` (needs bash, python3 and
 GNU sed).
 
+### Fixing out-of-sync versions
+
+If `pnpm release` stops with `versions are out of sync before bumping`, the five files
+above disagree about the current version (a file shown as `(not found)` means its version
+could not be read). Bring them back in line with:
+
+```bash
+pnpm version:set 0.5.0           # set all five files to this version
+pnpm version:set 0.5.0 --dry-run # show which files would change, change nothing
+```
+
+`scripts/set-version.mjs` only edits the files. It does not commit, tag or push, and it
+does not run the release checks. Set it to the **current** version you want to release
+from, then run `pnpm release` as usual. Do not set the new version first and then run
+`pnpm release` with the same number: the release script requires the new version to be
+higher than the current one. Review the result with `git diff` before you release,
+because the release script refuses a dirty working tree, so commit the change first.
+
 ## 2. Sign app locally (for now)
 
 ### Windows (MSI)

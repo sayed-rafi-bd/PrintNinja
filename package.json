@@ -19,6 +19,7 @@
     "build:templates:css": "node scripts/build-template-css.mjs",
     "prebuild": "pnpm build:templates:css",
     "release": "node scripts/release.mjs",
+    "version:set": "node scripts/set-version.mjs",
     "release:patch": "node scripts/release.mjs patch",
     "release:minor": "node scripts/release.mjs minor",
     "release:major": "node scripts/release.mjs major"
