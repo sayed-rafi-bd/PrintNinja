@@ -19,12 +19,24 @@ pub use error::{AppError, AppResult};
 // Re-exported so integration tests can assert API-key verification.
 pub use commands::api::verify_api_key;
 
+/// Wraps the generated command handler so every IPC call is logged.
+/// A generic fn (rather than a `let`) lets the compiler infer the closure's
+/// `Invoke<R>` parameter type, which `generate_handler!` leaves unannotated.
+fn with_ipc_logging<R: tauri::Runtime>(
+    handler: impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static,
+) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    move |invoke| {
+        tracing::info!(command = %invoke.message.command(), "ipc call");
+        handler(invoke)
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("printninja=info".parse().unwrap()),
+                .add_directive("printninja_lib=info".parse().unwrap()),
         )
         .init();
 
@@ -62,11 +74,24 @@ pub fn run() {
             // One shared print queue for the whole app, so the Tauri command
             // handlers, the REST API routes, and batch jobs all serialise
             // per printer instead of interleaving bytes on a thermal head.
-            let (queue, _rx) = queue::PrintQueue::new();
+            let (queue, mut rx) = queue::PrintQueue::new();
             app.manage(queue);
+
+            // `PrintQueue::submit` is an admission gate and fails with
+            // "channel closed" as soon as the receiver is dropped. The old
+            // `_rx` binding was dropped at the end of this closure, so every
+            // print was rejected. Nothing consumes jobs from the channel yet
+            // (sending happens inline under the per-printer permit), so keep
+            // the receiver alive and drain it. Without a drain the channel
+            // would also fill up after QUEUE_CAPACITY jobs and block submits.
+            tauri::async_runtime::spawn(async move {
+                while let Some(job) = rx.recv().await {
+                    tracing::debug!(job_id = %job.job_id, printer = %job.printer_id, "queue job admitted");
+                }
+            });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(with_ipc_logging(tauri::generate_handler![
             commands::ping,
             commands::printer::list_printers,
             commands::printer::add_printer,
@@ -115,7 +140,7 @@ pub fn run() {
             commands::api::get_api_status,
             commands::api::regenerate_api_key,
             commands::deeplink_cmd::parse_deeplink,
-        ])
+        ]))
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

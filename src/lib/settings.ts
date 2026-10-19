@@ -7,7 +7,7 @@ const lsKey = (key: string) => `printninja-setting:${key}`;
 
 export async function readSetting(key: string): Promise<string | null> {
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
+    const { invoke } = await import("@/lib/invoke");
     const v = await invoke<string | null>("get_setting", { key });
     if (v != null && v !== "") return v;
   } catch {
@@ -28,7 +28,7 @@ export async function writeSetting(key: string, value: string): Promise<void> {
     /* storage unavailable */
   }
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
+    const { invoke } = await import("@/lib/invoke");
     await invoke("set_setting", { key, value });
   } catch {
     /* kept in localStorage */

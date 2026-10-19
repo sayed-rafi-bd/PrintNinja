@@ -3,7 +3,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Bookmark, Download, Eye, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataTable } from "@/components/DataTable";
 import { PageHeader } from "@/components/PageHeader";

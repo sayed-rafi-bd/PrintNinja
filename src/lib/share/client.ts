@@ -11,7 +11,7 @@ const SETTINGS_KEYS = {
 
 async function getSetting(key: string): Promise<string | null> {
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
+    const { invoke } = await import("@/lib/invoke");
     return await invoke<string | null>("get_setting", { key });
   } catch {
     try {
@@ -24,7 +24,7 @@ async function getSetting(key: string): Promise<string | null> {
 
 async function setSetting(key: string, value: string | null): Promise<void> {
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
+    const { invoke } = await import("@/lib/invoke");
     if (value === null) {
       // No delete_setting command; set to empty and treat as missing on read
       await invoke("set_setting", { key, value: "" });

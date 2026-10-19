@@ -6,7 +6,7 @@ authors = ["PrintNinja"]
 edition = "2021"
 
 [lib]
-name = "printninja"
+name = "printninja_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

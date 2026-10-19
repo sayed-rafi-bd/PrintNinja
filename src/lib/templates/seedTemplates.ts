@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import { STARTER_TEMPLATES } from "@/lib/templates/defaultTemplate";
 
 export interface TemplateRow {

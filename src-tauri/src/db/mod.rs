@@ -78,5 +78,12 @@ pub fn ensure_v2_schema(conn: &mut Connection) -> rusqlite::Result<()> {
         [],
     )?;
 
+    // `regenerate_api_key` upserts with ON CONFLICT(name), which SQLite only
+    // accepts when `name` has a UNIQUE constraint/index.
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_api_clients_name ON api_clients(name)",
+        [],
+    )?;
+
     Ok(())
 }

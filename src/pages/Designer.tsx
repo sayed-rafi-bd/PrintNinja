@@ -4,7 +4,7 @@ import { DesignerSidebar } from "@/components/designer/DesignerSidebar";
 import { DesignerToolbar } from "@/components/designer/DesignerToolbar";
 import { TemplateSyncBar } from "@/components/designer/TemplateSyncBar";
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

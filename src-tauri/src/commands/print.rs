@@ -106,6 +106,27 @@ fn resolve_template(
     Ok((html, css, version_id, w as f64, h as f64))
 }
 
+/// Bundled print stylesheets, byte-identical to what the Designer/Print
+/// preview inlines (`buildTemplateCss` in `src/lib/templates/templateCss.ts`).
+///
+/// Templates are authored with Tailwind utility classes (`text-xs`,
+/// `border-b-2`, `flex`, ...) and store little or no CSS of their own, so
+/// without these the PDF comes out completely unstyled even though the
+/// preview looks right. `template-print.css` is regenerated together with
+/// `templates.generated.ts` by `pnpm build:templates:css`.
+const TEMPLATE_BASE_CSS: &str = include_str!("../../assets/template-base.css");
+const TEMPLATE_PRINT_CSS: &str = include_str!("../../assets/template-print.css");
+
+/// Base reset, then the Tailwind bundle, then the template's own CSS last so
+/// it wins (same order as the frontend).
+fn build_template_css(user_css: &str) -> String {
+    let mut parts = vec![TEMPLATE_BASE_CSS.trim(), TEMPLATE_PRINT_CSS.trim()];
+    if !user_css.trim().is_empty() {
+        parts.push(user_css);
+    }
+    parts.join("\n")
+}
+
 /// Build the final HTML with `@page` size + margins injected so the PDF
 /// renderer honours the layout form (PLANNING.md 7.7 profile settings).
 pub fn apply_layout(html: &str, css: &str, w_mm: f64, h_mm: f64, req: &PrintRequest) -> String {
@@ -137,7 +158,11 @@ pub fn apply_layout(html: &str, css: &str, w_mm: f64, h_mm: f64, req: &PrintRequ
     // dropped entirely whenever the HTML was a full document (which every
     // bundled starter template is), so custom styling never reached the
     // printer. User CSS first so the @page/fit rules win.
-    let styles = format!("{cleaned_css}\n{page_rule}\n{fit_rule}");
+    // Chromium drops background colours/images when printing unless told
+    // otherwise, which looks like "CSS not applied" (shaded headers, table
+    // fills, badges vanish). Force them on for every element.
+    let color_rule = "*{-webkit-print-color-adjust:exact;print-color-adjust:exact;}";
+    let styles = format!("{cleaned_css}\n{page_rule}\n{fit_rule}\n{color_rule}");
 
     if let Some(idx) = html.find("</head>") {
         format!("{}<style>{}</style>{}", &html[..idx], styles, &html[idx..])
@@ -155,16 +180,30 @@ fn strip_at_page(css: &str) -> String {
     while let Some(idx) = rest.find("@page") {
         out.push_str(&rest[..idx]);
         let after = &rest[idx..];
-        match after.find('{') {
-            Some(brace) => match after.find('}') {
-                Some(close) if close > brace => {
-                    rest = &after[close + 1..];
+        let Some(open) = after.find('{') else {
+            rest = "";
+            break;
+        };
+        // Match braces by depth: `@page { @bottom-center { ... } }` nests, and
+        // stopping at the first `}` left a stray `}` that made the browser
+        // drop the next rule.
+        let mut depth = 0usize;
+        let mut end = None;
+        for (i, ch) in after[open..].char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(open + i + 1);
+                        break;
+                    }
                 }
-                _ => {
-                    rest = "";
-                    break;
-                }
-            },
+                _ => {}
+            }
+        }
+        match end {
+            Some(e) => rest = &after[e..],
             None => {
                 rest = "";
                 break;
@@ -217,7 +256,7 @@ pub async fn run_print(
                 .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
             let conn = guard.connection()?;
             let (h, c, vid, tw, th) = resolve_template(&conn, tid, req.template_version_id)?;
-            (h, c, Some(vid), tw, th)
+            (h, build_template_css(&c), Some(vid), tw, th)
         }
         None => (
             req.html.clone(),
@@ -321,6 +360,13 @@ pub async fn run_print(
     let printer_type =
         crate::transport::parse_printer_type(printer.as_ref().map_or("", |p| p.0.as_str()));
     let address = printer.as_ref().map_or("", |p| p.1.as_str());
+    tracing::info!(
+        printer = %req.printer_name,
+        ?printer_type,
+        %address,
+        found = printer.is_some(),
+        "sending print job"
+    );
 
     // Hold this printer's permit across the whole send. Two jobs for the
     // same physical printer must never overlap, or their bytes interleave
@@ -371,7 +417,10 @@ pub async fn run_print(
     let duration = start.elapsed().as_millis();
     let (status, err) = match result {
         Ok(()) => ("success", None),
-        Err(e) => ("failed", Some(e)),
+        Err(e) => {
+            tracing::error!(printer = %req.printer_name, error = %e, "print send failed");
+            ("failed", Some(e))
+        }
     };
 
     // ── 6. History ──────────────────────────────────────────────────
@@ -402,7 +451,7 @@ pub fn lookup_printer(db: &DbState, name: &str) -> Option<(String, String)> {
     let guard = db.lock().ok()?;
     let conn = guard.connection().ok()?;
     conn.query_row(
-        "SELECT printer_type, COALESCE(address, '') FROM printers WHERE name = ?1 COLLATE NOCASE",
+        "SELECT type, COALESCE(address, '') FROM printers WHERE name = ?1 COLLATE NOCASE",
         [name],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )
@@ -630,6 +679,24 @@ mod tests {
         assert!(!cleaned.contains("@page"), "{}", cleaned);
         assert!(cleaned.contains("color:red"));
         assert!(cleaned.contains("p{margin:0}"));
+    }
+
+    #[test]
+    fn strip_at_page_handles_nested_margin_boxes() {
+        let css = "@page { margin: 4mm; @bottom-center { content: counter(page); } }\n* { box-sizing: border-box; }";
+        let cleaned = strip_at_page(css);
+        assert!(!cleaned.contains("@page"), "{}", cleaned);
+        assert!(!cleaned.contains("counter(page)"), "{}", cleaned);
+        assert!(cleaned.contains("* { box-sizing: border-box; }"), "{}", cleaned);
+        assert_eq!(cleaned.matches('}').count(), cleaned.matches('{').count(), "{}", cleaned);
+    }
+
+    #[test]
+    fn template_css_includes_tailwind_bundle_and_user_css_last() {
+        let css = build_template_css(".brand{color:#f00}");
+        assert!(css.contains(".text-xs"), "tailwind bundle missing");
+        assert!(css.contains(".border-b-2"), "tailwind bundle missing");
+        assert!(css.trim_end().ends_with(".brand{color:#f00}"));
     }
 
     #[test]

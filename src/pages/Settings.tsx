@@ -4,7 +4,7 @@ import { AppearanceSettings } from "@/components/AppearanceSettings";
 import { PageHeader } from "@/components/PageHeader";
 import { SetupChecklist } from "@/components/SetupChecklist";
 import { parseSection, type SettingsSection } from "@/lib/setup/checklist";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,7 @@ import {
 import { toast } from "sonner";
 import { diagnostics } from "@/lib/diagnostics";
 import * as share from "@/lib/share/client";
+import { normalizeServiceUrl } from "@/lib/share/session";
 
 interface ApiStatus {
   running: boolean;
@@ -303,7 +304,26 @@ export function SettingsPage() {
   };
 
   const saveShareUrl = async () => {
-    await share.setServiceUrl(shareUrl.trim() || null);
+    const typed = shareUrl.trim();
+    const next = typed ? normalizeServiceUrl(typed) : null;
+    if (typed && !next) {
+      toast.error("Enter the full address, starting with http:// or https://");
+      return;
+    }
+    const current = await share.getServiceUrl();
+    if (next === current) {
+      toast.success("Service URL unchanged");
+      return;
+    }
+    const hadSession = !!(await share.getSessionToken());
+    await share.setServiceUrl(next);
+    setShareUrl(next ?? "");
+    if (hadSession) {
+      // The session token belongs to the old server. Drop it and return to the
+      // sign-in screen, which is prefilled with the new address.
+      setShareUser(null);
+      await share.endSession("signed_out");
+    }
     toast.success("Service URL saved");
   };
 

@@ -1,0 +1,15 @@
+@page{margin:0}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:"Segoe UI",Roboto,"Noto Sans",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;color:#0f172a;line-height:1.4;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+table{border-collapse:collapse;width:100%}
+img,svg{max-width:100%}
+svg{shape-rendering:crispEdges}
+.barcode{text-align:center;margin:2mm 0}
+.barcode svg{display:inline-block;vertical-align:middle}
+.page-break-before{break-before:page;page-break-before:always}
+.page-break-after{break-after:page;page-break-after:always}
+.page-break-inside-avoid{break-inside:avoid;page-break-inside:avoid}
+.no-print{display:none!important}
+.print-only{display:none}
+@media print{.print-only{display:block}body{min-height:0}}
