@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { DesignerSidebar } from "@/components/designer/DesignerSidebar";
 import { DesignerToolbar } from "@/components/designer/DesignerToolbar";
 import { TemplateSyncBar } from "@/components/designer/TemplateSyncBar";
+import { ClassWarnings } from "@/components/designer/ClassWarnings";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@/lib/invoke";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -701,6 +702,7 @@ export function DesignerPage() {
           />
 
           <TabsContent value={activeTab} className="mt-0 space-y-4">
+          {activeTab !== "readme" && <ClassWarnings html={debouncedHtml} />}
           {activeTab === "canvas" && (
             <Card>
               <CardContent className="p-0">
