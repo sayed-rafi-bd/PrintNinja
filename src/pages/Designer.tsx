@@ -44,6 +44,8 @@ import { BARCODE_TYPES, validateBarcode, buildBarcodeHtml } from "@/lib/utils/ba
 import { DEFAULT_TEMPLATE_HTML, DEFAULT_TEMPLATE_CSS, DEFAULT_MOCK_DATA, STARTER_TEMPLATES } from "@/lib/templates/defaultTemplate";
 import { VisualDesigner } from "@/components/VisualDesigner";
 import { renderTemplate } from "@/lib/render/renderTemplate";
+import { compiledFields } from "@/lib/templates/compileTemplateCss";
+import { useCompiledCss } from "@/lib/templates/useCompiledCss";
 import { formatCss, formatHtml } from "@/lib/utils/format";
 import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
 import { ReadmeEditor } from "@/components/ReadmeEditor";
@@ -107,6 +109,7 @@ export function DesignerPage() {
     }, 300);
     return () => clearTimeout(id);
   }, [htmlCode, cssCode]);
+  const compiledCss = useCompiledCss(debouncedHtml);
 
 
   // Templates available in the designer — persisted in SQLite via
@@ -196,6 +199,7 @@ export function DesignerPage() {
           template_id: currentTemplateDbId,
           html: htmlCode,
           css: cssCode,
+          ...(await compiledFields(htmlCode)),
           label: null,
           note: null,
           created_by: "manual",
@@ -320,6 +324,7 @@ export function DesignerPage() {
           orientation: STARTER_TEMPLATES[0].orientation,
           html: DEFAULT_TEMPLATE_HTML,
           css: DEFAULT_TEMPLATE_CSS,
+          ...(await compiledFields(DEFAULT_TEMPLATE_HTML)),
         },
       });
       const tpl = {
@@ -512,6 +517,7 @@ export function DesignerPage() {
           template_id: currentTemplateDbId,
           html: htmlCode,
           css: cssCode,
+          ...(await compiledFields(htmlCode)),
           label: versionLabel || null,
           note: versionNote || null,
           created_by: "manual",
@@ -716,6 +722,7 @@ export function DesignerPage() {
                             return DEFAULT_MOCK_DATA;
                           }
                         })(),
+                        compiledCss,
                       )}
                       sandbox=""
                       className="pointer-events-none"
@@ -819,7 +826,7 @@ export function DesignerPage() {
                 <div className="flex items-center justify-center min-h-[500px] bg-muted rounded-b-lg">
                   <div className="bg-white shadow-lg border overflow-auto" style={{ width: pageWidth * MM_TO_PX, minHeight: pageHeight * MM_TO_PX }}>
                     <iframe
-                      srcDoc={renderTemplate(htmlCode, cssCode, DEFAULT_MOCK_DATA as any)}
+                      srcDoc={renderTemplate(htmlCode, cssCode, DEFAULT_MOCK_DATA as any, compiledCss)}
                       sandbox=""
                       className="w-full border-0"
                       style={{ height: pageHeight * MM_TO_PX, width: "100%" }}

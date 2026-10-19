@@ -73,6 +73,21 @@ pub fn ensure_v2_schema(conn: &mut Connection) -> rusqlite::Result<()> {
         )?;
     }
 
+    // Per-template compiled Tailwind CSS. Empty means "not compiled yet", and
+    // printing falls back to the shared bundle, so old rows keep working.
+    if !column_exists(conn, "template_versions", "compiled_css")? {
+        conn.execute(
+            "ALTER TABLE template_versions ADD COLUMN compiled_css TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "template_versions", "compiled_key")? {
+        conn.execute(
+            "ALTER TABLE template_versions ADD COLUMN compiled_key TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_templates_remote ON templates(remote_id)",
         [],

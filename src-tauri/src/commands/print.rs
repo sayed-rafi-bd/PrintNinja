@@ -66,11 +66,12 @@ pub struct PrintResponse {
 }
 
 /// Load template HTML/CSS for a job (pinned version, or current version).
+/// The tuple is `(html, css, compiled_css, version_id, width_mm, height_mm)`.
 fn resolve_template(
     conn: &rusqlite::Connection,
     template_id: i64,
     version_id: Option<i64>,
-) -> AppResult<(String, String, i64, f64, f64)> {
+) -> AppResult<(String, String, String, i64, f64, f64)> {
     let version_id = match version_id {
         Some(v) => v,
         None => {
@@ -87,11 +88,11 @@ fn resolve_template(
         }
     };
 
-    let (html, css): (String, String) = conn
+    let (html, css, compiled_css): (String, String, String) = conn
         .query_row(
-            "SELECT html, css FROM template_versions WHERE id = ?1 AND template_id = ?2",
+            "SELECT html, css, compiled_css FROM template_versions WHERE id = ?1 AND template_id = ?2",
             [version_id, template_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .map_err(|_| AppError::NotFound(format!("Version {} not found", version_id)))?;
 
@@ -103,7 +104,7 @@ fn resolve_template(
         )
         .map_err(|_| AppError::NotFound(format!("Template {} not found", template_id)))?;
 
-    Ok((html, css, version_id, w as f64, h as f64))
+    Ok((html, css, compiled_css, version_id, w as f64, h as f64))
 }
 
 /// Bundled print stylesheets, byte-identical to what the Designer/Print
@@ -117,10 +118,19 @@ fn resolve_template(
 const TEMPLATE_BASE_CSS: &str = include_str!("../../assets/template-base.css");
 const TEMPLATE_PRINT_CSS: &str = include_str!("../../assets/template-print.css");
 
-/// Base reset, then the Tailwind bundle, then the template's own CSS last so
-/// it wins (same order as the frontend).
-fn build_template_css(user_css: &str) -> String {
-    let mut parts = vec![TEMPLATE_BASE_CSS.trim(), TEMPLATE_PRINT_CSS.trim()];
+/// Base reset, then the Tailwind stylesheet, then the template's own CSS last
+/// so it wins (same order as the frontend).
+///
+/// The Tailwind stylesheet is the template's own compiled CSS when it has one,
+/// otherwise the shared bundle, so versions saved before per-template
+/// compilation print exactly as they did.
+fn build_template_css(user_css: &str, compiled_css: &str) -> String {
+    let tailwind = if compiled_css.trim().is_empty() {
+        TEMPLATE_PRINT_CSS.trim()
+    } else {
+        compiled_css.trim()
+    };
+    let mut parts = vec![TEMPLATE_BASE_CSS.trim(), tailwind];
     if !user_css.trim().is_empty() {
         parts.push(user_css);
     }
@@ -255,8 +265,9 @@ pub async fn run_print(
                 .lock()
                 .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
             let conn = guard.connection()?;
-            let (h, c, vid, tw, th) = resolve_template(&conn, tid, req.template_version_id)?;
-            (h, build_template_css(&c), Some(vid), tw, th)
+            let (h, c, compiled, vid, tw, th) =
+                resolve_template(&conn, tid, req.template_version_id)?;
+            (h, build_template_css(&c, &compiled), Some(vid), tw, th)
         }
         None => (
             req.html.clone(),
@@ -702,10 +713,28 @@ mod tests {
 
     #[test]
     fn template_css_includes_tailwind_bundle_and_user_css_last() {
-        let css = build_template_css(".brand{color:#f00}");
+        let css = build_template_css(".brand{color:#f00}", "");
         assert!(css.contains(".text-xs"), "tailwind bundle missing");
         assert!(css.contains(".border-b-2"), "tailwind bundle missing");
         assert!(css.trim_end().ends_with(".brand{color:#f00}"));
+    }
+
+    #[test]
+    fn compiled_css_replaces_the_shared_bundle() {
+        let css = build_template_css(".brand{color:#f00}", ".w-\\[37mm\\]{width:37mm}");
+        assert!(css.contains("37mm"), "compiled css missing");
+        // The shared bundle is a fallback, not an addition: it would add ~57 KB
+        // to every job and could override the compiled rules.
+        assert!(!css.contains(".border-b-2"), "shared bundle still present");
+        // Base reset first, template's own CSS last.
+        assert!(css.starts_with(TEMPLATE_BASE_CSS.trim()));
+        assert!(css.trim_end().ends_with(".brand{color:#f00}"));
+    }
+
+    #[test]
+    fn blank_compiled_css_falls_back_to_the_shared_bundle() {
+        let css = build_template_css("", "  \n ");
+        assert!(css.contains(".border-b-2"), "fallback bundle missing");
     }
 
     #[test]

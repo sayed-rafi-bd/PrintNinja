@@ -6,6 +6,7 @@
  * printing. The server copy is reached through the local row's `remote_id`.
  */
 import { invoke } from "@/lib/invoke";
+import { compiledFields } from "@/lib/templates/compileTemplateCss";
 import {
   fetchMyRemoteTemplates,
   fetchRemoteTemplate,
@@ -124,6 +125,7 @@ export async function refreshFromServer(template: SyncTemplate): Promise<Refresh
       template_id: template.id,
       html: remote.body ?? "",
       css: remote.css ?? "",
+      ...(await compiledFields(remote.body ?? "")),
       label: "Refreshed from server",
       note: null,
       created_by: "sync",
@@ -195,6 +197,7 @@ export async function downloadToLocal(
         orientation: remote.page_w_mm > remote.page_h_mm ? "landscape" : "portrait",
         html: remote.body ?? "",
         css: remote.css ?? "",
+        ...(await compiledFields(remote.body ?? "")),
         readme: remote.readme ?? "",
         summary: remote.summary ?? "",
       },

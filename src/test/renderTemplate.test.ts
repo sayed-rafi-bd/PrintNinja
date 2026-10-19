@@ -278,3 +278,32 @@ describe("wrapWithTailwind", () => {
     expect(out).toContain("<style data-printninja>");
   });
 });
+
+describe("per-template compiled CSS", () => {
+  const COMPILED = ".w-\\[37mm\\]{width:37mm}";
+
+  it("replaces the shared bundle when compiled CSS is given", () => {
+    const doc = renderTemplate("<p class='w-[37mm]'>x</p>", "", {}, COMPILED);
+    expect(doc).toContain(COMPILED);
+    // The bundle is a fallback, not an addition.
+    expect(doc).not.toContain(TEMPLATE_PRINT_CSS.slice(0, 200));
+  });
+
+  it("keeps the base reset first and the template's own CSS last", () => {
+    const doc = renderTemplate("<p>x</p>", ".brand{color:#f00}", {}, COMPILED);
+    const base = doc.indexOf("box-sizing:border-box");
+    const compiled = doc.indexOf(COMPILED);
+    const own = doc.indexOf(".brand{color:#f00}");
+    expect(base).toBeGreaterThanOrEqual(0);
+    expect(compiled).toBeGreaterThan(base);
+    expect(own).toBeGreaterThan(compiled);
+  });
+
+  it.each([undefined, null, "", "  \n "])(
+    "falls back to the shared bundle for %j",
+    (blank) => {
+      const doc = renderTemplate("<p>x</p>", "", {}, blank as string | null | undefined);
+      expect(doc).toContain(TEMPLATE_PRINT_CSS.slice(0, 200));
+    },
+  );
+});

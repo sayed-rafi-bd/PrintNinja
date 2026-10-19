@@ -14,6 +14,32 @@ pub struct TemplateVersion {
     pub note: Option<String>,
     pub created_at: String,
     pub created_by: String,
+    /// Tailwind CSS compiled from this version's HTML, or empty when it has
+    /// not been compiled (printing then uses the shared bundle).
+    #[serde(default)]
+    pub compiled_css: String,
+    /// Class-set hash plus compiler revision the stylesheet was built from.
+    #[serde(default)]
+    pub compiled_key: String,
+}
+
+const VERSION_COLUMNS: &str =
+    "id, template_id, version_no, html, css, label, note, created_at, created_by, compiled_css, compiled_key";
+
+fn map_version(row: &rusqlite::Row) -> rusqlite::Result<TemplateVersion> {
+    Ok(TemplateVersion {
+        id: row.get(0)?,
+        template_id: row.get(1)?,
+        version_no: row.get(2)?,
+        html: row.get(3)?,
+        css: row.get(4)?,
+        label: row.get(5)?,
+        note: row.get(6)?,
+        created_at: row.get(7)?,
+        created_by: row.get(8)?,
+        compiled_css: row.get(9)?,
+        compiled_key: row.get(10)?,
+    })
 }
 
 /// `sync` marks the version a Refresh from the server produced, so history
@@ -28,27 +54,11 @@ pub fn list_versions(db: State<DbState>, template_id: i64) -> AppResult<Vec<Temp
     let conn = guard.connection()?;
 
     let mut stmt = conn.prepare(
-        "SELECT id, template_id, version_no, html, css, label, note,
-                created_at, created_by
-         FROM template_versions
-         WHERE template_id = ?1
-         ORDER BY version_no DESC",
+        &format!("SELECT {VERSION_COLUMNS} FROM template_versions WHERE template_id = ?1 ORDER BY version_no DESC"),
     )?;
 
     let versions = stmt
-        .query_map([template_id], |row| {
-            Ok(TemplateVersion {
-                id: row.get(0)?,
-                template_id: row.get(1)?,
-                version_no: row.get(2)?,
-                html: row.get(3)?,
-                css: row.get(4)?,
-                label: row.get(5)?,
-                note: row.get(6)?,
-                created_at: row.get(7)?,
-                created_by: row.get(8)?,
-            })
-        })?
+        .query_map([template_id], map_version)?
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(versions)
@@ -62,6 +72,10 @@ pub struct CreateVersionRequest {
     pub label: Option<String>,
     pub note: Option<String>,
     pub created_by: Option<String>,
+    #[serde(default)]
+    pub compiled_css: Option<String>,
+    #[serde(default)]
+    pub compiled_key: Option<String>,
 }
 
 #[tauri::command]
@@ -106,8 +120,9 @@ pub fn create_version(db: State<DbState>, req: CreateVersionRequest) -> AppResul
 
     tx.execute(
         "INSERT INTO template_versions
-           (template_id, version_no, html, css, label, note, created_by)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+           (template_id, version_no, html, css, label, note, created_by,
+            compiled_css, compiled_key)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         rusqlite::params![
             req.template_id,
             next_no,
@@ -116,6 +131,8 @@ pub fn create_version(db: State<DbState>, req: CreateVersionRequest) -> AppResul
             req.label,
             req.note,
             created_by,
+            req.compiled_css.unwrap_or_default(),
+            req.compiled_key.unwrap_or_default(),
         ],
     )?;
     let version_id = tx.last_insert_rowid();
@@ -129,23 +146,9 @@ pub fn create_version(db: State<DbState>, req: CreateVersionRequest) -> AppResul
     tx.commit()?;
 
     let version = conn.query_row(
-        "SELECT id, template_id, version_no, html, css, label, note,
-                created_at, created_by
-         FROM template_versions WHERE id = ?1",
+        &format!("SELECT {VERSION_COLUMNS} FROM template_versions WHERE id = ?1"),
         [version_id],
-        |row| {
-            Ok(TemplateVersion {
-                id: row.get(0)?,
-                template_id: row.get(1)?,
-                version_no: row.get(2)?,
-                html: row.get(3)?,
-                css: row.get(4)?,
-                label: row.get(5)?,
-                note: row.get(6)?,
-                created_at: row.get(7)?,
-                created_by: row.get(8)?,
-            })
-        },
+        map_version,
     )?;
 
     Ok(version)
@@ -161,10 +164,17 @@ pub fn restore_version(db: State<DbState>, id: i64) -> AppResult<TemplateVersion
     let mut conn = guard.connection()?;
     let tx = conn.transaction()?;
 
-    let (template_id, html, css): (i64, String, String) = tx.query_row(
-        "SELECT template_id, html, css FROM template_versions WHERE id = ?1",
+    let (template_id, html, css, compiled_css, compiled_key): (
+        i64,
+        String,
+        String,
+        String,
+        String,
+    ) = tx.query_row(
+        "SELECT template_id, html, css, compiled_css, compiled_key
+             FROM template_versions WHERE id = ?1",
         [id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
     )?;
 
     let next_no: i64 = tx.query_row(
@@ -175,14 +185,17 @@ pub fn restore_version(db: State<DbState>, id: i64) -> AppResult<TemplateVersion
 
     tx.execute(
         "INSERT INTO template_versions
-           (template_id, version_no, html, css, label, note, created_by)
-         VALUES (?1, ?2, ?3, ?4, 'Restored', ?5, 'restore')",
+           (template_id, version_no, html, css, label, note, created_by,
+            compiled_css, compiled_key)
+         VALUES (?1, ?2, ?3, ?4, 'Restored', ?5, 'restore', ?6, ?7)",
         rusqlite::params![
             template_id,
             next_no,
             html,
             css,
-            format!("restored from version id {}", id)
+            format!("restored from version id {}", id),
+            compiled_css,
+            compiled_key,
         ],
     )?;
     let new_id = tx.last_insert_rowid();
@@ -196,23 +209,9 @@ pub fn restore_version(db: State<DbState>, id: i64) -> AppResult<TemplateVersion
     tx.commit()?;
 
     let version = conn.query_row(
-        "SELECT id, template_id, version_no, html, css, label, note,
-                created_at, created_by
-         FROM template_versions WHERE id = ?1",
+        &format!("SELECT {VERSION_COLUMNS} FROM template_versions WHERE id = ?1"),
         [new_id],
-        |row| {
-            Ok(TemplateVersion {
-                id: row.get(0)?,
-                template_id: row.get(1)?,
-                version_no: row.get(2)?,
-                html: row.get(3)?,
-                css: row.get(4)?,
-                label: row.get(5)?,
-                note: row.get(6)?,
-                created_at: row.get(7)?,
-                created_by: row.get(8)?,
-            })
-        },
+        map_version,
     )?;
 
     Ok(version)

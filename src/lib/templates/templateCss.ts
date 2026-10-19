@@ -39,13 +39,23 @@ svg{shape-rendering:crispEdges}
 @media print{.print-only{display:block}body{min-height:0}}`;
 
 /**
- * Combine the base print CSS with the generated Tailwind bundle.
+ * Combine the base print CSS with a Tailwind stylesheet.
  *
- * Base rules come first so the Tailwind utilities layer can override them,
- * and so caller-supplied CSS (appended last) always wins.
+ * The Tailwind stylesheet is the template's own compiled CSS when it has one
+ * (see `compileTemplateCss`), otherwise the shared bundle. It is a
+ * replacement, not an addition: the bundle would add ~57 KB to every job and
+ * could override the compiled rules. The Rust print path makes the same choice
+ * (`build_template_css`), so preview and print agree.
+ *
+ * Base rules come first so the Tailwind utilities can override them, and so
+ * caller-supplied CSS (appended last) always wins.
  */
-export function buildTemplateCss(userCss?: string | null): string {
-  const parts = [TEMPLATE_BASE_CSS, TEMPLATE_PRINT_CSS];
+export function buildTemplateCss(
+  userCss?: string | null,
+  compiledCss?: string | null,
+): string {
+  const tailwind = compiledCss && compiledCss.trim() ? compiledCss : TEMPLATE_PRINT_CSS;
+  const parts = [TEMPLATE_BASE_CSS, tailwind];
   if (userCss && userCss.trim()) parts.push(userCss);
   return parts.join("\n");
 }

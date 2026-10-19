@@ -227,6 +227,124 @@ fn restore_creates_new_version_not_overwrite() {
 }
 
 // ───────────────────────────────────────────────────────────────
+// per-template compiled CSS
+// ───────────────────────────────────────────────────────────────
+
+fn version_columns(conn: &Connection) -> Vec<String> {
+    let mut stmt = conn
+        .prepare("PRAGMA table_info(template_versions)")
+        .unwrap();
+    stmt.query_map([], |r| r.get::<_, String>(1))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+}
+
+#[test]
+fn compiled_css_columns_are_added_to_an_existing_database() {
+    // A database created before per-template compilation: schema.sql alone has
+    // no compiled_* columns, and already holds a saved version.
+    let mut conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(include_str!("../src/db/schema.sql"))
+        .unwrap();
+    assert!(!version_columns(&conn).contains(&"compiled_css".to_string()));
+
+    conn.execute(
+        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation)
+         VALUES ('Old', 120, 200, 'portrait')",
+        [],
+    )
+    .unwrap();
+    let tid = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
+         VALUES (?1, 1, '<p class=\"flex\">x</p>', '.a{b:c}', 'manual')",
+        [tid],
+    )
+    .unwrap();
+
+    printninja_lib::db::ensure_v2_schema(&mut conn).unwrap();
+
+    let cols = version_columns(&conn);
+    assert!(cols.contains(&"compiled_css".to_string()), "{cols:?}");
+    assert!(cols.contains(&"compiled_key".to_string()), "{cols:?}");
+
+    // Old rows read back as "not compiled", which makes printing fall back to
+    // the shared bundle, and their html/css are untouched.
+    let (html, css, compiled, key): (String, String, String, String) = conn
+        .query_row(
+            "SELECT html, css, compiled_css, compiled_key
+             FROM template_versions WHERE template_id = ?1",
+            [tid],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(html, "<p class=\"flex\">x</p>");
+    assert_eq!(css, ".a{b:c}");
+    assert_eq!(compiled, "");
+    assert_eq!(key, "");
+}
+
+#[test]
+fn compiled_css_migration_is_idempotent() {
+    let (_state, mut conn) = test_db();
+    let before = version_columns(&conn);
+    printninja_lib::db::ensure_v2_schema(&mut conn).unwrap();
+    printninja_lib::db::ensure_v2_schema(&mut conn).unwrap();
+    assert_eq!(version_columns(&conn), before);
+}
+
+#[test]
+fn compiled_css_is_stored_per_version_and_copied_on_restore() {
+    let (_state, conn) = test_db();
+
+    conn.execute(
+        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation)
+         VALUES ('T', 120, 200, 'portrait')",
+        [],
+    )
+    .unwrap();
+    let tid = conn.last_insert_rowid();
+
+    conn.execute(
+        "INSERT INTO template_versions
+           (template_id, version_no, html, css, created_by, compiled_css, compiled_key)
+         VALUES (?1, 1, '<p class=\"w-[37mm]\">x</p>', '', 'manual', '.w{width:37mm}', 'k1')",
+        [tid],
+    )
+    .unwrap();
+    // The next version has different html, so it carries different compiled CSS.
+    conn.execute(
+        "INSERT INTO template_versions
+           (template_id, version_no, html, css, created_by, compiled_css, compiled_key)
+         VALUES (?1, 2, '<p class=\"flex\">x</p>', '', 'manual', '.flex{display:flex}', 'k2')",
+        [tid],
+    )
+    .unwrap();
+
+    // Restoring v1 copies its html together with the CSS compiled from it.
+    conn.execute(
+        "INSERT INTO template_versions
+           (template_id, version_no, html, css, created_by, compiled_css, compiled_key)
+         SELECT template_id, 3, html, css, 'restore', compiled_css, compiled_key
+         FROM template_versions WHERE template_id = ?1 AND version_no = 1",
+        [tid],
+    )
+    .unwrap();
+
+    let (compiled, key): (String, String) = conn
+        .query_row(
+            "SELECT compiled_css, compiled_key FROM template_versions
+             WHERE template_id = ?1 AND version_no = 3",
+            [tid],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(compiled, ".w{width:37mm}");
+    assert_eq!(key, "k1");
+}
+
+// ───────────────────────────────────────────────────────────────
 // history
 // ───────────────────────────────────────────────────────────────
 

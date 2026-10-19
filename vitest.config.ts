@@ -9,6 +9,10 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     globals: true,
     exclude: ["**/node_modules/**", "**/dist/**"],
+    // Vitest replaces every .css import with an empty string, `?raw` included.
+    // The per-template compiler reads Tailwind's own stylesheets that way, so
+    // those (and only those) must come through intact.
+    css: { include: [/\/tailwindcss\/(theme|preflight|utilities)\.css/] },
   },
   resolve: {
     alias: {
