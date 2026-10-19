@@ -26,6 +26,7 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
             language    TEXT NOT NULL,
             body        TEXT NOT NULL,
             readme      TEXT NOT NULL DEFAULT '',
+            css         TEXT NOT NULL DEFAULT '',
             use_count   INTEGER NOT NULL DEFAULT 0,
             published_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at   TEXT NOT NULL DEFAULT (datetime('now'))

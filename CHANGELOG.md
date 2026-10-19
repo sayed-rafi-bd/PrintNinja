@@ -5,13 +5,25 @@ All notable changes to PrintNinja are documented here. The format is based on Ke
 ## [Unreleased] — Online-only server migration
 
 ### Added
-- **Sign-in gate (migration phase 2).** The app opens on a sign-in and register screen until the server accepts a session. The screen includes the server address, so a new PC can be set up without visiting Settings first.
+- **Save to server** (migration phase 1). The Designer and every Templates row push the local copy to the server, HTML and CSS together. A first Save stores the template private; Publish makes it visible in Community as before. `remote_id` comes back and links the two copies.
+- **Refresh from server**, one button per template, asks first because it overwrites unsaved local edits. On success it rewrites the local HTML, CSS, README, name, page size and summary; on failure it says so and leaves the local copy alone, so it still prints.
+- **Get from server** dialog on Templates: lists the account's own templates and the ones saved from Community, and adds the chosen ones to this PC with their CSS and README. This is how a new PC gets its templates.
 - **"Cannot reach the server" screen** with Retry and Change server address, shown when the server is down as the app starts.
 - A 401 from the server, or signing out, returns to sign-in. The app stays loaded behind the sign-in screen, so edits that are not saved yet are still there after signing in again.
 - Once the app is open the gate never blocks on the network, so printing keeps working if the server goes away.
+- Sign-in gate (migration phase 2): the app opens on a sign-in and register screen until the server accepts a session. The screen includes the server address, so a new PC can be set up without visiting Settings first.
 
 ### Changed
-- Share client requests go through one `authedFetch` helper that ends the session on 401 and reports an unreachable server as `ServerUnreachableError`.
+- Template CSS is stored on the server and returned with the HTML. Until now a published template lost its CSS on the way to another PC.
+- The Designer's publish strip is now a sync bar: Draft or Published, then **Save to server**, **Refresh from server** and **Publish to Community** / **Unpublish**. Each button says while it is working.
+- **Saved (community) copies are read-only.** They show Print, Refresh and Remove; there is no Edit, Save or Publish, and the Designer explains that they cannot be changed. Saving a copy now brings its CSS and README across too.
+- Templates rows show where a template stands: *Not on the server*, *Private*, *Published*, or *Changes not saved* when the local copy has edits the server has not.
+- A saved copy whose template is no longer on the server is marked *Withdrawn by author* in the tab, without touching the local row.
+- Share client requests go through one `authedFetch` helper that ends the session on 401 and reports an unreachable server as `ServerUnreachableError`. New helpers cover Get, Refresh, Save and the saved-template list.
+
+### Fixed
+- **The desktop app builds again.** `src-tauri/Cargo.toml` held a copy of the server's manifest, so the app crate failed to compile (`tauri_build` not found) and no desktop build, bundle or Rust test could run. The Tauri manifest is restored and matches `Cargo.lock`, which was intact. `cargo test` passes (133 tests).
+- Rust tests for the new commands (`src-tauri/tests/template_sync.rs`) and a guard that the print path grows no HTTP client (`print_path_offline.rs`), the check the migration plan asked for.
 
 ## [0.5.0] - 2026-10-19 — Corporate UI (phases 0–6)
 

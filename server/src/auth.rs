@@ -31,10 +31,7 @@ pub fn verify_password(hash: &str, password: &str) -> bool {
 pub fn generate_token() -> (String, String) {
     let mut bytes = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut bytes);
-    let token = base64::Engine::encode(
-        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-        &bytes,
-    );
+    let token = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, bytes);
     let hash = hash_token(&token);
     (token, hash)
 }
@@ -69,12 +66,11 @@ impl Throttle {
     }
 }
 
-/// Session info returned after auth.
+/// The identity behind a valid session token. The expiry is checked here, so it
+/// is not carried any further: the routes only ever need the user id.
 #[derive(Debug, Clone)]
 pub struct Session {
     pub user_id: String,
-    pub handle: String,
-    pub expires_at: DateTime<Utc>,
 }
 
 /// Validate Bearer token from header, return session if valid and not expired.
@@ -85,7 +81,7 @@ pub fn validate_session(
     let hash = hash_token(token);
     let mut stmt = conn
         .prepare(
-            "SELECT s.user_id, s.expires_at, u.handle \
+            "SELECT s.user_id, s.expires_at \
              FROM sessions s JOIN users u ON s.user_id = u.id \
              WHERE s.token_hash = ?1",
         )
@@ -96,7 +92,6 @@ pub fn validate_session(
     if let Some(row) = rows.next().map_err(|e| AppError::Internal(e.to_string()))? {
         let user_id: String = row.get(0).map_err(|e| AppError::Internal(e.to_string()))?;
         let expires_at_str: String = row.get(1).map_err(|e| AppError::Internal(e.to_string()))?;
-        let handle: String = row.get(2).map_err(|e| AppError::Internal(e.to_string()))?;
         let expires_at = expires_at_str
             .parse::<DateTime<Utc>>()
             .or_else(|_| {
@@ -108,11 +103,7 @@ pub fn validate_session(
         if expires_at < Utc::now() {
             return Err(AppError::Unauthorized("Session expired".into()));
         }
-        Ok(Session {
-            user_id,
-            handle,
-            expires_at,
-        })
+        Ok(Session { user_id })
     } else {
         Err(AppError::Unauthorized("Invalid token".into()))
     }

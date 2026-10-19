@@ -7,17 +7,14 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
-    routing::{delete, get, post, put},
+    routing::{get, post, put},
     Json, Router,
 };
 use chrono::{Duration, Utc};
 use error::AppError;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
@@ -111,7 +108,7 @@ async fn register(State(state): State<AppState>, headers: HeaderMap, Json(req): 
         t.check_and_record(&format!("register:ip:{ip}"))?;
     }
 
-    let mut conn = state.db.lock().await;
+    let conn = state.db.lock().await;
     // Check handle exists (case-insensitive due to COLLATE NOCASE)
     let exists: i64 = conn
         .query_row("SELECT COUNT(*) FROM users WHERE handle = ?1", [&handle], |r| r.get(0))
@@ -153,7 +150,7 @@ async fn login(State(state): State<AppState>, headers: HeaderMap, Json(req): Jso
         t.check_and_record(&format!("login:ip:{ip}"))?;
     }
 
-    let mut conn = state.db.lock().await;
+    let conn = state.db.lock().await;
     let mut stmt = conn
         .prepare("SELECT id, handle, password_hash, created_at FROM users WHERE handle = ?1 COLLATE NOCASE")
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -252,6 +249,7 @@ struct Template {
     page_h_mm: f64,
     language: String,
     body: String,
+    css: String,
     readme: String,
     use_count: i64,
     published_at: String,
@@ -370,7 +368,7 @@ async fn get_template(State(state): State<AppState>, headers: HeaderMap, Path(id
         Err(_) => None,
     };
     let mut stmt = conn
-        .prepare("SELECT t.id, t.owner_id, u.handle, t.name, t.summary, t.page_w_mm, t.page_h_mm, t.language, t.body, t.readme, t.use_count, t.published_at, t.updated_at FROM templates t JOIN users u ON t.owner_id = u.id WHERE t.id = ?1")
+        .prepare("SELECT t.id, t.owner_id, u.handle, t.name, t.summary, t.page_w_mm, t.page_h_mm, t.language, t.body, t.readme, t.css, t.use_count, t.published_at, t.updated_at FROM templates t JOIN users u ON t.owner_id = u.id WHERE t.id = ?1")
         .map_err(|e| AppError::Internal(e.to_string()))?;
     let mut rows = stmt.query([&id]).map_err(|e| AppError::Internal(e.to_string()))?;
     let Some(row) = rows.next().map_err(|e| AppError::Internal(e.to_string()))? else {
@@ -387,9 +385,10 @@ async fn get_template(State(state): State<AppState>, headers: HeaderMap, Path(id
         language: row.get(7).map_err(|e| AppError::Internal(e.to_string()))?,
         body: row.get(8).map_err(|e| AppError::Internal(e.to_string()))?,
         readme: row.get(9).map_err(|e| AppError::Internal(e.to_string()))?,
-        use_count: row.get(10).map_err(|e| AppError::Internal(e.to_string()))?,
-        published_at: row.get(11).map_err(|e| AppError::Internal(e.to_string()))?,
-        updated_at: row.get(12).map_err(|e| AppError::Internal(e.to_string()))?,
+        css: row.get(10).map_err(|e| AppError::Internal(e.to_string()))?,
+        use_count: row.get(11).map_err(|e| AppError::Internal(e.to_string()))?,
+        published_at: row.get(12).map_err(|e| AppError::Internal(e.to_string()))?,
+        updated_at: row.get(13).map_err(|e| AppError::Internal(e.to_string()))?,
     };
     if tpl.published_at == PRIVATE && caller.as_deref() != Some(tpl.owner_id.as_str()) {
         // Do not reveal that a private template exists.
@@ -406,6 +405,9 @@ struct PutTemplateReq {
     page_h_mm: f64,
     language: String,
     body: String,
+    /// Template CSS. Sent by Save, Refresh and Get from server so the CSS
+    /// travels with the HTML instead of being lost (migration plan, phase 1).
+    css: Option<String>,
     readme: Option<String>,
     /// `true` publishes, `false` makes the template private. When omitted, a new template is
     /// published (the original behaviour) and an existing one keeps its current state.
@@ -420,26 +422,34 @@ async fn put_template(
 ) -> Result<impl IntoResponse, AppError> {
     // Auth required
     let token = extract_bearer(&headers)?;
-    let mut conn = state.db.lock().await;
+    let conn = state.db.lock().await;
     let sess = {
         // Need to validate while holding lock, but we have &Connection, not &mut
         // We have a tokio::sync::Mutex, we can get &Connection via &*conn
         auth::validate_session(&conn, &token)?
     };
 
-    // Validate sizes
-    if req.body.as_bytes().len() > 512 * 1024 {
+    // Validate sizes. `String::len` is the byte length, which is what the caps are in.
+    if req.body.len() > 512 * 1024 {
         return Err(AppError::BadRequest("Template body exceeds 512 KiB".into()));
     }
+    let css = req.css.as_deref().unwrap_or_default();
+    if css.len() > 256 * 1024 {
+        return Err(AppError::BadRequest("Template CSS exceeds 256 KiB".into()));
+    }
     let readme = req.readme.unwrap_or_default();
-    if readme.as_bytes().len() > 64 * 1024 {
+    if readme.len() > 64 * 1024 {
         return Err(AppError::BadRequest("README exceeds 64 KiB".into()));
     }
     // Validate handlebars-ish body doesn't contain remote refs (re-sanitize)
-    // For now, simple check: if body contains http:// or https:// in src/href/url, reject
-    let lower_body = req.body.to_lowercase();
-    if lower_body.contains("src=\"http") || lower_body.contains("href=\"http") || lower_body.contains("url(\"http") || lower_body.contains("url('http") {
-        return Err(AppError::BadRequest("Template body contains remote references — use data: URIs".into()));
+    // For now, simple check: if body or css contains http:// or https:// in src/href/url, reject
+    for (source, text) in [("body", req.body.as_str()), ("css", css)] {
+        let lower = text.to_lowercase();
+        if lower.contains("src=\"http") || lower.contains("href=\"http") || lower.contains("url(\"http") || lower.contains("url('http") {
+            return Err(AppError::BadRequest(format!(
+                "Template {source} contains remote references — use data: URIs"
+            )));
+        }
     }
     if Uuid::parse_str(&id).is_err() {
         return Err(AppError::BadRequest("Invalid template id (must be UUID)".into()));
@@ -455,27 +465,29 @@ async fn put_template(
             return Err(AppError::Forbidden("Not the owner".into()));
         }
         // Update. `published_at` changes only when `publish` is sent: true keeps an existing
-        // publish time (or sets one), false makes the template private.
+        // publish time (or sets one), false makes the template private. `css` is kept when the
+        // request omits it, so an older client pushing a body does not wipe the stored CSS.
         conn.execute(
             "UPDATE templates SET name = ?1, summary = ?2, page_w_mm = ?3, page_h_mm = ?4, language = ?5, body = ?6, readme = ?7, \
+             css = CASE WHEN ?10 IS NULL THEN css ELSE ?10 END, \
              published_at = CASE ?9 WHEN 1 THEN CASE WHEN published_at = '' THEN datetime('now') ELSE published_at END WHEN 0 THEN '' ELSE published_at END, \
              updated_at = datetime('now') WHERE id = ?8",
-            rusqlite::params![req.name, req.summary.unwrap_or_default(), req.page_w_mm, req.page_h_mm, req.language, req.body, readme, id, req.publish.map(|b| b as i64)],
+            rusqlite::params![req.name, req.summary.unwrap_or_default(), req.page_w_mm, req.page_h_mm, req.language, req.body, readme, id, req.publish.map(|b| b as i64), req.css],
         )
         .map_err(|e| AppError::Internal(e.to_string()))?;
     } else {
         // Create
         let published_at = if req.publish == Some(false) { PRIVATE.to_string() } else { Utc::now().format("%Y-%m-%d %H:%M:%S").to_string() };
         conn.execute(
-            "INSERT INTO templates (id, owner_id, name, summary, page_w_mm, page_h_mm, language, body, readme, published_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            rusqlite::params![id, sess.user_id, req.name, req.summary.unwrap_or_default(), req.page_w_mm, req.page_h_mm, req.language, req.body, readme, published_at],
+            "INSERT INTO templates (id, owner_id, name, summary, page_w_mm, page_h_mm, language, body, readme, css, published_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            rusqlite::params![id, sess.user_id, req.name, req.summary.unwrap_or_default(), req.page_w_mm, req.page_h_mm, req.language, req.body, readme, css, published_at],
         )
         .map_err(|e| AppError::Internal(e.to_string()))?;
     }
 
     // Return updated template
     let mut stmt = conn
-        .prepare("SELECT t.id, t.owner_id, u.handle, t.name, t.summary, t.page_w_mm, t.page_h_mm, t.language, t.body, t.readme, t.use_count, t.published_at, t.updated_at FROM templates t JOIN users u ON t.owner_id = u.id WHERE t.id = ?1")
+        .prepare("SELECT t.id, t.owner_id, u.handle, t.name, t.summary, t.page_w_mm, t.page_h_mm, t.language, t.body, t.readme, t.css, t.use_count, t.published_at, t.updated_at FROM templates t JOIN users u ON t.owner_id = u.id WHERE t.id = ?1")
         .map_err(|e| AppError::Internal(e.to_string()))?;
     let mut rows = stmt.query([&id]).map_err(|e| AppError::Internal(e.to_string()))?;
     let row = rows.next().map_err(|e| AppError::Internal(e.to_string()))?.unwrap();
@@ -490,9 +502,10 @@ async fn put_template(
         language: row.get(7).map_err(|e| AppError::Internal(e.to_string()))?,
         body: row.get(8).map_err(|e| AppError::Internal(e.to_string()))?,
         readme: row.get(9).map_err(|e| AppError::Internal(e.to_string()))?,
-        use_count: row.get(10).map_err(|e| AppError::Internal(e.to_string()))?,
-        published_at: row.get(11).map_err(|e| AppError::Internal(e.to_string()))?,
-        updated_at: row.get(12).map_err(|e| AppError::Internal(e.to_string()))?,
+        css: row.get(10).map_err(|e| AppError::Internal(e.to_string()))?,
+        use_count: row.get(11).map_err(|e| AppError::Internal(e.to_string()))?,
+        published_at: row.get(12).map_err(|e| AppError::Internal(e.to_string()))?,
+        updated_at: row.get(13).map_err(|e| AppError::Internal(e.to_string()))?,
     };
     Ok((StatusCode::OK, Json(tpl)))
 }
@@ -613,7 +626,7 @@ mod tests {
         body::Body,
         http::{Request, StatusCode},
     };
-    use tower::{Service, ServiceExt};
+    use tower::ServiceExt;
 
     fn test_app() -> Router {
         let conn = db::open_db(":memory:").unwrap();
@@ -1155,5 +1168,82 @@ mod tests {
         send(&app, "PUT", &format!("/v1/templates/{id}"), Some(&t), Some(tpl_payload("T", Some(true)))).await;
         let (s, _) = send(&app, "GET", &format!("/v1/templates/{id}"), Some("not-a-real-token"), None).await;
         assert_eq!(s, StatusCode::UNAUTHORIZED);
+    }
+
+    // ── Phase 1: template CSS travels with the HTML ──
+
+    fn tpl_payload_with_css(name: &str, publish: Option<bool>, css: &str) -> serde_json::Value {
+        let mut v = tpl_payload(name, publish);
+        v["css"] = serde_json::json!(css);
+        v
+    }
+
+    #[tokio::test]
+    async fn p1_css_round_trips_for_the_owner() {
+        let mut app = test_app();
+        let owner = token_for(&mut app, "css_owner").await;
+        let id = Uuid::new_v4().to_string();
+        let css = "body { font-size: 9pt } @page { size: 80mm 200mm; }";
+
+        let (s, put) = send(&app, "PUT", &format!("/v1/templates/{id}"), Some(&owner), Some(tpl_payload_with_css("Label", Some(false), css))).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(put["css"], css);
+
+        let (s, got) = send(&app, "GET", &format!("/v1/templates/{id}"), Some(&owner), None).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(got["css"], css, "GET must return the stored CSS");
+        assert_eq!(got["body"], "<div>x</div>", "HTML still travels alongside it");
+    }
+
+    #[tokio::test]
+    async fn p1_css_is_returned_on_the_public_route_for_published_templates() {
+        let mut app = test_app();
+        let owner = token_for(&mut app, "css_pub").await;
+        let id = Uuid::new_v4().to_string();
+        send(&app, "PUT", &format!("/v1/templates/{id}"), Some(&owner), Some(tpl_payload_with_css("Public", Some(true), ".a { color: #000 }"))).await;
+
+        let (s, got) = send(&app, "GET", &format!("/v1/templates/{id}"), None, None).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(got["css"], ".a { color: #000 }");
+    }
+
+    #[tokio::test]
+    async fn p1_css_can_be_cleared_and_is_kept_when_a_request_omits_it() {
+        let mut app = test_app();
+        let owner = token_for(&mut app, "css_edit").await;
+        let id = Uuid::new_v4().to_string();
+        send(&app, "PUT", &format!("/v1/templates/{id}"), Some(&owner), Some(tpl_payload_with_css("A", Some(false), ".a{}"))).await;
+
+        // An update that sends CSS replaces it, including with an empty string.
+        let (_, v) = send(&app, "PUT", &format!("/v1/templates/{id}"), Some(&owner), Some(tpl_payload_with_css("A2", None, ".b{}"))).await;
+        assert_eq!(v["css"], ".b{}");
+        let (_, v) = send(&app, "PUT", &format!("/v1/templates/{id}"), Some(&owner), Some(tpl_payload_with_css("A3", None, ""))).await;
+        assert_eq!(v["css"], "");
+
+        // An update from a client that never learned about CSS keeps what is stored.
+        send(&app, "PUT", &format!("/v1/templates/{id}"), Some(&owner), Some(tpl_payload_with_css("A4", None, ".c{}"))).await;
+        let (_, v) = send(&app, "PUT", &format!("/v1/templates/{id}"), Some(&owner), Some(tpl_payload("A5", None))).await;
+        assert_eq!(v["css"], ".c{}", "omitting css must not wipe the stored CSS");
+    }
+
+    #[tokio::test]
+    async fn p1_css_is_capped_and_checked_for_remote_references() {
+        let mut app = test_app();
+        let owner = token_for(&mut app, "css_caps").await;
+        let id = Uuid::new_v4().to_string();
+
+        let mut big = tpl_payload_with_css("Big", Some(false), "");
+        big["css"] = serde_json::json!("a".repeat(256 * 1024 + 1));
+        let (s, _) = send(&app, "PUT", &format!("/v1/templates/{id}"), Some(&owner), Some(big)).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+
+        let remote = tpl_payload_with_css("Remote", Some(false), ".logo { background: url(\"https://example.com/l.png\") }");
+        let (s, _) = send(&app, "PUT", &format!("/v1/templates/{id}"), Some(&owner), Some(remote)).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+
+        // Exactly at the cap is accepted.
+        let ok = tpl_payload_with_css("Ok", Some(false), &"a".repeat(256 * 1024));
+        let (s, _) = send(&app, "PUT", &format!("/v1/templates/{id}"), Some(&owner), Some(ok)).await;
+        assert_eq!(s, StatusCode::OK);
     }
 }
