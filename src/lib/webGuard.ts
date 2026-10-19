@@ -32,6 +32,6 @@ export const guardInvoke = async <T = unknown>(
     return null;
   }
 
-  const { invoke } = await import("@tauri-apps/api/core");
+  const { invoke } = await import("@/lib/invoke");
   return invoke<T>(cmd, args);
 };

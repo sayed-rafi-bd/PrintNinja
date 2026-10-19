@@ -5,7 +5,7 @@
  * push that local copy to the server and pull it back; nothing here runs while
  * printing. The server copy is reached through the local row's `remote_id`.
  */
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import {
   fetchMyRemoteTemplates,
   fetchRemoteTemplate,

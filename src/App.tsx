@@ -39,7 +39,7 @@ function AppContent() {
     let cancelled = false;
     (async () => {
       try {
-        const { invoke } = await import("@tauri-apps/api/core");
+        const { invoke } = await import("@/lib/invoke");
         const v = await invoke<string | null>("get_setting", { key: "onboarding_done" }).catch(() => null);
         if (cancelled) return;
         if (v === "true") {
@@ -77,7 +77,7 @@ function AppContent() {
   const handleOnboardingComplete = async (destination?: string) => {
     localStorage.setItem("printninja-onboarding-complete", "true");
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
+      const { invoke } = await import("@/lib/invoke");
       await invoke("set_setting", { key: "onboarding_done", value: "true" }).catch(() => {});
     } catch {}
     // The router has not mounted yet, so set the starting address before it does.

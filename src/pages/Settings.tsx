@@ -4,7 +4,7 @@ import { AppearanceSettings } from "@/components/AppearanceSettings";
 import { PageHeader } from "@/components/PageHeader";
 import { SetupChecklist } from "@/components/SetupChecklist";
 import { parseSection, type SettingsSection } from "@/lib/setup/checklist";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/lib/invoke";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";

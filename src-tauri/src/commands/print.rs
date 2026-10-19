@@ -321,6 +321,13 @@ pub async fn run_print(
     let printer_type =
         crate::transport::parse_printer_type(printer.as_ref().map_or("", |p| p.0.as_str()));
     let address = printer.as_ref().map_or("", |p| p.1.as_str());
+    tracing::info!(
+        printer = %req.printer_name,
+        ?printer_type,
+        %address,
+        found = printer.is_some(),
+        "sending print job"
+    );
 
     // Hold this printer's permit across the whole send. Two jobs for the
     // same physical printer must never overlap, or their bytes interleave
@@ -371,7 +378,10 @@ pub async fn run_print(
     let duration = start.elapsed().as_millis();
     let (status, err) = match result {
         Ok(()) => ("success", None),
-        Err(e) => ("failed", Some(e)),
+        Err(e) => {
+            tracing::error!(printer = %req.printer_name, error = %e, "print send failed");
+            ("failed", Some(e))
+        }
     };
 
     // ── 6. History ──────────────────────────────────────────────────

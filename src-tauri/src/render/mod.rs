@@ -83,6 +83,7 @@ impl PdfRenderer {
             }
         }
 
+        tracing::warn!("Edge print-to-pdf failed or msedge.exe not found; using placeholder PDF");
         self.fallback_pdf(w * 25.4, h * 25.4, orientation)
     }
 
