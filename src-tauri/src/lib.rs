@@ -74,8 +74,21 @@ pub fn run() {
             // One shared print queue for the whole app, so the Tauri command
             // handlers, the REST API routes, and batch jobs all serialise
             // per printer instead of interleaving bytes on a thermal head.
-            let (queue, _rx) = queue::PrintQueue::new();
+            let (queue, mut rx) = queue::PrintQueue::new();
             app.manage(queue);
+
+            // `PrintQueue::submit` is an admission gate and fails with
+            // "channel closed" as soon as the receiver is dropped. The old
+            // `_rx` binding was dropped at the end of this closure, so every
+            // print was rejected. Nothing consumes jobs from the channel yet
+            // (sending happens inline under the per-printer permit), so keep
+            // the receiver alive and drain it. Without a drain the channel
+            // would also fill up after QUEUE_CAPACITY jobs and block submits.
+            tauri::async_runtime::spawn(async move {
+                while let Some(job) = rx.recv().await {
+                    tracing::debug!(job_id = %job.job_id, printer = %job.printer_id, "queue job admitted");
+                }
+            });
             Ok(())
         })
         .invoke_handler(with_ipc_logging(tauri::generate_handler![
