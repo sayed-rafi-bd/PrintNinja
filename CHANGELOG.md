@@ -21,6 +21,10 @@ All notable changes to PrintNinja are documented here. The format is based on Ke
 - A saved copy whose template is no longer on the server is marked *Withdrawn by author* in the tab, without touching the local row.
 - Share client requests go through one `authedFetch` helper that ends the session on 401 and reports an unreachable server as `ServerUnreachableError`. New helpers cover Get, Refresh, Save and the saved-template list.
 
+### Fixed
+- **The desktop app builds again.** `src-tauri/Cargo.toml` held a copy of the server's manifest, so the app crate failed to compile (`tauri_build` not found) and no desktop build, bundle or Rust test could run. The Tauri manifest is restored and matches `Cargo.lock`, which was intact. `cargo test` passes (133 tests).
+- Rust tests for the new commands (`src-tauri/tests/template_sync.rs`) and a guard that the print path grows no HTTP client (`print_path_offline.rs`), the check the migration plan asked for.
+
 ## [0.5.0] - 2026-10-19 — Corporate UI (phases 0–6)
 
 ### Changed

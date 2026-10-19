@@ -62,16 +62,16 @@ Still open:
 - Make Saved (community) templates read-only: hide Edit, Save and Publish on them, using the existing local `origin` value `saved`.
 - Done when: a template saved on one PC appears on another through Get from server, an edit shows up there after Refresh, and prints from the local copy.
 
-**Built.** `update_template_meta` and the `sync` version marker were added to `src-tauri` (see "Known gap" below); the `css` column, the client sync module and the three actions live in `server/src/db.rs`, `src/lib/share/sync.ts` and the Designer and Templates screens. The manual walk-through in section 4 has not been run.
+**Built.** `update_template_meta` and the `sync` version marker were added to `src-tauri`; the `css` column, the client sync module and the three actions live in `server/src/db.rs`, `src/lib/share/sync.ts` and the Designer and Templates screens. Covered by `src-tauri/tests/template_sync.rs`, `src/test/shareSync.test.ts`, the server route tests and the Templates and Designer page tests. The manual walk-through in section 4 has not been run.
 
 ### Phase 2: Check the print path
 
 - Confirm that `print_html`, `api/routes.rs`, `deeplink.rs`, `commands/batch.rs` and reprint read only the local copy and make no network call.
 - Done when: every print route works with the network off.
 
-**Checked by reading, not by running.** `print_html` resolves the template and its current version from SQLite; the only network call in the crate is `data::fetcher`, and it runs only when a job carries a `data_url` that the person set. `api/routes.rs`, `deeplink.rs`, `commands/batch.rs` and `reprint_job` query SQLite or replay the `rendered_html` stored on the original job. Nothing in the print path calls the share service.
+**Done.** `print_html` resolves the template and its current version from SQLite; `api/routes.rs`, `deeplink.rs` and `commands/batch.rs` query SQLite; `reprint_job` replays the `rendered_html` stored on the original job. The only network call in the crate is `data::fetcher`, reached only when a job carries a `data_url` that the person set. `src-tauri/tests/print_path_offline.rs` guards this, and the renderer still refuses templates that pull in remote assets.
 
-**Known gap.** `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` hold the *server's* manifest in this repository, so the desktop crate does not build (`tauri_build` is not a dependency) and none of the Rust changes could be compiled or tested here. The Rust test asked for in section 4 is still to be added, and the manual check with the network off is still to be run.
+Still to do by hand: print something with the network off, to see it with your own eyes.
 
 ## 4. Testing
 
