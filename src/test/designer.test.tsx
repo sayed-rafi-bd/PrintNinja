@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import "@/lib/i18n";
 import { DesignerToolbar } from "@/components/designer/DesignerToolbar";
 import { DesignerSidebar } from "@/components/designer/DesignerSidebar";
-import { PublishBar } from "@/components/designer/PublishBar";
+import { TemplateSyncBar } from "@/components/designer/TemplateSyncBar";
 
 beforeAll(() => {
   (globalThis as any).ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
@@ -25,32 +25,73 @@ describe("DesignerToolbar", () => {
   });
 });
 
-describe("PublishBar", () => {
-  const base = { templateName: "Label", publishing: false, onPublish: vi.fn(), onUnpublish: vi.fn() };
+describe("TemplateSyncBar", () => {
+  const base = {
+    templateName: "Label",
+    pending: null,
+    onSave: vi.fn(),
+    onRefresh: vi.fn(),
+    onPublish: vi.fn(),
+    onUnpublish: vi.fn(),
+  };
 
-  it("shows Draft with a Publish action for an unpublished template", () => {
-    render(<PublishBar {...base} remoteId={null} publishedAt={null} templateUpdatedAt={null} />);
+  it("saves a template that is only on this computer, and offers Publish", () => {
+    render(<TemplateSyncBar {...base} remoteId={null} publishedAt={null} templateUpdatedAt={null} />);
     expect(screen.getByText("Draft")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Publish" }));
+    expect(screen.getByText("Only on this computer")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Refresh/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save to server" }));
+    expect(base.onSave).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Publish to Community" }));
     expect(base.onPublish).toHaveBeenCalled();
   });
 
-  it("warns once when there are unpublished changes", () => {
-    render(<PublishBar {...base} remoteId="r1" publishedAt="2026-01-01T00:00:00Z" templateUpdatedAt="2026-02-01T00:00:00Z" />);
+  it("offers Refresh and Unpublish once a template is published", () => {
+    render(<TemplateSyncBar {...base} remoteId="r1" publishedAt="2026-02-01T00:00:00Z" templateUpdatedAt="2026-01-01T00:00:00Z" />);
     expect(screen.getByText("Published")).toBeInTheDocument();
-    expect(screen.getAllByText(/changes that aren’t published/)).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Update published copy" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Refresh from server/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unpublish" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Publish/ })).not.toBeInTheDocument();
+  });
+
+  it("says when a private template is saved but not published", () => {
+    render(<TemplateSyncBar {...base} remoteId="r1" publishedAt={null} templateUpdatedAt="2026-02-01T00:00:00Z" />);
+    expect(screen.getByText(/private copy/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Publish to Community" })).toBeInTheDocument();
+  });
+
+  it("warns once when local changes are not on the server yet", () => {
+    render(<TemplateSyncBar {...base} remoteId="r1" publishedAt="2026-01-01T00:00:00Z" templateUpdatedAt="2026-02-01T00:00:00Z" />);
+    expect(screen.getAllByText(/not on the server yet/)).toHaveLength(1);
+  });
+
+  it("asks before refreshing, naming the template", async () => {
+    render(<TemplateSyncBar {...base} remoteId="r1" publishedAt="2026-02-01T00:00:00Z" templateUpdatedAt="2026-02-01T00:00:00Z" />);
+    fireEvent.click(screen.getByRole("button", { name: /Refresh from server/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Refresh “Label” from the server?")).toBeInTheDocument();
+    expect(base.onRefresh).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Refresh template" }));
+    await waitFor(() => expect(base.onRefresh).toHaveBeenCalled());
   });
 
   it("asks before unpublishing, naming the template", async () => {
     const onUnpublish = vi.fn();
-    render(<PublishBar {...base} onUnpublish={onUnpublish} remoteId="r1" publishedAt="2026-02-01T00:00:00Z" templateUpdatedAt="2026-01-01T00:00:00Z" />);
+    render(<TemplateSyncBar {...base} onUnpublish={onUnpublish} remoteId="r1" publishedAt="2026-02-01T00:00:00Z" templateUpdatedAt="2026-01-01T00:00:00Z" />);
     fireEvent.click(screen.getByRole("button", { name: "Unpublish" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Unpublish “Label”?")).toBeInTheDocument();
     expect(onUnpublish).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Unpublish" }));
     await waitFor(() => expect(onUnpublish).toHaveBeenCalled());
+  });
+
+  it("hides Save and Publish on a saved copy from Community", () => {
+    render(<TemplateSyncBar {...base} readOnly remoteId="x1" publishedAt="2026-02-01T00:00:00Z" templateUpdatedAt="2026-02-01T00:00:00Z" />);
+    expect(screen.getByText("Read-only copy")).toBeInTheDocument();
+    expect(screen.getByText(/can print it, but not change it/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save to server" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Publish/ })).not.toBeInTheDocument();
   });
 });
 

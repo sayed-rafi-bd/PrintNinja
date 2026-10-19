@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/PageHeader";
 import { DesignerSidebar } from "@/components/designer/DesignerSidebar";
 import { DesignerToolbar } from "@/components/designer/DesignerToolbar";
-import { PublishBar } from "@/components/designer/PublishBar";
+import { TemplateSyncBar } from "@/components/designer/TemplateSyncBar";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,6 +48,13 @@ import { formatCss, formatHtml } from "@/lib/utils/format";
 import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
 import { ReadmeEditor } from "@/components/ReadmeEditor";
 import * as share from "@/lib/share/client";
+import {
+  getLocalTemplate,
+  isReadOnly,
+  refreshFromServer,
+  saveToServer,
+  type SaveOptions,
+} from "@/lib/share/sync";
 
 const PAGE_PRESETS = [
   { label: "A4", width: 210, height: 297 },
@@ -59,6 +66,9 @@ const PAGE_PRESETS = [
 ];
 
 const MM_TO_PX = 3.7795;
+
+/** Which sync action is running, so only its button says so. */
+type SyncAction = "save" | "refresh" | "publish" | "unpublish";
 
 export function DesignerPage() {
   const { t } = useTranslation();
@@ -86,7 +96,8 @@ export function DesignerPage() {
   const [remoteId, setRemoteId] = useState<string | null>(null);
   const [publishedAt, setPublishedAt] = useState<string | null>(null);
   const [templateUpdatedAt, setTemplateUpdatedAt] = useState<string | null>(null);
-  const [publishing, setPublishing] = useState(false);
+  const [origin, setOrigin] = useState<"own" | "saved">("own");
+  const [pending, setPending] = useState<SyncAction | null>(null);
   const [debouncedHtml, setDebouncedHtml] = useState(htmlCode);
   const [debouncedCss, setDebouncedCss] = useState(cssCode);
   useEffect(() => {
@@ -132,6 +143,7 @@ export function DesignerPage() {
       setRemoteId((tpl as any).remote_id ?? null);
       setPublishedAt((tpl as any).published_at ?? null);
       setTemplateUpdatedAt((tpl as any).updated_at ?? null);
+      setOrigin(((tpl as any).origin ?? "own") === "saved" ? "saved" : "own");
     } else {
       (async () => {
         try {
@@ -140,11 +152,13 @@ export function DesignerPage() {
           setRemoteId(full.remote_id ?? null);
           setPublishedAt(full.published_at ?? null);
           setTemplateUpdatedAt(full.updated_at ?? null);
+          setOrigin(full.origin === "saved" ? "saved" : "own");
         } catch {
           setReadme("");
           setRemoteId(null);
           setPublishedAt(null);
           setTemplateUpdatedAt(null);
+          setOrigin("own");
         }
       })();
     }
@@ -162,53 +176,86 @@ export function DesignerPage() {
     toast.success(`Loaded "${tpl.name}"`);
   };
 
-  const handlePublish = async () => {
+  const runSync = async (action: SyncAction, options: SaveOptions, done: string) => {
     if (!currentTemplateDbId) {
       toast.error("No template selected");
       return;
     }
-    const serviceUrl = await share.getServiceUrl();
-    if (!serviceUrl) {
-      toast.error("Share service not configured — set it in Settings");
-      return;
-    }
-    const token = await share.getSessionToken();
-    if (!token) {
-      toast.error("Not signed in — sign in via Settings");
-      return;
-    }
-    setPublishing(true);
+    setPending(action);
     try {
-      const id = remoteId ?? crypto.randomUUID();
-      const isUpdate = !!remoteId;
-      const payload = {
-        id,
-        name: templateName,
-        summary: "",
-        page_w_mm: pageWidth,
-        page_h_mm: pageHeight,
-        language: "html",
-        body: htmlCode,
-        readme,
-      };
-      const res = await share.publishTemplate(payload);
-      // Persist remote_id and published_at locally
-      const publishedAt = res.updated_at ?? res.published_at ?? new Date().toISOString();
-      await invoke("set_publish_info", { req: { id: currentTemplateDbId, remote_id: id, published_at: publishedAt } });
-      setRemoteId(id);
-      setPublishedAt(publishedAt);
-      setTemplateUpdatedAt(publishedAt);
-      toast.success(isUpdate ? "Published update" : "Published");
+      const row = await getLocalTemplate(currentTemplateDbId);
+      if (isReadOnly(row)) {
+        toast.error("A saved copy from Community can’t be changed");
+        return;
+      }
+      // The editor holds the copy this PC would print. Put its content and its
+      // metadata into the local row first, so Save sends what the editor shows and
+      // Refresh, Print and this PC all read the same copy.
+      await invoke("create_version", {
+        req: {
+          template_id: currentTemplateDbId,
+          html: htmlCode,
+          css: cssCode,
+          label: null,
+          note: null,
+          created_by: "manual",
+        },
+      });
+      await invoke("update_template_meta", {
+        req: {
+          id: currentTemplateDbId,
+          name: templateName,
+          page_w_mm: pageWidth,
+          page_h_mm: pageHeight,
+          summary: row.summary ?? "",
+        },
+      });
+      const result = await saveToServer(
+        { ...row, name: templateName, page_w_mm: pageWidth, page_h_mm: pageHeight },
+        options,
+      );
+      setRemoteId(result.remoteId);
+      setPublishedAt(result.published ? result.updatedAt : null);
+      setTemplateUpdatedAt(result.updatedAt);
+      toast.success(done);
     } catch (e) {
-      toast.error(String(e));
+      toast.error(e instanceof Error ? e.message : String(e));
     } finally {
-      setPublishing(false);
+      setPending(null);
+    }
+  };
+
+  const handleSave = () => runSync("save", {}, "Saved to the server");
+
+  const handlePublish = () => runSync("publish", { publish: true }, "Published to Community");
+
+  const handleRefresh = async () => {
+    if (!currentTemplateDbId) return;
+    setPending("refresh");
+    try {
+      const row = await getLocalTemplate(currentTemplateDbId);
+      const result = await refreshFromServer(row);
+      // Show what came back, so the editor matches this PC's new copy.
+      setHtmlCode(formatHtml(result.template.body ?? ""));
+      setCssCode(formatCss(result.template.css ?? ""));
+      setTemplateName(result.name);
+      setPageWidth(result.page_w_mm);
+      setPageHeight(result.page_h_mm);
+      setReadme(result.template.readme ?? "");
+      setRemoteId(result.template.id);
+      setPublishedAt(result.template.published_at || null);
+      setTemplateUpdatedAt(result.template.updated_at);
+      toast.success(`Refreshed “${result.name}” from the server`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPending(null);
     }
   };
 
   const handleUnpublish = async () => {
     if (!currentTemplateDbId || !remoteId) return;
-    setPublishing(true);
+    setPending("unpublish");
     try {
       await share.unpublishTemplate(remoteId);
       await invoke("clear_publish_info", { req: { id: currentTemplateDbId } });
@@ -216,9 +263,9 @@ export function DesignerPage() {
       setPublishedAt(null);
       toast.success("Unpublished");
     } catch (e) {
-      toast.error(String(e));
+      toast.error(e instanceof Error ? e.message : String(e));
     } finally {
-      setPublishing(false);
+      setPending(null);
     }
   };
 
@@ -391,6 +438,7 @@ export function DesignerPage() {
             setRemoteId(full.remote_id ?? null);
             setPublishedAt(full.published_at ?? null);
             setTemplateUpdatedAt(full.updated_at ?? null);
+            setOrigin(full.origin === "saved" ? "saved" : "own");
           } catch {
             setReadme("");
             setRemoteId(null);
@@ -633,13 +681,16 @@ export function DesignerPage() {
             </div>
           </div>
 
-          <PublishBar
+          <TemplateSyncBar
             templateName={templateName}
             remoteId={remoteId}
             publishedAt={publishedAt}
             templateUpdatedAt={templateUpdatedAt}
-            publishing={publishing}
-            onPublish={handlePublish}
+            readOnly={isReadOnly({ origin })}
+            pending={pending}
+            onSave={() => void handleSave()}
+            onRefresh={() => void handleRefresh()}
+            onPublish={() => void handlePublish()}
             onUnpublish={handleUnpublish}
           />
 

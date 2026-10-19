@@ -12,7 +12,7 @@ Silent print for Windows and Android — design HTML templates, fetch JSON data,
 - **Printers** — grouped Network, USB, Bluetooth and System; test print per row; setup in a side panel (IPP / raw TCP 9100, language, paper, DPI). Status shows only when known.
 - **History** — sticky filter bar (status, source, printer, search, dates), saved filter sets, bulk reprint and retry (each confirmed), CSV export, retention.
 - **Automation** — local REST API (`axum`, `127.0.0.1:17717`, Bearer + idempotency, CORS scoped, LAN off by default) and `printninja://` deep links with trust list and confirmation sheet
-- **Share** — hosted `server/` (`axum` + Turso/`rusqlite`, `scrypt` + sha256 sessions, throttle 5/min) at `share_service_url` + `share_session_token` (Settings → Share: Register/Login/Logout, handle `alphanumeric+_-` 1–32, password ≥8), `PUT/DELETE /v1/templates/{id}` (client UUID, owner 403, 404, size caps 512K/64K, remote-ref `data: URIs`), `GET /v1/templates` public, `POST /v1/templates/{id}/use`, `PUT/DELETE/GET /v1/saved`
+- **Share** — hosted `server/` (`axum` + `rusqlite`/SQLite, `scrypt` + sha256 sessions, throttle 5/min) at `share_service_url` + `share_session_token` (Settings → Share: Register/Login/Logout, handle `alphanumeric+_-` 1–32, password ≥8), `PUT/DELETE /v1/templates/{id}` (client UUID, owner 403, 404, size caps 512K/64K, remote-ref `data: URIs`), `GET /v1/templates` public, `POST /v1/templates/{id}/use`, `PUT/DELETE/GET /v1/saved`
 - **Corporate UI** — one light theme in a restrained slate teal; IBM Plex bundled for identical rendering on every workstation, offline. One status vocabulary (colour + icon + word) on every screen. `Ctrl/Cmd+K` palette, `G` then `P/H/D/T/R/S` navigation, full keyboard path, WCAG 2.1 AA as the internal bar. **Comfortable/Compact density** and optional **name and logo** in Settings → General; **Settings → Setup** checklist for admins. See [`docs/UI_GUIDE.md`](docs/UI_GUIDE.md).
 - **Queue** — per-printer `Semaphore` (no byte interleaving), bounded admission, `POST /v1/print` runs the same pipeline as the UI
 
@@ -28,7 +28,7 @@ Silent print for Windows and Android — design HTML templates, fetch JSON data,
 | Markdown | `react-markdown` + `remark-gfm` (no `rehype-raw` → XSS as text, links `http/https/mailto` only) |
 | Sanitize | `sanitize.ts` + `handlebars.rs` strip `<script>`/`on*`, `find_remote_refs` → `data: URIs`, CSP `default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:`, `sandbox=""` iframes |
 | API | `axum` + `tower-http` (local `127.0.0.1:17717` + share `server/` at `share_service_url`) |
-| Share service | `server/` (`axum`, Turso/`rusqlite`, `scrypt` + sha256 sessions, throttle) |
+| Share service | `server/` (`axum`, `rusqlite`/SQLite, `scrypt` + sha256 sessions, throttle) |
 | Secrets | `keyring` (redacted from `print_jobs` / diagnostics) |
 | Android | Kotlin plugins: WebView → PDF, `UsbManager`, RFCOMM |
 
@@ -49,7 +49,7 @@ Batch ─────┘
 
 App SQLite (`src-tauri/src/db/schema.sql` + `db::ensure_v2_schema`): `printers` · `templates` (`readme`, `summary`, `remote_id` UUID, `published_at`, `origin` `own`/`saved`, `origin_owner`, `withdrawn`, `idx_templates_remote`) + `template_versions` · `sample_datasets` · `fonts` · `printer_profiles` · `presets` · `batches` · `print_jobs` · `api_clients` · `settings` (`share_service_url`, `share_session_token`, `onboarding_done` etc.).
 
-Server Turso (`server/src/db.rs`): `users` (`handle` `UNIQUE COLLATE NOCASE`, `password_hash` scrypt) · `sessions` (`token_hash` sha256, `expires_at`) · `templates` (`id` UUID PK, `owner_id`, `name`, `summary`, `page_w_mm`, `page_h_mm`, `language`, `body` 512K, `readme` 64K, `use_count`, `published_at`, `updated_at`, `idx_tpl_owner/updated`) · `saved_templates` (`user_id`, `template_id` PK).
+Server SQLite file (`server/src/db.rs`, path from `DATABASE_URL`): `users` (`handle` `UNIQUE COLLATE NOCASE`, `password_hash` scrypt) · `sessions` (`token_hash` sha256, `expires_at`) · `templates` (`id` UUID PK, `owner_id`, `name`, `summary`, `page_w_mm`, `page_h_mm`, `language`, `body` 512K, `readme` 64K, `use_count`, `published_at`, `updated_at`, `idx_tpl_owner/updated`) · `saved_templates` (`user_id`, `template_id` PK).
 
 ## Project Structure
 
@@ -62,7 +62,7 @@ src/                         # React
 src-tauri/src/
   commands/{print,printer,template{readme, publish info, origin},version,history,batch,font,profile,settings,api}
   api/{routes,auth,openapi}  queue.rs  transport/{...}  data/fetcher.rs  deeplink.rs  render/handlebars.rs (sanitize)  db (ensure_v2_schema)  readme.rs
-server/                      # share service (axum, Turso/rusqlite, scrypt)
+server/                      # share service (axum, rusqlite/SQLite, scrypt)
   src/{main.rs (v1 auth/templates/saved), db.rs, auth.rs (throttle, sessions), error.rs}
 ```
 
