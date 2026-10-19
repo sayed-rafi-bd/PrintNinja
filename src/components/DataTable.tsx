@@ -34,6 +34,9 @@ interface DataTableProps<T> {
 
 const SKELETON_ROWS = 5;
 
+/** The checkbox itself stays small; this padded label makes the touch target ~40px. */
+const CHECK_HIT = "-m-2.5 inline-flex cursor-pointer items-center justify-center p-2.5";
+
 /** Per-column responsive classes, e.g. `{ meta: { className: "hidden md:table-cell" } }`. */
 const metaClass = (col: { columnDef: { meta?: unknown } }): string | undefined =>
   (col.columnDef.meta as { className?: string } | undefined)?.className;
@@ -111,27 +114,29 @@ export function DataTable<T>({
                       style={header.getSize() !== 150 ? { width: header.getSize() } : undefined}
                     >
                       {header.column.id === "__select" && selection ? (
-                        <input
-                          type="checkbox"
-                          aria-label="Select all rows"
-                          className="h-4 w-4 accent-primary"
-                          checked={rows.length > 0 && rows.every((r) => selection.selectedIds.has(r.id))}
-                          ref={(el) => {
-                            if (el) el.indeterminate = rows.some((r) => selection.selectedIds.has(r.id)) && !rows.every((r) => selection.selectedIds.has(r.id));
-                          }}
-                          onChange={(e) =>
-                            selection.onChange(
-                              e.target.checked
-                                ? new Set([...selection.selectedIds, ...rows.map((r) => r.id)])
-                                : new Set([...selection.selectedIds].filter((id) => !rows.some((r) => r.id === id))),
-                            )
-                          }
-                        />
+                        <label className={CHECK_HIT}>
+                          <input
+                            type="checkbox"
+                            aria-label="Select all rows"
+                            className="h-5 w-5 accent-primary"
+                            checked={rows.length > 0 && rows.every((r) => selection.selectedIds.has(r.id))}
+                            ref={(el) => {
+                              if (el) el.indeterminate = rows.some((r) => selection.selectedIds.has(r.id)) && !rows.every((r) => selection.selectedIds.has(r.id));
+                            }}
+                            onChange={(e) =>
+                              selection.onChange(
+                                e.target.checked
+                                  ? new Set([...selection.selectedIds, ...rows.map((r) => r.id)])
+                                  : new Set([...selection.selectedIds].filter((id) => !rows.some((r) => r.id === id))),
+                              )
+                            }
+                          />
+                        </label>
                       ) : header.isPlaceholder ? null : canSort ? (
                         <button
                           type="button"
                           onClick={header.column.getToggleSortingHandler()}
-                          className="inline-flex items-center gap-1 rounded-sm hover:text-foreground"
+                          className="inline-flex min-h-9 items-center gap-1 rounded-sm hover:text-foreground"
                         >
                           {flexRender(header.column.columnDef.header, header.getContext())}
                           {sorted === "asc" ? (
@@ -182,18 +187,20 @@ export function DataTable<T>({
                   {row.getVisibleCells().map((cell) =>
                     cell.column.id === "__select" && selection ? (
                       <TableCell key={cell.id} onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          aria-label={`Select row ${row.id}`}
-                          className="h-4 w-4 accent-primary"
-                          checked={selection.selectedIds.has(row.id)}
-                          onChange={(e) => {
-                            const next = new Set(selection.selectedIds);
-                            if (e.target.checked) next.add(row.id);
-                            else next.delete(row.id);
-                            selection.onChange(next);
-                          }}
-                        />
+                        <label className={CHECK_HIT}>
+                          <input
+                            type="checkbox"
+                            aria-label={`Select row ${row.id}`}
+                            className="h-5 w-5 accent-primary"
+                            checked={selection.selectedIds.has(row.id)}
+                            onChange={(e) => {
+                              const next = new Set(selection.selectedIds);
+                              if (e.target.checked) next.add(row.id);
+                              else next.delete(row.id);
+                              selection.onChange(next);
+                            }}
+                          />
+                        </label>
                       </TableCell>
                     ) : (
                       <TableCell key={cell.id} className={metaClass(cell.column)}>
