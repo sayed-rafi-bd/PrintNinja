@@ -1,7 +1,6 @@
 # UI guide
 
 How the PrintNinja interface is put together, so new screens match the rest.
-Background and decisions: [`UI_CORPORATE_PLAN.md`](UI_CORPORATE_PLAN.md).
 
 ## Principles
 
