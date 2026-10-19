@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use printninja::render::raster::RasterImage;
+    use printninja_lib::render::raster::RasterImage;
 
     #[test]
     fn test_raster_image_creation() {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Bookmark, Download, Eye, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { Bookmark, Download, Eye, RotateCcw, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { invoke } from "@/lib/invoke";
@@ -55,6 +55,8 @@ export function HistoryPage() {
     { kind: "bulk-reprint" } | { kind: "bulk-retry" } | { kind: "delete"; job: HistoryJob } | null
   >(null);
   const [busy, setBusy] = useState(false);
+  // Phones: only Search is shown until this is opened (md and up always shows everything).
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -195,10 +197,19 @@ export function HistoryPage() {
   };
 
   const columns = useMemo<ColumnDef<HistoryJob>[]>(() => [
-    { id: "id", header: "Job", accessorFn: (j) => j.id, enableSorting: true, cell: (c) => <span className="font-mono text-xs">#{c.row.original.id}</span> },
+    {
+      id: "id", header: "Job", accessorFn: (j) => j.id, enableSorting: true,
+      cell: (c) => (
+        <div>
+          <span className="font-mono text-xs">#{c.row.original.id}</span>
+          {/* Phones drop the Printer column; show it under the job number instead. */}
+          <p className="max-w-[4.25rem] truncate text-xs text-muted-foreground sm:hidden">{printerName(c.row.original.printer_id)}</p>
+        </div>
+      ),
+    },
     { id: "time", header: "Time", accessorFn: (j) => j.finished_at || j.started_at || "", enableSorting: true, meta: { className: "hidden md:table-cell" }, cell: (c) => <span className="text-muted-foreground">{fmtTime(c.row.original)}</span> },
     { id: "template", header: "Template", meta: { className: "hidden lg:table-cell" }, cell: (c) => c.row.original.template_id != null ? `Template #${c.row.original.template_id}` : "—" },
-    { id: "printer", header: "Printer", cell: (c) => printerName(c.row.original.printer_id) },
+    { id: "printer", header: "Printer", meta: { className: "hidden sm:table-cell" }, cell: (c) => printerName(c.row.original.printer_id) },
     { id: "status", header: "Status", accessorFn: (j) => j.status, enableSorting: true, cell: (c) => <JobStatusBadge status={c.row.original.status} /> },
     { id: "duration", header: "Duration", meta: { className: "hidden xl:table-cell" }, cell: (c) => c.row.original.duration_ms != null ? `${c.row.original.duration_ms} ms` : "—" },
     { id: "source", header: "Source", meta: { className: "hidden lg:table-cell" }, cell: (c) => <Badge variant="outline">{c.row.original.source}</Badge> },
@@ -210,8 +221,9 @@ export function HistoryPage() {
       cell: (c) => {
         const job = c.row.original;
         return (
-          <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-            <Button variant="ghost" size="icon" aria-label={`View job ${job.id}`} title="View details" onClick={() => store.setSelectedJob(job)}>
+          <div className="flex flex-wrap justify-end gap-1" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+            {/* On phones tapping the row opens the same details, so this button is hidden there. */}
+            <Button variant="ghost" size="icon" className="hidden sm:inline-flex" aria-label={`View job ${job.id}`} title="View details" onClick={() => store.setSelectedJob(job)}>
               <Eye className="h-4 w-4" />
             </Button>
             <Button variant="ghost" size="icon" aria-label={`Reprint job ${job.id}`} title={t("history.reprint")} onClick={() => handleReprint(job)}>
@@ -231,6 +243,8 @@ export function HistoryPage() {
   ], [printers, t]);
 
   const f = store.filter;
+  // Filters hidden behind the phone toggle (everything except Search), for its badge count.
+  const moreFiltersActive = [f.status !== "all", f.printer !== "all", f.source !== "all", !!f.dateFrom, !!f.dateTo].filter(Boolean).length;
   const filtersActive = f.status !== "all" || f.printer !== "all" || f.source !== "all" || !!f.dateFrom || !!f.dateTo || !!f.search;
   const job = store.selectedJob;
 
@@ -243,13 +257,26 @@ export function HistoryPage() {
         </Button>
       </PageHeader>
 
-      {/* Filter bar stays visible while the table scrolls */}
-      <div className="sticky top-0 z-20 -mx-1 rounded-lg border bg-card p-3 shadow-[0_1px_0_hsl(var(--border))]" role="search" aria-label="Filter print jobs">
+      {/* Filter bar stays visible while the table scrolls, but only from tablet width up:
+          on a phone it stacks to ~500px tall and would cover most of the screen. */}
+      <div className="-mx-1 rounded-lg border bg-card p-3 shadow-[0_1px_0_hsl(var(--border))] md:sticky md:top-0 md:z-20" role="search" aria-label="Filter print jobs">
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative w-full sm:min-w-[220px] sm:flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input aria-label={t("common.search")} placeholder={t("common.search")} className="pl-9" value={f.search} onChange={(e) => store.setFilter({ search: e.target.value })} />
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="md:hidden"
+            aria-expanded={filtersOpen}
+            aria-controls="history-more-filters"
+            onClick={() => setFiltersOpen((v) => !v)}
+          >
+            <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+            Filters{moreFiltersActive > 0 ? ` (${moreFiltersActive})` : ""}
+          </Button>
+          <div id="history-more-filters" className={`${filtersOpen ? "contents" : "hidden"} md:contents`}>
           <Select value={f.status} onValueChange={(v) => store.setFilter({ status: v })}>
             <SelectTrigger aria-label="Filter by status" className="w-full sm:w-[140px]"><SelectValue placeholder={t("history.filter_status")} /></SelectTrigger>
             <SelectContent>
@@ -302,6 +329,7 @@ export function HistoryPage() {
               <DropdownMenuItem disabled={!filtersActive} onSelect={() => setSaveOpen(true)}>Save current filters…</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          </div>
           {filtersActive && <Button variant="ghost" size="sm" onClick={store.clearFilter}>Clear</Button>}
         </div>
       </div>

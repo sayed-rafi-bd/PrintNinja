@@ -687,8 +687,17 @@ mod tests {
         let cleaned = strip_at_page(css);
         assert!(!cleaned.contains("@page"), "{}", cleaned);
         assert!(!cleaned.contains("counter(page)"), "{}", cleaned);
-        assert!(cleaned.contains("* { box-sizing: border-box; }"), "{}", cleaned);
-        assert_eq!(cleaned.matches('}').count(), cleaned.matches('{').count(), "{}", cleaned);
+        assert!(
+            cleaned.contains("* { box-sizing: border-box; }"),
+            "{}",
+            cleaned
+        );
+        assert_eq!(
+            cleaned.matches('}').count(),
+            cleaned.matches('{').count(),
+            "{}",
+            cleaned
+        );
     }
 
     #[test]

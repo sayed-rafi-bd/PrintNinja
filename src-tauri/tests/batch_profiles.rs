@@ -10,7 +10,7 @@ fn db() -> Connection {
     let mut c = Connection::open_in_memory().expect("open");
     c.execute_batch(include_str!("../src/db/schema.sql"))
         .expect("schema");
-    printninja::db::ensure_v2_schema(&mut c).expect("v2 schema");
+    printninja_lib::db::ensure_v2_schema(&mut c).expect("v2 schema");
     c
 }
 

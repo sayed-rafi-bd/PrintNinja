@@ -94,7 +94,7 @@ fn the_renderer_refuses_remote_references() {
         "the renderer is expected to reject @import with a remote URL"
     );
 
-    let issues = printninja::render::handlebars::find_remote_refs(
+    let issues = printninja_lib::render::handlebars::find_remote_refs(
         "<style>@import url('https://cdn.example.com/l.css');</style>",
         "",
     );

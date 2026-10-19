@@ -3,16 +3,17 @@
 //!
 //! They run against a real SQLite connection, so the SQL is actually executed.
 
-use printninja::commands::template::{
+use printninja_lib::commands::template::{
     write_publish_info, write_template_meta, SetPublishInfoRequest, UpdateTemplateMetaRequest,
 };
+use printninja_lib::AppError;
 use rusqlite::Connection;
 
 fn seeded_db() -> Connection {
     let mut conn = Connection::open_in_memory().expect("open in-memory db");
     conn.execute_batch(include_str!("../src/db/schema.sql"))
         .expect("apply schema");
-    printninja::db::ensure_v2_schema(&mut conn).expect("apply v2 schema");
+    printninja_lib::db::ensure_v2_schema(&mut conn).expect("apply v2 schema");
     conn.execute(
         "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, readme, summary)
          VALUES ('Invoice', 80, 200, 'portrait', '# Invoice', 'A4 invoice')",
@@ -134,7 +135,7 @@ fn update_template_meta_reports_a_missing_template() {
         },
     )
     .unwrap_err();
-    assert!(matches!(err, printninja::AppError::NotFound(_)), "{err:?}");
+    assert!(matches!(err, AppError::NotFound(_)), "{err:?}");
 }
 
 // ── set_publish_info ────────────────────────────────────────────────────────
@@ -213,8 +214,5 @@ fn set_publish_info_rejects_an_id_that_is_not_a_uuid() {
         },
     )
     .unwrap_err();
-    assert!(
-        matches!(err, printninja::AppError::Validation(_)),
-        "{err:?}"
-    );
+    assert!(matches!(err, AppError::Validation(_)), "{err:?}");
 }

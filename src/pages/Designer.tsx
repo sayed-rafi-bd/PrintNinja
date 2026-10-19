@@ -948,9 +948,9 @@ export function DesignerPage() {
           )}
 
           </TabsContent>
-          {/* Action Bar */}
-          <div className="flex items-center justify-between">
-            <div className="flex gap-2">
+          {/* Action Bar: wraps on phones so Save is never pushed off-screen */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" onClick={() => setShowBarcodeDialog(true)}>
                 <QrCode className="h-4 w-4" />
                 Barcode
@@ -990,7 +990,7 @@ export function DesignerPage() {
                 }}
               />
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" onClick={() => setShowVersionDialog(true)}>
                 <Save className="h-4 w-4" />
                 Save Version

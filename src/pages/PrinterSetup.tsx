@@ -260,7 +260,7 @@ export function PrinterSetupPage() {
             <div className="min-w-0">
               <p className="truncate font-medium">{p.name}</p>
               <p
-                className="max-w-[260px] truncate font-mono text-xs text-muted-foreground"
+                className="max-w-[140px] truncate font-mono text-xs text-muted-foreground sm:max-w-[260px]"
                 title={p.address}
               >
                 {p.address}
@@ -286,10 +286,11 @@ export function PrinterSetupPage() {
       cell: (c) => {
         const p = c.row.original;
         return (
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" size="sm" disabled={testing === p.id} onClick={() => testPrinter(p)} aria-label={`Test print on ${p.name}`}>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="outline" size="sm" disabled={testing === p.id} onClick={() => testPrinter(p)} aria-label={`Test print on ${p.name}`} title={t("printers.test_print")}>
               <TestTube className="h-4 w-4" aria-hidden="true" />
-              {testing === p.id ? "Testing…" : t("printers.test_print")}
+              {/* Icon-only on phones so the row fits; the aria-label keeps it named. */}
+              <span className="hidden sm:inline">{testing === p.id ? "Testing…" : t("printers.test_print")}</span>
             </Button>
             <Button variant="ghost" size="icon" aria-label={`Remove ${p.name}`} title="Remove" onClick={() => setRemoveTarget(p)}>
               <Trash2 className="h-4 w-4" />
