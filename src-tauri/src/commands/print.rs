@@ -402,7 +402,7 @@ pub fn lookup_printer(db: &DbState, name: &str) -> Option<(String, String)> {
     let guard = db.lock().ok()?;
     let conn = guard.connection().ok()?;
     conn.query_row(
-        "SELECT printer_type, COALESCE(address, '') FROM printers WHERE name = ?1 COLLATE NOCASE",
+        "SELECT type, COALESCE(address, '') FROM printers WHERE name = ?1 COLLATE NOCASE",
         [name],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )
