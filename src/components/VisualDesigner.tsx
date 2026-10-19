@@ -23,6 +23,7 @@ export function VisualDesigner({
 }: VisualDesignerProps) {
   const editorRef = useRef<any>(null);
   const [grapesLoaded, setGrapesLoaded] = useState(false);
+  const [grapesFailed, setGrapesFailed] = useState(false);
   const [htmlCode, setHtmlCode] = useState(initialHtml);
   const [cssCode, setCssCode] = useState(initialCss);
   const syncDirectionRef = useRef<"visual" | "code">("visual");
@@ -34,6 +35,7 @@ export function VisualDesigner({
     script.onload = () => setGrapesLoaded(true);
     script.onerror = () => {
       console.warn("Failed to load GrapesJS, falling back to code editor");
+      setGrapesFailed(true);
     };
     document.head.appendChild(script);
 
@@ -159,10 +161,16 @@ export function VisualDesigner({
               <CardTitle className="text-sm">Visual Canvas</CardTitle>
             </CardHeader>
             <CardContent className="p-0">
+              {grapesFailed && (
+                <p role="status" className="p-4 text-sm text-muted-foreground">
+                  The visual editor could not be loaded. It is downloaded from the internet, so it is not available
+                  offline. You can still edit this template in the Code tab.
+                </p>
+              )}
               <div
                 ref={editorRef}
                 id="gjs-container"
-                className="min-h-[500px] border-0"
+                className={grapesFailed ? "hidden" : "min-h-[500px] border-0"}
               />
               <div id="blocks" className="hidden" />
             </CardContent>

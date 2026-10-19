@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Bookmark, Download, Eye, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { Bookmark, Download, Eye, RotateCcw, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { invoke } from "@/lib/invoke";
@@ -55,6 +55,8 @@ export function HistoryPage() {
     { kind: "bulk-reprint" } | { kind: "bulk-retry" } | { kind: "delete"; job: HistoryJob } | null
   >(null);
   const [busy, setBusy] = useState(false);
+  // Phones: only Search is shown until this is opened (md and up always shows everything).
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -241,6 +243,8 @@ export function HistoryPage() {
   ], [printers, t]);
 
   const f = store.filter;
+  // Filters hidden behind the phone toggle (everything except Search), for its badge count.
+  const moreFiltersActive = [f.status !== "all", f.printer !== "all", f.source !== "all", !!f.dateFrom, !!f.dateTo].filter(Boolean).length;
   const filtersActive = f.status !== "all" || f.printer !== "all" || f.source !== "all" || !!f.dateFrom || !!f.dateTo || !!f.search;
   const job = store.selectedJob;
 
@@ -261,6 +265,18 @@ export function HistoryPage() {
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input aria-label={t("common.search")} placeholder={t("common.search")} className="pl-9" value={f.search} onChange={(e) => store.setFilter({ search: e.target.value })} />
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="md:hidden"
+            aria-expanded={filtersOpen}
+            aria-controls="history-more-filters"
+            onClick={() => setFiltersOpen((v) => !v)}
+          >
+            <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+            Filters{moreFiltersActive > 0 ? ` (${moreFiltersActive})` : ""}
+          </Button>
+          <div id="history-more-filters" className={`${filtersOpen ? "contents" : "hidden"} md:contents`}>
           <Select value={f.status} onValueChange={(v) => store.setFilter({ status: v })}>
             <SelectTrigger aria-label="Filter by status" className="w-full sm:w-[140px]"><SelectValue placeholder={t("history.filter_status")} /></SelectTrigger>
             <SelectContent>
@@ -313,6 +329,7 @@ export function HistoryPage() {
               <DropdownMenuItem disabled={!filtersActive} onSelect={() => setSaveOpen(true)}>Save current filters…</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          </div>
           {filtersActive && <Button variant="ghost" size="sm" onClick={store.clearFilter}>Clear</Button>}
         </div>
       </div>
