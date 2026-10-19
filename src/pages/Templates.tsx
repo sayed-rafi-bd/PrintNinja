@@ -1,6 +1,18 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import type { ColumnDef } from "@tanstack/react-table";
+import { Bookmark, BookmarkCheck, Eye, Pencil, Printer } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { PageHeader } from "@/components/PageHeader";
+import { StatusBadge } from "@/components/StatusBadge";
 import { invoke } from "@tauri-apps/api/core";
 import { Card, CardContent } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DataTable } from "@/components/DataTable";
+import { EmptyState } from "@/components/EmptyState";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { usePrintStore } from "@/lib/store/printStore";
+import { DEFAULT_MOCK_DATA } from "@/lib/templates/defaultTemplate";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -45,7 +57,14 @@ interface ServerSummary {
 }
 
 export function TemplatesPage() {
-  const [activeTab, setActiveTab] = useState("community");
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState("mine");
+  const [configured, setConfigured] = useState(true);
+  const [removeTarget, setRemoveTarget] = useState<LocalTemplate | null>(null);
+  const [previewTpl, setPreviewTpl] = useState<ServerSummary | null>(null);
+  const [previewHtml, setPreviewHtml] = useState("");
+  const [previewError, setPreviewError] = useState("");
   const [community, setCommunity] = useState<ServerSummary[]>([]);
   const [communityLoading, setCommunityLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -68,6 +87,7 @@ export function TemplatesPage() {
 
   const loadCommunity = useCallback(async () => {
     const url = await share.getServiceUrl();
+    setConfigured(!!url);
     if (!url) {
       setCommunity([]);
       setOffline(false);
@@ -231,213 +251,243 @@ export function TemplatesPage() {
     }
   };
 
-  const handleUse = async (tpl: LocalTemplate | ServerSummary, isSaved: boolean) => {
-    // For saved copies, record use on server (best-effort, silent if offline)
-    const remoteId = (tpl as any).remote_id ?? (tpl as any).id;
-    if (isSaved && remoteId) {
+  // Opens the Print page with this template selected.
+  const handleUse = async (tpl: LocalTemplate, isSavedCopy: boolean) => {
+    // For saved copies, record use on the share service (best effort, silent if offline).
+    if (isSavedCopy && tpl.remote_id) {
       const url = await share.getServiceUrl();
       const token = await share.getSessionToken();
       if (url && token) {
         try {
-          await fetch(`${url}/v1/templates/${remoteId}/use`, {
+          await fetch(`${url}/v1/templates/${tpl.remote_id}/use`, {
             method: "POST",
             headers: { Authorization: `Bearer ${token}` },
           });
         } catch {}
       }
     }
-    // For local demo, just toast
-    toast.success(`Printing "${(tpl as any).name}"`);
+    usePrintStore.getState().setTemplateId(String(tpl.id));
+    navigate("/print");
+  };
+
+  const openPreview = async (tpl: ServerSummary) => {
+    setPreviewTpl(tpl);
+    setPreviewHtml("");
+    setPreviewError("");
+    try {
+      const url = await share.getServiceUrl();
+      if (!url) throw new Error("Share service not configured");
+      const res = await fetch(`${url}/v1/templates/${tpl.id}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const detail = await res.json();
+      const { renderTemplate } = await import("@/lib/render/renderTemplate");
+      setPreviewHtml(renderTemplate(detail.body ?? "", "", DEFAULT_MOCK_DATA as any));
+    } catch (e) {
+      setPreviewError(`Could not load the preview: ${e}`);
+    }
   };
 
   const isSaved = (serverId: string) => saved.some((t) => t.remote_id === serverId);
 
+  const mineColumns = useMemo<ColumnDef<LocalTemplate>[]>(() => [
+    {
+      id: "name", header: "Template", accessorFn: (r) => r.name.toLowerCase(), enableSorting: true,
+      cell: (c) => (
+        <div className="min-w-0">
+          <p className="truncate font-medium">{c.row.original.name}</p>
+          <p className="truncate text-xs text-muted-foreground">{c.row.original.summary || "No summary"}</p>
+        </div>
+      ),
+    },
+    {
+      id: "status", header: "Status",
+      cell: (c) => {
+        const tpl = c.row.original;
+        if (!tpl.remote_id) return <StatusBadge status="draft" />;
+        return share.hasUnpublishedChanges(tpl)
+          ? <StatusBadge status="draft" label="Changes not published" />
+          : <StatusBadge status="published" />;
+      },
+    },
+    { id: "size", header: "Page size", meta: { className: "hidden md:table-cell" }, cell: (c) => `${c.row.original.page_w_mm} × ${c.row.original.page_h_mm} mm` },
+    { id: "updated", header: "Updated", accessorFn: (r) => r.updated_at, enableSorting: true, meta: { className: "hidden md:table-cell" }, cell: (c) => c.row.original.updated_at.slice(0, 10) },
+    {
+      id: "actions", header: () => <span className="sr-only">Actions</span>, meta: { className: "text-right" },
+      cell: (c) => (
+        <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+          <Button size="sm" variant="outline" onClick={() => navigate(`/template/${c.row.original.id}`)}>
+            <Pencil className="h-4 w-4" aria-hidden="true" />Edit
+          </Button>
+          <Button size="sm" onClick={() => handleUse(c.row.original, false)}>
+            <Printer className="h-4 w-4" aria-hidden="true" />Print
+          </Button>
+        </div>
+      ),
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], []);
+
+  const savedColumns = useMemo<ColumnDef<LocalTemplate>[]>(() => [
+    {
+      id: "name", header: "Template", accessorFn: (r) => r.name.toLowerCase(), enableSorting: true,
+      cell: (c) => (
+        <div className="min-w-0">
+          <p className="truncate font-medium">{c.row.original.name}</p>
+          <p className="truncate text-xs text-muted-foreground">{c.row.original.summary || "No summary"}</p>
+        </div>
+      ),
+    },
+    { id: "from", header: "Saved from", meta: { className: "hidden md:table-cell" }, cell: (c) => c.row.original.origin_owner ?? "unknown" },
+    {
+      id: "status", header: "Status",
+      cell: (c) => c.row.original.withdrawn
+        ? <StatusBadge status="withdrawn" label="Withdrawn by author" />
+        : <StatusBadge status="saved" />,
+    },
+    {
+      id: "actions", header: () => <span className="sr-only">Actions</span>, meta: { className: "text-right" },
+      cell: (c) => (
+        <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+          <Button size="sm" onClick={() => handleUse(c.row.original, true)}>
+            <Printer className="h-4 w-4" aria-hidden="true" />Print
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setRemoveTarget(c.row.original)}>Remove</Button>
+        </div>
+      ),
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], []);
+
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Templates</h1>
+      <PageHeader title="Templates" description={t("pages.templates")} />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList>
+          <TabsTrigger value="mine">Mine ({mine.length})</TabsTrigger>
+          <TabsTrigger value="saved">Saved ({saved.length})</TabsTrigger>
           <TabsTrigger value="community">Community</TabsTrigger>
-          <TabsTrigger value="mine">Mine</TabsTrigger>
-          <TabsTrigger value="saved">★ Saved</TabsTrigger>
         </TabsList>
 
-        {/* Community */}
-        <TabsContent value="community" className="space-y-4">
-          <div className="flex flex-col md:flex-row gap-2">
-            <Input
-              placeholder="Search name…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="flex-1"
-            />
+        {/* Mine */}
+        <TabsContent value="mine" className="mt-4">
+          <DataTable
+            caption="My templates"
+            columns={mineColumns}
+            data={mine}
+            getRowId={(r) => String(r.id)}
+            onRowActivate={(r) => navigate(`/template/${r.id}`)}
+            empty={{ title: "No templates yet", description: "Create one in Designer.", action: { label: "Open Designer", onClick: () => navigate("/") } }}
+          />
+        </TabsContent>
+
+        {/* Saved */}
+        <TabsContent value="saved" className="mt-4">
+          <DataTable
+            caption="Saved templates"
+            columns={savedColumns}
+            data={saved}
+            getRowId={(r) => String(r.id)}
+            empty={{ title: "No saved templates", description: "Save a community template to keep a copy that works offline.", action: { label: "Browse community", onClick: () => setActiveTab("community") } }}
+          />
+        </TabsContent>
+
+        {/* Community gallery: previews matter here, so cards stay */}
+        <TabsContent value="community" className="mt-4 space-y-4">
+          <div className="flex flex-col gap-2 md:flex-row">
+            <Input aria-label="Search templates" placeholder="Search by name" value={search} onChange={(e) => setSearch(e.target.value)} className="flex-1" />
             <Select value={sort} onValueChange={setSort}>
-              <SelectTrigger className="w-[160px]">
-                <SelectValue />
-              </SelectTrigger>
+              <SelectTrigger aria-label="Sort templates" className="w-full md:w-[170px]"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="updated">Recently updated</SelectItem>
                 <SelectItem value="used">Most used</SelectItem>
                 <SelectItem value="name">A–Z</SelectItem>
               </SelectContent>
             </Select>
-            <Button variant="outline" onClick={loadCommunity}>
-              Refresh
-            </Button>
+            <Button variant="outline" onClick={loadCommunity}>Refresh</Button>
           </div>
 
-          {offline ? (
-            <Card>
-              <CardContent className="p-8 text-center space-y-2">
-                <p className="font-medium">Offline</p>
-                <p className="text-sm text-muted-foreground">Community needs a network connection. Your Saved templates are still available offline.</p>
-                <Button variant="outline" onClick={loadCommunity}>
-                  Retry
-                </Button>
-              </CardContent>
-            </Card>
+          {!configured ? (
+            <Card><EmptyState title="Share service not set up" description="Add a share service address in Settings to browse templates published by others." action={{ label: "Open Settings", onClick: () => navigate("/settings") }} /></Card>
+          ) : offline ? (
+            <Card><EmptyState title="Can’t reach the share service" description="Community needs a network connection. Your saved templates still work offline." action={{ label: "Try again", onClick: loadCommunity }} /></Card>
           ) : communityLoading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <p className="text-sm text-muted-foreground" role="status">Loading…</p>
           ) : community.length === 0 ? (
-            <Card>
-              <CardContent className="p-8 text-center">
-                <p className="text-sm text-muted-foreground">No published templates yet. Publish one from Mine to see it here.</p>
-              </CardContent>
-            </Card>
+            <Card><EmptyState title="No published templates yet" description="Publish one from Designer to see it here." /></Card>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <ul className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
               {community.map((tpl) => {
                 const savedState = isSaved(tpl.id);
                 const savingState = saving.has(tpl.id);
                 const own = mine.some((m) => m.remote_id === tpl.id);
                 return (
-                  <Card key={tpl.id} className="overflow-hidden">
-                    <div className={`h-1 ${own ? "bg-cyan-500" : "bg-emerald-500"}`} />
-                    <CardContent className="p-4 space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <h3 className="font-medium truncate">{tpl.name}</h3>
-                        {own ? (
-                          <Badge variant="outline" className="bg-cyan-50 text-cyan-700 border-cyan-200">
-                            Yours
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
-                            Community
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground line-clamp-2">{tpl.summary || "No summary"}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {tpl.owner_handle} · {tpl.use_count} prints · {tpl.page_w_mm}×{tpl.page_h_mm} mm
-                      </p>
-                      <div className="flex gap-2 pt-2">
-                        {!own && (
-                          <Button
-                            size="sm"
-                            variant={savedState ? "secondary" : "default"}
-                            aria-pressed={savedState}
-                            disabled={savedState || savingState}
-                            onClick={() => handleSave(tpl)}
-                            className={savedState ? "bg-violet-100 text-violet-700" : ""}
-                          >
-                            {savingState ? "…" : savedState ? "★ Saved" : "☆ Save"}
+                  <li key={tpl.id}>
+                    <Card className="h-full">
+                      <CardContent className="space-y-2 p-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <h2 className="truncate font-medium">{tpl.name}</h2>
+                          {own ? <StatusBadge status="published" label="Yours" /> : <Badge variant="outline">Community</Badge>}
+                        </div>
+                        <p className="line-clamp-2 text-xs text-muted-foreground">{tpl.summary || "No summary"}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {tpl.owner_handle} · {tpl.use_count} prints · {tpl.page_w_mm}×{tpl.page_h_mm} mm
+                        </p>
+                        <div className="flex gap-2 pt-2">
+                          {!own && (
+                            <Button size="sm" variant={savedState ? "secondary" : "default"} aria-pressed={savedState} disabled={savedState || savingState} onClick={() => handleSave(tpl)}>
+                              {savedState ? <BookmarkCheck className="h-4 w-4" aria-hidden="true" /> : <Bookmark className="h-4 w-4" aria-hidden="true" />}
+                              {savingState ? "Saving…" : savedState ? "Saved" : "Save"}
+                            </Button>
+                          )}
+                          <Button size="sm" variant="outline" onClick={() => openPreview(tpl)}>
+                            <Eye className="h-4 w-4" aria-hidden="true" />Preview
                           </Button>
-                        )}
-                        <Button size="sm" variant="outline" onClick={() => toast.info("Preview not yet implemented")}>
-                          Preview
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </li>
                 );
               })}
-            </div>
-          )}
-        </TabsContent>
-
-        {/* Mine */}
-        <TabsContent value="mine" className="space-y-4">
-          {mine.length === 0 ? (
-            <Card>
-              <CardContent className="p-8 text-center">
-                <p className="text-sm text-muted-foreground">No templates yet. Create one in Designer.</p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {mine.map((tpl) => (
-                <Card key={tpl.id} className="overflow-hidden">
-                  <div className={`h-1 ${tpl.remote_id ? "bg-emerald-500" : "bg-amber-500"}`} />
-                  <CardContent className="p-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-medium truncate">{tpl.name}</h3>
-                      {tpl.remote_id ? (
-                        <Badge className="bg-emerald-500 text-white">Published</Badge>
-                      ) : (
-                        <Badge variant="outline" className="border-amber-500 text-amber-700 bg-amber-50">
-                          Draft
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground truncate">{tpl.summary || "No summary"}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {tpl.page_w_mm}×{tpl.page_h_mm} mm · {tpl.updated_at.slice(0, 10)}
-                    </p>
-                    <div className="flex gap-2 pt-2">
-                      <Button size="sm" variant="outline" onClick={() => (window.location.href = `/template/${tpl.id}`)}>
-                        Edit
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => handleUse(tpl, false)}>
-                        Print
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </TabsContent>
-
-        {/* Saved */}
-        <TabsContent value="saved" className="space-y-4">
-          {saved.length === 0 ? (
-            <Card>
-              <CardContent className="p-8 text-center space-y-2">
-                <p className="text-sm text-muted-foreground">No saved templates yet.</p>
-                <p className="text-xs text-muted-foreground">Browse Community and tap ☆ to save.</p>
-                <Button variant="outline" size="sm" onClick={() => setActiveTab("community")}>
-                  Browse Community
-                </Button>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {saved.map((tpl) => (
-                <Card key={tpl.id} className="overflow-hidden">
-                  <div className={`h-1 ${tpl.withdrawn ? "bg-slate-400" : "bg-violet-500"}`} />
-                  <CardContent className="p-4 space-y-2">
-                    <h3 className="font-medium truncate">{tpl.name}</h3>
-                    <p className="text-xs text-muted-foreground">
-                      Saved from {tpl.origin_owner ?? "unknown"}
-                      {tpl.withdrawn && <span className="ml-2 text-slate-500">· withdrawn by author</span>}
-                    </p>
-                    <p className="text-xs text-muted-foreground line-clamp-2">{tpl.summary || ""}</p>
-                    <div className="flex gap-2 pt-2">
-                      <Button size="sm" onClick={() => handleUse(tpl, true)}>
-                        Print
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => handleUnsave(tpl)}>
-                        Unsave
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+            </ul>
           )}
         </TabsContent>
       </Tabs>
+
+      <ConfirmDialog
+        open={removeTarget != null}
+        onOpenChange={(o) => { if (!o) setRemoveTarget(null); }}
+        title={`Remove “${removeTarget?.name ?? ""}” from Saved?`}
+        description="The local copy is deleted. You can save it again from Community."
+        confirmLabel="Remove template"
+        destructive
+        onConfirm={async () => { if (removeTarget) await handleUnsave(removeTarget); setRemoveTarget(null); }}
+      />
+
+      <Dialog open={previewTpl != null} onOpenChange={(o) => { if (!o) setPreviewTpl(null); }}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{previewTpl?.name}</DialogTitle>
+            <DialogDescription>
+              {previewTpl ? `${previewTpl.page_w_mm} × ${previewTpl.page_h_mm} mm, shown with sample data` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          {previewError ? (
+            <p role="alert" className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">{previewError}</p>
+          ) : previewHtml ? (
+            <div className="max-h-[60vh] overflow-auto rounded-md border bg-muted p-4">
+              <div className="mx-auto bg-white shadow-md" style={{ width: (previewTpl?.page_w_mm ?? 80) * 3.7795, maxWidth: "100%" }}>
+                <iframe srcDoc={previewHtml} sandbox="" className="w-full border-0" style={{ height: (previewTpl?.page_h_mm ?? 200) * 3.7795 }} title="Template preview" />
+              </div>
+            </div>
+          ) : (
+            <p className="py-8 text-center text-sm text-muted-foreground" role="status">Loading preview…</p>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPreviewTpl(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

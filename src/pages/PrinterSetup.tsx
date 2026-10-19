@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ColumnDef } from "@tanstack/react-table";
+import { PageHeader } from "@/components/PageHeader";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DataTable } from "@/components/DataTable";
+import { StatusBadge } from "@/components/StatusBadge";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
   Select,
   SelectContent,
@@ -14,27 +18,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Plus,
-  Printer,
-  Wifi,
-  Usb,
-  Bluetooth,
-  Monitor,
-  Trash2,
-  TestTube,
-  Scan,
-} from "lucide-react";
+import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Plus, Printer, Wifi, Usb, Bluetooth, Monitor, Trash2, TestTube, Scan, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
-import { EmptyState } from "@/components/EmptyState";
 
 const PRINTER_TYPES = [
   { value: "ipp", label: "Wi-Fi / LAN (IPP)" },
@@ -79,6 +66,15 @@ interface SystemPrinter {
   status?: string;
 }
 
+/** Tabs group printers by how they connect. */
+const GROUPS = [
+  { key: "all", label: "All", types: null as string[] | null },
+  { key: "network", label: "Network", types: ["ipp", "raw_tcp"] },
+  { key: "usb", label: "USB", types: ["usb"] },
+  { key: "bluetooth", label: "Bluetooth", types: ["bluetooth"] },
+  { key: "system", label: "System", types: ["system"] },
+];
+
 const TYPE_ICONS: Record<string, typeof Printer> = {
   ipp: Wifi,
   raw_tcp: Wifi,
@@ -95,6 +91,7 @@ export function PrinterSetupPage() {
   const [tab, setTab] = useState("all");
   const [testing, setTesting] = useState<number | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<SavedPrinter | null>(null);
 
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({
@@ -246,173 +243,144 @@ export function PrinterSetupPage() {
     }
   };
 
-  const filtered = printers.filter((p) =>
-    tab === "all" ? true : p.printer_type === tab,
-  );
+  const counts = (types: string[] | null) =>
+    types ? printers.filter((p) => types.includes(p.printer_type)).length : printers.length;
+  const group = GROUPS.find((g) => g.key === tab) ?? GROUPS[0];
+  const filtered = group.types ? printers.filter((p) => group.types?.includes(p.printer_type)) : printers;
+
+  const columns = useMemo<ColumnDef<SavedPrinter>[]>(() => [
+    {
+      id: "name", header: "Printer", accessorFn: (p) => p.name.toLowerCase(), enableSorting: true,
+      cell: (c) => {
+        const p = c.row.original;
+        const Icon = TYPE_ICONS[p.printer_type] ?? Printer;
+        return (
+          <div className="flex min-w-0 items-center gap-3">
+            <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <div className="min-w-0">
+              <p className="truncate font-medium">{p.name}</p>
+              <p className="truncate font-mono text-xs text-muted-foreground">{p.address}</p>
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      id: "status", header: "Status",
+      cell: (c) => {
+        const st = c.row.original.status;
+        if (st === "online" || st === "offline") return <StatusBadge status={st} />;
+        return <span className="text-xs text-muted-foreground">Not checked</span>;
+      },
+    },
+    { id: "connection", header: "Connection", meta: { className: "hidden md:table-cell" }, cell: (c) => PRINTER_TYPES.find((x) => x.value === c.row.original.printer_type)?.label ?? c.row.original.printer_type },
+    { id: "language", header: "Language", meta: { className: "hidden lg:table-cell" }, cell: (c) => LANGUAGES.find((x) => x.value === c.row.original.language)?.label ?? c.row.original.language },
+    { id: "paper", header: "Paper", meta: { className: "hidden lg:table-cell" }, cell: (c) => (c.row.original.paper_width_mm ? `${c.row.original.paper_width_mm} mm` : "—") },
+    {
+      id: "actions", header: () => <span className="sr-only">Actions</span>, meta: { className: "text-right" },
+      cell: (c) => {
+        const p = c.row.original;
+        return (
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" disabled={testing === p.id} onClick={() => testPrinter(p)} aria-label={`Test print on ${p.name}`}>
+              <TestTube className="h-4 w-4" aria-hidden="true" />
+              {testing === p.id ? "Testing…" : t("printers.test_print")}
+            </Button>
+            <Button variant="ghost" size="icon" aria-label={`Remove ${p.name}`} title="Remove" onClick={() => setRemoveTarget(p)}>
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        );
+      },
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [testing, t]);
+
+  const field = "space-y-1.5";
+  const addressLabel =
+    form.printer_type === "system" ? "Printer name"
+    : form.printer_type === "usb" ? "USB device ID"
+    : form.printer_type === "bluetooth" ? "Bluetooth MAC or COM port"
+    : "Address";
+  const addressHint =
+    form.printer_type === "ipp" ? "For example http://192.168.1.100"
+    : form.printer_type === "raw_tcp" ? "For example 192.168.1.100:9100"
+    : "";
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">{t("printers.title")}</h1>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={load}>
-            Refresh
-          </Button>
-          <Button variant="outline" size="sm" onClick={scanAndAddSystem} disabled={scanning}>
-            <Scan className="h-4 w-4" />
-            {scanning ? "Scanning…" : "Scan System"}
-          </Button>
-          <Button size="sm" onClick={() => setShowAdd(true)}>
-            <Plus className="h-4 w-4" />
-            {t("printers.add_printer")}
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-4">
+      <PageHeader title={t("printers.title")} description={t("pages.printers")}>
+        <Button variant="outline" size="sm" onClick={load}>
+          <RefreshCw className="h-4 w-4" aria-hidden="true" />
+          Refresh
+        </Button>
+        <Button variant="outline" size="sm" onClick={scanAndAddSystem} disabled={scanning}>
+          <Scan className="h-4 w-4" aria-hidden="true" />
+          {scanning ? "Scanning…" : "Scan system"}
+        </Button>
+        <Button size="sm" onClick={() => setShowAdd(true)}>
+          <Plus className="h-4 w-4" aria-hidden="true" />
+          {t("printers.add_printer")}
+        </Button>
+      </PageHeader>
 
       <Tabs value={tab} onValueChange={setTab} className="w-full">
         <TabsList>
-          <TabsTrigger value="all">All</TabsTrigger>
-          <TabsTrigger value="wifi">Wi-Fi / LAN</TabsTrigger>
-          <TabsTrigger value="usb">USB</TabsTrigger>
-          <TabsTrigger value="bluetooth">Bluetooth</TabsTrigger>
-          <TabsTrigger value="system">System</TabsTrigger>
+          {GROUPS.map((g) => (
+            <TabsTrigger key={g.key} value={g.key}>
+              {g.label} ({counts(g.types)})
+            </TabsTrigger>
+          ))}
         </TabsList>
 
-        {["all", "wifi", "usb", "bluetooth", "system"].map((key) => (
-          <TabsContent key={key} value={key} className="mt-4">
-            {loading ? (
-              <p className="py-12 text-center text-muted-foreground">
-                Loading printers…
-              </p>
-            ) : filtered.length === 0 ? (
-              <EmptyState
-                icon={Printer}
-                title="No printers configured"
-                description={
-                  tab === "all"
-                    ? "Add your first printer to start printing."
-                    : `No ${tab === "wifi" ? "Wi-Fi / LAN" : tab} printers yet.`
-                }
-                action={{
-                  label: "Add Printer",
-                  onClick: () => setShowAdd(true),
-                }}
-              />
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filtered.map((printer) => {
-                  const Icon =
-                    TYPE_ICONS[printer.printer_type] ?? Printer;
-                  const online = printer.status !== "offline";
-                  return (
-                    <Card key={printer.id}>
-                      <CardHeader className="pb-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="p-2 rounded-md bg-secondary shrink-0">
-                              <Icon className="h-5 w-5" />
-                            </div>
-                            <div className="min-w-0">
-                              <CardTitle className="text-base truncate">
-                                {printer.name}
-                              </CardTitle>
-                              <p className="text-xs text-muted-foreground truncate">
-                                {printer.address}
-                              </p>
-                            </div>
-                          </div>
-                          <Badge
-                            variant={online ? "success" : "secondary"}
-                            className="shrink-0"
-                          >
-                            {online ? "online" : "offline"}
-                          </Badge>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        <div className="flex flex-wrap gap-2">
-                          <Badge variant="outline">
-                            {printer.printer_type}
-                          </Badge>
-                          <Badge variant="outline">
-                            {printer.language}
-                          </Badge>
-                          {printer.paper_width_mm && (
-                            <Badge variant="outline">
-                              {printer.paper_width_mm}mm
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="flex-1"
-                            disabled={testing === printer.id}
-                            onClick={() => testPrinter(printer)}
-                          >
-                            <TestTube className="h-3 w-3" />
-                            {testing === printer.id
-                              ? "Testing…"
-                              : t("printers.test_print")}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            aria-label={`Remove ${printer.name}`}
-                            onClick={() => removePrinter(printer)}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
-          </TabsContent>
-        ))}
+        <TabsContent value={tab} className="mt-4">
+      <DataTable
+        caption="Printers"
+        columns={columns}
+        data={filtered}
+        getRowId={(p) => String(p.id)}
+        loading={loading}
+        empty={{
+          title: tab === "all" ? "No printers yet" : `No ${group.label.toLowerCase()} printers`,
+          description: tab === "all" ? "Add a printer, or scan this computer for installed printers." : "Add one, or pick another group.",
+          action: { label: "Add printer", onClick: () => setShowAdd(true) },
+        }}
+      />
+        </TabsContent>
       </Tabs>
 
-      {/* Add / Edit printer */}
-      <Dialog open={showAdd} onOpenChange={setShowAdd}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Add Printer</DialogTitle>
+      <ConfirmDialog
+        open={removeTarget != null}
+        onOpenChange={(o) => { if (!o) setRemoveTarget(null); }}
+        title={`Remove “${removeTarget?.name ?? ""}”?`}
+        description="The printer is removed from PrintNinja. Past jobs stay in History."
+        confirmLabel="Remove printer"
+        destructive
+        onConfirm={async () => { if (removeTarget) await removePrinter(removeTarget); setRemoveTarget(null); }}
+      />
+
+      {/* Setup lives in a side panel so the list stays in view */}
+      <Sheet open={showAdd} onOpenChange={setShowAdd}>
+        <SheetContent className="flex w-full flex-col gap-0 overflow-y-auto p-0 sm:max-w-md">
+          <DialogHeader className="border-b p-5 pr-12">
+            <DialogTitle>Add printer</DialogTitle>
+            <DialogDescription>Connect a printer, then send a test page from the list.</DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3">
+          <div className="flex-1 space-y-4 p-5">
             {systemPrinters.length > 0 && (
               <div className="rounded-md border p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-medium">
-                    Discovered system printers
-                  </p>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 text-xs"
-                    onClick={refreshSystem}
-                  >
-                    Rescan
-                  </Button>
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-xs font-medium">Found on this computer</p>
+                  <Button variant="ghost" size="sm" onClick={refreshSystem}>Rescan</Button>
                 </div>
-                <div className="flex flex-wrap gap-1">
+                <div className="flex flex-wrap gap-1.5">
                   {systemPrinters.map((sp) => (
                     <Button
                       key={sp.id}
                       variant="outline"
                       size="sm"
-                      className="h-6 text-xs"
-                      onClick={() =>
-                        setForm((f) => ({
-                          ...f,
-                          name: sp.name,
-                          address: sp.name,
-                          printer_type: "system",
-                        }))
-                      }
+                      onClick={() => setForm((f) => ({ ...f, name: sp.name, address: sp.name, printer_type: "system" }))}
                     >
                       {sp.name}
                     </Button>
@@ -421,110 +389,57 @@ export function PrinterSetupPage() {
               </div>
             )}
 
-            <div className="space-y-1">
-              <Label htmlFor="printer-name">Printer Name</Label>
-              <Input
-                id="printer-name"
-                value={form.name}
-                placeholder="e.g. Front Desk"
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, name: e.target.value }))
-                }
-              />
+            <div className={field}>
+              <Label htmlFor="printer-name">Printer name</Label>
+              <Input id="printer-name" value={form.name} placeholder="Front desk" onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>Connection</Label>
-                <Select
-                  value={form.printer_type}
-                  onValueChange={(v) =>
-                    setForm((f) => ({ ...f, printer_type: v }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+              <div className={field}>
+                <Label htmlFor="printer-connection">Connection</Label>
+                <Select value={form.printer_type} onValueChange={(v) => setForm((f) => ({ ...f, printer_type: v }))}>
+                  <SelectTrigger id="printer-connection" aria-label="Connection"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {PRINTER_TYPES.map((t) => (
-                      <SelectItem key={t.value} value={t.value}>
-                        {t.label}
-                      </SelectItem>
-                    ))}
+                    {PRINTER_TYPES.map((x) => <SelectItem key={x.value} value={x.value}>{x.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
-
-              <div className="space-y-1">
-                <Label>Language</Label>
-                <Select
-                  value={form.language}
-                  onValueChange={(v) => setForm((f) => ({ ...f, language: v }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+              <div className={field}>
+                <Label htmlFor="printer-language">Language</Label>
+                <Select value={form.language} onValueChange={(v) => setForm((f) => ({ ...f, language: v }))}>
+                  <SelectTrigger id="printer-language" aria-label="Language"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {LANGUAGES.map((l) => (
-                      <SelectItem key={l.value} value={l.value}>
-                        {l.label}
-                      </SelectItem>
-                    ))}
+                    {LANGUAGES.map((x) => <SelectItem key={x.value} value={x.value}>{x.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
-            <div className="space-y-1">
-              <Label htmlFor="printer-address">
-                {form.printer_type === "system"
-                  ? "Printer name"
-                  : form.printer_type === "usb"
-                    ? "USB device id"
-                    : form.printer_type === "bluetooth"
-                      ? "Bluetooth MAC / COM port"
-                      : "Address (e.g. http://192.168.1.100 or 192.168.1.100:9100)"}
-              </Label>
+            <div className={field}>
+              <Label htmlFor="printer-address">{addressLabel}</Label>
               <Input
                 id="printer-address"
                 value={form.address}
-                placeholder="192.168.1.100"
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, address: e.target.value }))
-                }
+                aria-describedby={addressHint ? "printer-address-hint" : undefined}
+                onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
               />
+              {addressHint && <p id="printer-address-hint" className="text-xs text-muted-foreground">{addressHint}</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>Paper Width</Label>
-                <Select
-                  value={form.paper_width_mm}
-                  onValueChange={(v) =>
-                    setForm((f) => ({ ...f, paper_width_mm: v }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+              <div className={field}>
+                <Label htmlFor="printer-paper">Paper width</Label>
+                <Select value={form.paper_width_mm} onValueChange={(v) => setForm((f) => ({ ...f, paper_width_mm: v }))}>
+                  <SelectTrigger id="printer-paper" aria-label="Paper width"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {PAPERS.map((p) => (
-                      <SelectItem key={p.value} value={p.value}>
-                        {p.label}
-                      </SelectItem>
-                    ))}
+                    {PAPERS.map((x) => <SelectItem key={x.value} value={x.value}>{x.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1">
-                <Label>DPI</Label>
-                <Select
-                  value={form.dpi}
-                  onValueChange={(v) => setForm((f) => ({ ...f, dpi: v }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
+              <div className={field}>
+                <Label htmlFor="printer-dpi">DPI</Label>
+                <Select value={form.dpi} onValueChange={(v) => setForm((f) => ({ ...f, dpi: v }))}>
+                  <SelectTrigger id="printer-dpi" aria-label="DPI"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="203">203</SelectItem>
                     <SelectItem value="300">300</SelectItem>
@@ -535,14 +450,12 @@ export function PrinterSetupPage() {
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAdd(false)}>
-              Cancel
-            </Button>
-            <Button onClick={addPrinter}>Save Printer</Button>
+          <DialogFooter className="gap-2 border-t p-5 sm:space-x-0">
+            <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
+            <Button onClick={addPrinter}>Save printer</Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

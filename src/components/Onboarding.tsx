@@ -1,89 +1,52 @@
-import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
-import { Printer, Upload, CheckCircle2, Zap } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AppLogo } from "@/components/AppLogo";
+import { usePrefs } from "@/lib/prefs/PrefsProvider";
 
-const STEPS = [
-  {
-    title: "Add a Printer",
-    description: "Configure your first printer (Wi-Fi, USB, Bluetooth, or system)",
-    icon: Printer,
-    action: "Add Printer",
-  },
-  {
-    title: "Load a Template",
-    description: "Create or import your first HTML template",
-    icon: Upload,
-    action: "New Template",
-  },
-  {
-    title: "Test Print",
-    description: "Send a test print to verify everything works",
-    icon: Zap,
-    action: "Test Print",
-  },
-  {
-    title: "Done!",
-    description: "PrintNinja is ready to use",
-    icon: CheckCircle2,
-    action: "Get Started",
-  },
+const OPERATOR_STEPS = [
+  "Open Print and choose a template.",
+  "Choose your printer, then press Print.",
+  "Find past jobs in History, and reprint from there.",
 ];
 
 interface OnboardingProps {
-  onComplete: () => void;
+  /** Called when the person leaves the welcome screen, with the page to open first. */
+  onComplete: (destination?: string) => void;
 }
 
+/**
+ * First-run screen. It only says what an operator needs. Printer, template, API
+ * and sharing setup is an admin job and lives in Settings → Setup.
+ */
 export function Onboarding({ onComplete }: OnboardingProps) {
-  const [step, setStep] = useState(0);
-
-  const handleNext = () => {
-    if (step < STEPS.length - 1) {
-      setStep(step + 1);
-    } else {
-      onComplete();
-    }
-  };
-
-  const currentStep = STEPS[step];
-  const progress = Math.min(100, Math.max(0, ((step) / (STEPS.length - 1)) * 100));
-
+  const { appName, logo } = usePrefs();
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-lg">
-        <CardHeader className="text-center">
-          <div className="flex justify-center mb-4">
-            <div className="p-4 rounded-full bg-primary/10">
-              <currentStep.icon className="h-8 w-8 text-primary" />
-            </div>
-          </div>
-          <CardTitle className="text-2xl">{currentStep.title}</CardTitle>
-          <p className="text-muted-foreground">{currentStep.description}</p>
+    <main className="flex min-h-screen items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader className="space-y-3">
+          <AppLogo src={logo} className="h-10 w-10" />
+          <CardTitle className="text-xl">Welcome to {appName}</CardTitle>
+          <p className="text-muted-foreground">Printing takes three steps:</p>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <Progress value={progress} className="h-2" />
-          <div className="flex justify-between text-xs text-muted-foreground">
-            <span>Step {step + 1} of {STEPS.length}</span>
-            <span>{Math.round(progress)}%</span>
-          </div>
-          <div className="flex gap-3 pt-4">
-            {step > 0 && (
-              <Button variant="outline" onClick={() => setStep(step - 1)}>
-                Back
-              </Button>
-            )}
-            <Button className="flex-1" onClick={handleNext}>
-              {currentStep.action}
+        <CardContent className="space-y-5">
+          <ol className="list-decimal space-y-1.5 pl-5">
+            {OPERATOR_STEPS.map((s) => (
+              <li key={s}>{s}</li>
+            ))}
+          </ol>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button className="sm:flex-1" onClick={() => onComplete("/print")}>
+              Start printing
+            </Button>
+            <Button variant="outline" className="sm:flex-1" onClick={() => onComplete("/settings?section=setup")}>
+              Set up this workstation
             </Button>
           </div>
-          <div className="text-center">
-            <button type="button" onClick={onComplete} className="text-xs text-muted-foreground hover:text-foreground underline">
-              Skip onboarding — don’t show again
-            </button>
-          </div>
+          <p className="text-xs text-muted-foreground">
+            Setting up a printer, templates, or sharing? The checklist in Settings walks through it.
+          </p>
         </CardContent>
       </Card>
-    </div>
+    </main>
   );
 }

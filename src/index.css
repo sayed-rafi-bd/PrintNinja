@@ -3,53 +3,68 @@
 @tailwind utilities;
 
 @layer base {
+  /* PrintNinja corporate palette ("Slate teal"). Single light theme.
+     Values are HSL triplets so Tailwind can apply opacity modifiers.
+     Contrast pairs are asserted in src/test/tokens.test.ts. */
   :root {
-    /* Depth: background is cooler off-white, cards are pure white popping above it */
-    --background: 210 20% 98%;
-    --foreground: 222.2 47.4% 11.2%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 47.4% 11.2%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 47.4% 11.2%;
-    /* Primary: cyan 600 for depth + action focus, not flat navy */
-    --primary: 199 89% 48%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 20% 96%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 20% 96%;
-    --muted-foreground: 215 16% 47%;
-    /* Accent: very light cyan tint so hover/tint has hue, not just gray */
-    --accent: 199 20% 96%;
-    --accent-foreground: 199 89% 18%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 199 89% 48%;
-    --radius: 0.75rem;
-  }
+    color-scheme: light;
 
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    /* Card slightly lighter than background for elevation in dark */
-    --card: 222.2 47.4% 11.2%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 47.4% 11.2%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 199 89% 48%;
-    --primary-foreground: 222.2 84% 4.9%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 199 30% 18%;
-    --accent-foreground: 199 89% 78%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 199 89% 48%;
+    --background: 180 16% 96%;            /* #F4F7F7 app surface */
+    --foreground: 196 37% 12%;            /* #14252B ink */
+    --card: 0 0% 100%;
+    --card-foreground: 196 37% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 196 37% 12%;
+
+    --primary: 180 75% 24%;               /* #0F6B6B brand */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 180 14% 93%;             /* #EBF0F0 */
+    --secondary-foreground: 196 37% 12%;
+    --muted: 180 14% 93%;
+    --muted-foreground: 194 16% 32%;      /* #44575D */
+    --accent: 176 33% 92%;                /* #E3F1F0 brand-soft */
+    --accent-foreground: 180 75% 24%;
+
+    --destructive: 4 76% 40%;             /* #B42318 */
+    --destructive-foreground: 0 0% 100%;
+
+    /* Decorative dividers are light; form-control borders must reach 3:1. */
+    --border: 180 14% 86%;                /* #D6E0E0 */
+    --input: 193 9% 52%;                  /* #7A8C91 */
+    --ring: 180 75% 24%;
+
+    /* Status vocabulary. Each state is a text colour on its own tint, and is
+       always shown with an icon and a word (see StatusBadge). */
+    --success: 93 73% 25%;                /* #3B6D11 */
+    --success-soft: 86 47% 91%;           /* #EAF3DE */
+    --warning: 35 100% 30%;               /* #9A5B00 */
+    --warning-soft: 38 89% 93%;           /* #FDF1DC */
+    --danger: 4 76% 40%;                  /* #B42318 */
+    --danger-soft: 5 85% 95%;             /* #FDE8E6 */
+    --info: 180 75% 24%;                  /* #0F6B6B */
+    --info-soft: 176 33% 92%;             /* #E3F1F0 */
+    --neutral: 194 16% 32%;               /* #44575D */
+    --neutral-soft: 180 14% 93%;          /* #EBF0F0 */
+
+    --radius: 0.375rem;
+
+    /* Density. Comfortable is the default; Compact is set from Settings via
+       data-density on <html>. Touch screens always keep the comfortable sizes. */
+    --control-h: 2.25rem;
+    --head-h: 2.5rem;
+    --cell-py: 0.625rem;
+  }
+  :root[data-density="compact"] {
+    --control-h: 2rem;
+    --head-h: 2rem;
+    --cell-py: 0.25rem;
+  }
+  @media (pointer: coarse) {
+    :root[data-density="compact"] {
+      --control-h: 2.25rem;
+      --head-h: 2.5rem;
+      --cell-py: 0.625rem;
+    }
   }
 }
 
@@ -57,15 +72,44 @@
   * {
     @apply border-border;
   }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
     font-family:
-      "Inter",
+      "IBM Plex Sans",
+      "Segoe UI",
       -apple-system,
       BlinkMacSystemFont,
-      "Segoe UI",
       Roboto,
       "Noto Sans",
       sans-serif;
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  table {
+    font-variant-numeric: tabular-nums;
+  }
+  /* Visible keyboard focus everywhere, including elements without a ring utility. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }

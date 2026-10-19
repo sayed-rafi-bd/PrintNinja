@@ -1,6 +1,16 @@
 # PrintNinja — Corporate UI Redesign Plan
 
-Status: **proposal, palette and single light theme decided (§3, §10), nothing implemented**
+Status: **Phases 0 to 6 implemented on `v2-ui-corporate`. i18n (part of Phase 5) deferred. Screenshots and manual Windows/Android checks still to do.**
+
+| Phase | Status |
+|---|---|
+| 0 Baseline and safety net | Mostly complete. Baseline screenshots still to capture (see Phase 0) |
+| 1 Tokens and foundation | Complete |
+| 2 Primitives | Complete |
+| 3 Application shell | Complete |
+| 4 Pages | Complete, with two items deferred (see Phase 4) |
+| 5 Corporate readiness | Complete except i18n (deferred) and manual device checks |
+| 6 Docs and release | Complete except README screenshots |
 Base branch: `v2` (at `0869383`)
 Suggested working branch: `v2-ui-corporate`
 
@@ -146,7 +156,7 @@ Checked the direction above against "improve the UI and make it for corporate us
 
 Each phase is one PR into `v2-ui-corporate`, and leaves the app working.
 
-### Phase 0 — Baseline and safety net
+### Phase 0 — Baseline and safety net (mostly complete)
 
 - Capture screenshots of all 6 pages, at 1440 px and 390 px, before any change.
 - Add Playwright (or Vitest browser mode) smoke tests: each route renders, no console errors,
@@ -156,7 +166,12 @@ Each phase is one PR into `v2-ui-corporate`, and leaves the app working.
 
 **Done when:** baseline screenshots committed under `docs/ui-baseline/`; CI runs the smoke tests.
 
-### Phase 1 — Tokens and foundation
+**Status: mostly complete.**
+- Done: route smoke tests (`src/test/smoke.test.tsx`) check that each page renders in the shell with no console errors, one `main`, one `h1`, and no axe violations. These found 3 real accessibility issues on `v2`, all fixed in Phase 2. `pnpm test` already runs in CI.
+- Not done: baseline screenshots. The build sandbox has no browser. Run `node scripts/capture-screens.mjs docs/ui-baseline` from a clean `v2` checkout (steps in `docs/ui-baseline/README.md`).
+- Changed from the plan: jsdom plus axe-core replaced Playwright for the smoke tests, so colour contrast is checked from the token values (`src/test/tokens.test.ts`) instead of rendered pixels.
+
+### Phase 1 — Tokens and foundation (complete)
 
 Files: `src/index.css`, `tailwind.config.ts`, `index.html`, `package.json`.
 
@@ -171,7 +186,13 @@ Files: `src/index.css`, `tailwind.config.ts`, `index.html`, `package.json`.
 **Done when:** every button, input, and badge meets 4.5:1 text contrast
 (checked with axe); app renders with the new palette and no layout regressions.
 
-### Phase 2 — Primitives
+**Status: complete** (`src/index.css`, `tailwind.config.ts`, `src/main.tsx`).
+- Slate teal tokens, status tokens (`success`, `warning`, `danger`, `info`, `neutral`, each with `-soft`), 6px radius, IBM Plex Sans 400/500/600 and Mono 400/500 bundled with `@fontsource` (about 160 KB), reduced-motion handling, and a 2px focus outline.
+- Single light theme: dark variables, `dark:` classes, `ThemeProvider`, the Settings theme selector, and the `next-themes` dependency are removed.
+- Changed from the plan: `--input` (form control borders) is `#7A8C91`, not the light `line` colour, because a light border is about 1.3:1 and form controls need 3:1. `--border` stays light for dividers.
+- Template print CSS (`templates.src.css`, `templates.generated.ts`) is unchanged and byte-identical after a build.
+
+### Phase 2 — Primitives (complete)
 
 Files: `src/components/ui/*`, new `PageHeader.tsx`, `StatusBadge.tsx`, `DataTable.tsx`.
 
@@ -190,7 +211,15 @@ Files: `src/components/ui/*`, new `PageHeader.tsx`, `StatusBadge.tsx`, `DataTabl
 **Done when:** no page uses raw colour utilities for status; Storybook-style demo route
 (dev only) shows each primitive in each state.
 
-### Phase 3 — Application shell
+**Status: complete.**
+- Added `StatusBadge` (11 states, each with icon and word), `PageHeader`, `DataTable` (sticky header, opt-in column sorting, empty and loading states, arrow-key row navigation), and `ConfirmDialog`.
+- Buttons are 36 / 32 / 44 px; every control also gets a 44px minimum on touch pointers. Cards lose shadows and use `h2` titles; tables, dialogs, and empty states use the compact scale.
+- No raw palette colours remain in `src/pages` or `src/components`; `src/test/noRawColors.test.ts` fails if one comes back. `PageHeader` now replaces all six page titles.
+- Fixed all baseline axe findings: 14 Select triggers now have accessible names and heading levels are in order.
+- Dev-only reference page at `/__ui`, excluded from production builds.
+- Not done: `DataTable` supports single-row selection only. Bulk selection arrives with History in Phase 4. `ConfirmDialog` exists but existing delete flows still use their current confirmation until their pages are reworked in Phase 4.
+
+### Phase 3 — Application shell (complete)
 
 Files: `src/components/Layout.tsx`, `src/App.tsx`, `src/lib/theme/ThemeProvider.tsx`.
 
@@ -206,7 +235,15 @@ Files: `src/components/Layout.tsx`, `src/App.tsx`, `src/lib/theme/ThemeProvider.
 **Done when:** every page is reachable by keyboard only, and the shell is identical across
 routes except for content.
 
-### Phase 4 — Pages (one PR each, in this order)
+**Status: complete** (`src/components/Layout.tsx`, `src/lib/shell/*`, `CommandPalette`, `ShortcutsDialog`, `AppLogo`).
+- Top bar on every screen size: logo, search (`Ctrl/Cmd+K`), share-service status, help.
+- Sidebar grouped Work, Build, Admin with real links and `aria-current`; Printers now has a printer icon; the tip text is gone. Phones get a bottom bar with the same labels and a safe-area inset.
+- Command palette: jump to pages, open templates (read from the desktop database when it opens), start a new template, and reprint the last job after a confirmation.
+- Shortcuts: `Ctrl/Cmd+K`, `?`, and `G` then `P`, `H`, `D`, `T`, `R`, or `S`. Letter shortcuts are ignored while typing in a field or the code editor.
+- Also fixed: the Templates nav label was missing from i18n and displayed as `nav.templates`.
+- Not done: the share indicator checks `/v1/auth/me` every two minutes and on window focus, but could not be exercised against a live share service here.
+
+### Phase 4 — Pages (complete, two items deferred)
 
 | Order | Page | Lines | Main changes |
 |---|---|---|---|
@@ -220,7 +257,30 @@ routes except for content.
 **Done when (per page):** matches the page-level checklist in §6; baseline screenshot diff
 reviewed and approved.
 
-### Phase 5 — Corporate readiness
+**Status: complete, with two items deferred.** Each page is its own commit on `v2-ui-corporate`, and every page has tests and a clean axe run (Designer is now included in the route smoke tests).
+
+| Page | What changed | Things to know |
+|---|---|---|
+| History | `DataTable` with sticky filter bar, `JobStatusBadge`, bulk reprint and bulk retry (each behind a confirmation), saved filter sets (stored in localStorage), named delete confirmation, printer names instead of the hardcoded Front Desk / Kitchen list, CSV export unchanged | Batch groups are now flat rows with a Batch column, not collapsible groups. Search also matches "batch 12" |
+| Print | Printer, template, data source, and copies on the left with one primary **Print** button and the reason when it is disabled; live preview on the right (no preview dialog); orientation, fit, margins, page range, grayscale, and the pipeline test page under **Advanced options**; success, failure (with Try again), and printing banners; batch cards with progress bars | The preview now loads whenever the template changes, using the same sample data as before |
+| Templates | Mine and Saved are tables (status, page size, updated); Community stays a gallery; real **Print** (opens Print with the template selected) and **Edit** (in-app navigation) | Opens on **Mine**, not Community, because Community needs a share service. **Print** previously only showed a toast. Community **Preview** previously showed "not implemented" and now works. Removing a saved template asks first |
+| Printers | Table grouped Network, USB, Bluetooth, System with counts; status shown only when known, otherwise "Not checked"; test print per row; remove asks first; setup moved to a side panel with field hints | Fixes a bug: the Wi-Fi tab matched nothing because printer types are `ipp` and `raw_tcp`. Live reachability checks are not implemented, so Online and Offline appear only if the backend reports them |
+| Settings | Two-column layout: General (fonts), Share, API and automation (REST API plus trusted sources), Data sources, Retention, Diagnostics; numeric settings validate inline and confirm on save | Section names differ slightly from the plan because Fonts and Data sources had no home in the plan's list |
+| Designer | Toolbar, sidebar (template list, page setup, versions), and publish bar extracted into `src/components/designer/`; compact segmented view switcher; Draft and Published chip with a single unpublished-changes strip; unpublish uses a named confirmation instead of the browser dialog; zoom, add-version, and font-upload controls labelled; tab panels now sit inside real tab panels | **Deferred:** the six view panels (canvas, visual, code, README, preview, variables) and the dialogs are still inside `Designer.tsx` (1,242 lines, down from 1,430) because they share a lot of state. **Deferred:** no visual restyle of the canvas and properties panels beyond tokens and type sizes |
+
+
+### Phase 5 — Corporate readiness (complete except i18n)
+
+**Status.**
+- **i18n: deferred on request.** Strings stay English; some pages use `react-i18next` keys and others plain text. No pseudo-locale test.
+- **Branding: done.** Settings → General: app name and logo (PNG/JPEG/WebP/SVG, 256 KB), stored as `brand_name` and `brand_logo`. Applied to the top bar, `document.title`, the native window title, and the welcome screen. Needs the new `src-tauri/capabilities/default.json` (`core:window:allow-set-title`).
+- **Density: done.** Comfortable (default) and Compact, stored as `ui_density`, applied through `data-density` and three CSS variables (`--control-h`, `--head-h`, `--cell-py`). Touch screens ignore Compact. `cn()` was taught that `h-control` conflicts with `h-8` and similar.
+- **Single light theme: already done in Phase 1.**
+- **Windows polish: done in config, not verified on a device.** Window `theme: Light` and `backgroundColor` in `tauri.conf.json`. DPI 100/125/150 needs a manual pass; steps in `docs/ui-baseline/README.md`, and `capture-screens.mjs --dpi` approximates it.
+- **Android status bar: done in script, not verified on a device.** `scripts/patch-android-theme.mjs` (run by CI after `tauri android init`) makes the theme light with white bars. It was tested against a sample `themes.xml`, not a real generated project.
+- **Onboarding: done.** One screen with the three operator steps; exits are Start printing and Set up this workstation. Admin steps are in Settings → Setup, a checklist with live status (printer, template, test print; optional retention, REST API, share). Reachable at `/settings?section=setup`.
+
+Original scope:
 
 - **i18n:** move all remaining hardcoded strings into `src/lib/i18n`; add a pseudo-locale test
   to catch overflow; keep English as default.
@@ -233,7 +293,11 @@ reviewed and approved.
 - **Onboarding:** shorten `Onboarding.tsx` to what an operator needs; admin setup steps move
   to a checklist in Settings.
 
-### Phase 6 — Docs and release
+### Phase 6 — Docs and release (complete except screenshots)
+
+**Status.** README Features rewritten for the new UI; `CHANGELOG.md` has a 0.5.0 entry; version is 0.5.0 in `package.json`, `Cargo.toml`, `Cargo.lock` and `tauri.conf.json`; `docs/UI_GUIDE.md` added. README screenshots are not included because the sandbox has no browser: run `node scripts/capture-screens.mjs docs/screenshots` and link them. The version was bumped by hand with the same edits `scripts/release.sh` makes, because that script commits and tags and this tree has no git history; tag the release with `./scripts/release.sh 0.5.0 --tag` or tag manually.
+
+Original scope:
 
 - Update `README.md` Features section wording for the new UI; add screenshots.
 - `CHANGELOG.md` entry; bump version per `docs/RELEASE.md`.

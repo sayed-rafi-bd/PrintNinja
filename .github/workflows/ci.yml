@@ -178,6 +178,9 @@ jobs:
           RES=src-tauri/gen/android/app/src/main/res
           cp -r src-tauri/icons/android/. "$RES"/
           find "$RES" -name 'ic_launcher*.png' -printf '%p %s\n' | sort
+      # Light status and navigation bars, to match the app's single light theme.
+      - name: Apply light Android theme
+        run: node scripts/patch-android-theme.mjs
       - name: Make gradlew executable
         run: chmod +x src-tauri/gen/android/gradlew || true
       # arm64-v8a only (new mobiles). Debug APK is signed with debug keystore and installable for testing;

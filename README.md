@@ -2,17 +2,18 @@
 
 Silent print for Windows and Android — design HTML templates, fetch JSON data, print via IPP / raw TCP / USB / Bluetooth / system spooler, with history, batch, profiles, and automation.
 
-![Tauri 2](https://img.shields.io/badge/Tauri-2-blue) ![React](https://img.shields.io/badge/React-19-blue) ![Rust](https://img.shields.io/badge/Rust-stable-orange)
+![Tauri 2](https://img.shields.io/badge/Tauri-2-blue) ![React](https://img.shields.io/badge/React-18-blue) ![Rust](https://img.shields.io/badge/Rust-stable-orange)
 
 ## Features
 
-- **Designer** — HTML/CSS (CodeMirror) + visual canvas, page presets (A4, 80 mm roll, 4×6 label…), zoom, Handlebars helpers (`currency`, `date`, `padLeft`…), `bwip-js` barcodes (14 symbologies → inline SVG), custom fonts, version history with diff/restore, **README** tab (markdown `react-markdown` + `remark-gfm`, no `rehype-raw`, toolbar, split preview, 64 KiB cap) and **Publish** (Draft amber / Published emerald chip, `Publish`/`Update` emerald, `Unpublish` destructive, unpublished-changes strip)
-- **Templates** — `/templates` library (Community with search `q` + sort `updated|used|name` + cards + offline state, Mine with Draft/Published, ★ Saved with violet star + slate withdrawn, 1 col mobile / 2 md / 3 xl), optimistic save (`PUT /v1/saved/{id}` idempotent), local read-only copies (`origin='saved'`), `POST /v1/templates/{id}/use` atomic `use_count`
-- **Print** — printer + template selectors, data URL / test-data switch, orientation / margins / fit mode / copies, live preview (sandboxed `iframe` + CSP `default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:` + `<script>`/`on*` stripping), batch (JSON array or CSV upload with column mapping), per-printer profiles
-- **Printer Setup** — Wi-Fi/LAN (IPP / raw TCP 9100), USB, Bluetooth, system spooler; test print, validation, language/paper/DPI
-- **History** — filters (status/source/printer/search + date range), batch-grouped expandable rows, reprint/retry/delete, CSV export (RFC 4180), retention
+- **Designer** — HTML/CSS (CodeMirror) + visual canvas, page presets (A4, 80 mm roll, 4×6 label…), zoom, Handlebars helpers (`currency`, `date`, `padLeft`…), `bwip-js` barcodes (14 symbologies → inline SVG), custom fonts, version history with diff/restore, **README** tab (markdown, 64 KiB cap) and **Publish** with a Draft/Published badge and an unpublished-changes strip. Compact view switcher; unpublish asks first and names the template.
+- **Print** — choose printer, template, data source and copies on the left, one **Print** button (with the reason when it is disabled), live preview on the right. Orientation, fit, margins, page range, grayscale and the test page sit under **Advanced options**. Batch (JSON array or CSV with column mapping), per-printer profiles, clear success/failure banners with Try again.
+- **Templates** — Mine and Saved as tables (status, page size, updated); Community stays a gallery with search and sort. Print and Edit straight from a row. Save, download as a read-only copy, and print offline.
+- **Printers** — grouped Network, USB, Bluetooth and System; test print per row; setup in a side panel (IPP / raw TCP 9100, language, paper, DPI). Status shows only when known.
+- **History** — sticky filter bar (status, source, printer, search, dates), saved filter sets, bulk reprint and retry (each confirmed), CSV export, retention.
 - **Automation** — local REST API (`axum`, `127.0.0.1:17717`, Bearer + idempotency, CORS scoped, LAN off by default) and `printninja://` deep links with trust list and confirmation sheet
 - **Share** — hosted `server/` (`axum` + Turso/`rusqlite`, `scrypt` + sha256 sessions, throttle 5/min) at `share_service_url` + `share_session_token` (Settings → Share: Register/Login/Logout, handle `alphanumeric+_-` 1–32, password ≥8), `PUT/DELETE /v1/templates/{id}` (client UUID, owner 403, 404, size caps 512K/64K, remote-ref `data: URIs`), `GET /v1/templates` public, `POST /v1/templates/{id}/use`, `PUT/DELETE/GET /v1/saved`
+- **Corporate UI** — one light theme in a restrained slate teal; IBM Plex bundled for identical rendering on every workstation, offline. One status vocabulary (colour + icon + word) on every screen. `Ctrl/Cmd+K` palette, `G` then `P/H/D/T/R/S` navigation, full keyboard path, WCAG 2.1 AA as the internal bar. **Comfortable/Compact density** and optional **name and logo** in Settings → General; **Settings → Setup** checklist for admins. See [`docs/UI_GUIDE.md`](docs/UI_GUIDE.md).
 - **Queue** — per-printer `Semaphore` (no byte interleaving), bounded admission, `POST /v1/print` runs the same pipeline as the UI
 
 ## Tech Stack
@@ -20,7 +21,7 @@ Silent print for Windows and Android — design HTML templates, fetch JSON data,
 | Layer | Choice |
 |---|---|
 | App shell | Tauri 2 (Windows + Android) |
-| UI | React 19 + Vite 7 + TypeScript 5 + Tailwind 3 + shadcn/ui + Zustand + TanStack Query/Table |
+| UI | React 18 + Vite 6 + TypeScript 5 + Tailwind 3 + shadcn/ui + Zustand + TanStack Query/Table, IBM Plex via `@fontsource` |
 | DB | SQLite (`tauri-plugin-sql` migrations + `rusqlite` commands) — 11 tables |
 | Template | Handlebars (singleton registry), `buildTemplateCss` inlines a committed minified Tailwind bundle (`pnpm build:templates:css`) |
 | Barcodes | `bwip-js` `toSVG()` (inline SVG, no canvas data-URI) |
@@ -36,7 +37,7 @@ Silent print for Windows and Android — design HTML templates, fetch JSON data,
 ```
 UI (Designer + README + Templates / Print / PrinterSetup / History) ──invoke()──► Rust core
   Designer: canvas/visual/code/readme/preview + Publish (remote_id/published_at)        Data fetcher → Handlebars (sanitize + CSP) → Layout (@page) → PDF → Queue (per-printer) → Transport → History
-  Templates: Community (search/sort, offline) / Mine (Draft amber / Published emerald) / Saved (violet ★, slate withdrawn)  Share client ──fetch──► server (`share_service_url` + Bearer)
+  Templates: Community (search/sort, offline) / Mine (Draft / Published badge) / Saved / Withdrawn badges  Share client ──fetch──► server (`share_service_url` + Bearer)
 REST API ──┐
 Deep link ─┼──► same queue/pipeline (idempotency, copies, redaction)
 Batch ─────┘

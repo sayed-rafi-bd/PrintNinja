@@ -2,6 +2,35 @@
 
 All notable changes to PrintNinja are documented here. The format is based on Keep a Changelog.
 
+## [0.5.0] - 2026-10-19 — Corporate UI (phases 0–6)
+
+### Changed
+- **New look.** Slate teal palette, IBM Plex Sans and Mono bundled with the app (no dependence on installed fonts), 6 px radius, flat cards, one light theme. Dark mode and the theme selector are removed. Text and control colours meet WCAG 2.1 AA.
+- **One status vocabulary.** Printed, Failed, Queued, Printing, Cancelled, Draft, Published, Saved, Withdrawn, Online and Offline each have one colour, icon and word everywhere (`StatusBadge`). This replaces the per-screen emerald/amber/violet/slate colours described in the 0.2.0 to 0.4.0 entries below.
+- **New shell.** Top bar with search (`Ctrl/Cmd+K`), share-service status and help; sidebar grouped Work, Build, Admin; bottom bar on phones. Shortcuts: `?` and `G` then `P`, `H`, `D`, `T`, `R`, `S`.
+- **Pages reworked.** History, Templates and Printers use tables with row actions; Print puts printer, template and the Print button on the left and a live preview on the right; Settings has a section list; the Designer toolbar, sidebar and publish bar are separate components.
+- **Shorter welcome screen.** First run shows the three operator steps and two exits: Start printing, or Set up this workstation. Printer, template, API and sharing setup moved to Settings → Setup.
+
+### Added
+- **Settings → Setup checklist** with live status for printer, template and test print, plus optional retention, REST API and share service steps. Reachable at `/settings?section=setup`.
+- **Density** (Settings → General): Comfortable (default) or Compact. Touch screens always keep the larger controls.
+- **Branding** (optional, Settings → General): app name and logo for the top bar, window title and welcome screen. Defaults to PrintNinja.
+- **Window chrome.** The Windows title bar is forced light and the window background matches the app. `scripts/patch-android-theme.mjs` gives the generated Android project light status and navigation bars; CI runs it after `tauri android init`.
+- Command palette, shortcuts dialog, `ConfirmDialog` that names what it deletes, `/__ui` component reference (dev builds only).
+- Tests: route smoke tests with axe on every page, colour-contrast checks from the token values, a guard against raw palette colours, plus tests for density, branding, setup checklist, onboarding and the Android patch.
+
+### Fixed
+- Printers: the Wi-Fi filter matched nothing because printer types are `ipp` and `raw_tcp`.
+- Templates: **Print** only showed a toast, and Community **Preview** said "not implemented". Both now work.
+- The Templates nav label showed `nav.templates`.
+- 14 Select controls had no accessible name; heading levels skipped from `h1` to `h3`.
+
+### Notes
+- No change to print output: `templates.src.css` and `templates.generated.ts` are byte-identical, and the Rust core, REST API and share service are untouched.
+- Version numbers: earlier entries (0.2.0 to 0.4.0) were never written to `package.json`, which stayed at 0.1.4. This release sets `package.json`, `Cargo.toml` and `tauri.conf.json` to 0.5.0 so they match this changelog.
+- A new `src-tauri/capabilities/default.json` allows the window title to change (branding). Existing app commands are not affected.
+- Not included: translations (strings stay in English), live printer reachability checks.
+
 ## [0.4.0] - 2026-10-18 — Phase 3: Sharing (B5+B6)
 
 ### Added

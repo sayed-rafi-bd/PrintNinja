@@ -132,7 +132,7 @@ export function ReadmeEditor({ value, onChange, templateName, onReset, scaffoldF
   };
 
   const preview = (
-    <div className="prose prose-sm dark:prose-invert max-w-none p-4 border rounded-md bg-card min-h-[300px] overflow-auto">
+    <div className="prose prose-sm max-w-none p-4 border rounded-md bg-card min-h-[300px] overflow-auto">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         // No rehype-raw: raw HTML stays as text, which is the XSS guarantee
