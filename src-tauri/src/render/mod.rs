@@ -91,8 +91,18 @@ impl PdfRenderer {
 
             if output.status.success() && pdf_path.exists() {
                 let bytes = tokio::fs::read(&pdf_path).await;
+                // Keep the newest render next to render.html so it can be
+                // opened directly to tell "Edge output is unstyled" apart
+                // from "styling is lost later in the print path".
+                let last = self.cache_dir.join("last-render.pdf");
+                let _ = std::fs::copy(&pdf_path, &last);
                 let _ = std::fs::remove_file(&pdf_path);
-                tracing::info!(html = %html_url, bytes = bytes.as_ref().map_or(0, |b| b.len()), "rendered PDF with Edge");
+                tracing::info!(
+                    html = %html_url,
+                    pdf = %last.display(),
+                    bytes = bytes.as_ref().map_or(0, |b| b.len()),
+                    "rendered PDF with Edge"
+                );
                 return bytes.map_err(Into::into);
             }
 
