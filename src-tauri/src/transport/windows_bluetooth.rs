@@ -1,4 +1,4 @@
-use crate::transport::{PrinterInfo, PrinterLanguage, PrinterTransport, PrinterType, RenderedJob};
+use crate::transport::{PrinterInfo, PrinterTransport, RenderedJob};
 use async_trait::async_trait;
 
 /// Windows Bluetooth transport via COM port (paired Bluetooth printer)
@@ -37,30 +37,36 @@ impl WindowsBluetoothPrinter {
     }
 
     /// List paired Bluetooth COM ports
+    #[cfg(feature = "serialport")]
     pub fn discover_paired_bluetooth() -> Vec<PrinterInfo> {
+        use crate::transport::{PrinterLanguage, PrinterType};
+
         let mut printers = Vec::new();
 
         // Scan for COM ports that might be Bluetooth printers
         for i in 1..=256 {
             let port_name = format!("COM{}", i);
-            #[cfg(feature = "serialport")]
-            {
-                // Try to open and identify
-                if let Ok(_) = serialport::new(&port_name, 9600).open() {
-                    printers.push(PrinterInfo {
-                        id: port_name.clone(),
-                        name: format!("Bluetooth Printer ({})", port_name),
-                        address: port_name,
-                        printer_type: PrinterType::Bluetooth,
-                        language: PrinterLanguage::Escpos,
-                        status: "online".to_string(),
-                    });
-                }
+            // Try to open and identify
+            if serialport::new(&port_name, 9600).open().is_ok() {
+                printers.push(PrinterInfo {
+                    id: port_name.clone(),
+                    name: format!("Bluetooth Printer ({})", port_name),
+                    address: port_name,
+                    printer_type: PrinterType::Bluetooth,
+                    language: PrinterLanguage::Escpos,
+                    status: "online".to_string(),
+                });
             }
-            let _ = port_name;
         }
 
         printers
+    }
+
+    /// Without the `serialport` crate there is nothing to enumerate: paired
+    /// Bluetooth printers are reached through the Windows spooler instead.
+    #[cfg(not(feature = "serialport"))]
+    pub fn discover_paired_bluetooth() -> Vec<PrinterInfo> {
+        Vec::new()
     }
 }
 

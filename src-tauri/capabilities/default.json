@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Lets the main window set its own title (Settings → Branding). App commands are unaffected.",
+  "windows": ["main"],
+  "permissions": ["core:window:allow-set-title"]
+}

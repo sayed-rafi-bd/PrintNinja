@@ -8,7 +8,7 @@ pub struct RasterImage {
 
 impl RasterImage {
     pub fn new(width: usize, height: usize) -> Self {
-        let bytes_per_row = (width + 7) / 8;
+        let bytes_per_row = width.div_ceil(8);
         Self {
             width,
             height,
@@ -20,7 +20,7 @@ impl RasterImage {
         if x >= self.width || y >= self.height {
             return false;
         }
-        let idx = y * ((self.width + 7) / 8) + (x / 8);
+        let idx = y * self.width.div_ceil(8) + (x / 8);
         let bit = 7 - (x % 8);
         (self.dots[idx] >> bit) & 1 == 1
     }
@@ -29,7 +29,7 @@ impl RasterImage {
         if x >= self.width || y >= self.height {
             return;
         }
-        let idx = y * ((self.width + 7) / 8) + (x / 8);
+        let idx = y * self.width.div_ceil(8) + (x / 8);
         let bit = 7 - (x % 8);
         if value {
             self.dots[idx] |= 1 << bit;
@@ -76,8 +76,7 @@ impl RasterImage {
                     pixels[idx + width] = (pixels[idx + width] + err * 5 / 16).clamp(0, 255);
                 }
                 if y + 1 < height && x + 1 < width {
-                    pixels[idx + width + 1] =
-                        (pixels[idx + width + 1] + err * 1 / 16).clamp(0, 255);
+                    pixels[idx + width + 1] = (pixels[idx + width + 1] + err / 16).clamp(0, 255);
                 }
             }
         }
@@ -98,14 +97,14 @@ impl RasterImage {
         let new_height = new_height.max(1);
 
         // Nearest neighbor scaling
-        let mut new_dots = vec![0u8; ((target_width + 7) / 8) * new_height];
-        let new_bytes_per_row = (target_width + 7) / 8;
+        let new_bytes_per_row = target_width.div_ceil(8);
+        let mut new_dots = vec![0u8; new_bytes_per_row * new_height];
 
         for y in 0..new_height {
             for x in 0..target_width {
                 let src_x = (x as f64 / scale) as usize;
                 let src_y = (y as f64 / scale) as usize;
-                let src_idx = src_y * ((self.width + 7) / 8) + (src_x / 8);
+                let src_idx = src_y * self.width.div_ceil(8) + (src_x / 8);
                 let src_bit = 7 - (src_x % 8);
 
                 if src_x < self.width && src_y < self.height {

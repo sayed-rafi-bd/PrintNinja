@@ -32,7 +32,7 @@ impl EscPosEncoder {
 
     /// Print raster bitmap (GS v 0)
     pub fn print_raster(image: &crate::render::raster::RasterImage) -> Vec<u8> {
-        let width_bytes = (image.width + 7) / 8;
+        let width_bytes = image.width.div_ceil(8);
         let height = image.height;
 
         let mut cmd = vec![

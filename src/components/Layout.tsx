@@ -1,151 +1,243 @@
-import { useState, useEffect } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-import { cn } from "@/lib/utils";
-import {
-  Printer,
-  FileText,
-  Settings,
-  History,
-  Pencil,
-  ChevronRight,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useCallback, useEffect, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { ChevronRight, CircleHelp, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import { AppLogo } from "@/components/AppLogo";
+import { CommandPalette } from "@/components/CommandPalette";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ShortcutsDialog } from "@/components/ShortcutsDialog";
+import { StatusBadge } from "@/components/StatusBadge";
+import { Button } from "@/components/ui/button";
+import type { HistoryJob } from "@/lib/store/historyStore";
+import { NAV_GROUPS, NAV_ITEMS, isActivePath } from "@/lib/shell/nav";
+import { useGlobalShortcuts } from "@/lib/shell/useGlobalShortcuts";
+import { useShareStatus } from "@/lib/shell/useShareStatus";
+import { usePrefs } from "@/lib/prefs/PrefsProvider";
+import { tauriInvoke } from "@/lib/tauriGuard";
+import { cn } from "@/lib/utils";
 
-const navItems = [
-  { path: "/", icon: Pencil, labelKey: "nav.designer" },
-  { path: "/print", icon: Printer, labelKey: "nav.print" },
-  { path: "/printers", icon: FileText, labelKey: "nav.printers" },
-  { path: "/history", icon: History, labelKey: "nav.history" },
-  { path: "/settings", icon: Settings, labelKey: "nav.settings" },
-] as const;
-
-function isActivePath(currentPath: string, itemPath: string): boolean {
-  if (itemPath === "/") return currentPath === "/" || currentPath.startsWith("/template");
-  return currentPath === itemPath || currentPath.startsWith(`${itemPath}/`);
+function ShareIndicator() {
+  const { t } = useTranslation();
+  const status = useShareStatus();
+  if (status.state === "unconfigured") return null;
+  if (status.state === "online") {
+    return (
+      <span title={t("shell.share_online", { handle: status.handle })}>
+        <StatusBadge status="online" label={status.handle || t("status.online")} />
+      </span>
+    );
+  }
+  if (status.state === "offline") {
+    return (
+      <Link to="/settings" title={t("shell.share_offline")}>
+        <StatusBadge status="offline" label={t("shell.share_offline")} />
+      </Link>
+    );
+  }
+  return (
+    <Link to="/settings" className="text-xs text-muted-foreground underline-offset-2 hover:underline">
+      {t("shell.share_signed_out")}
+    </Link>
+  );
 }
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
+  const { appName, logo } = usePrefs();
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem("printninja-sidebar-collapsed") === "true"; } catch { return false; }
   });
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [reprintJob, setReprintJob] = useState<HistoryJob | null>(null);
+  const [reprinting, setReprinting] = useState(false);
 
   useEffect(() => {
     try { localStorage.setItem("printninja-sidebar-collapsed", String(collapsed)); } catch {}
   }, [collapsed]);
 
-  const handleNavigate = (path: string) => {
-    navigate(path);
+  const goto = useCallback(
+    (key: string) => {
+      const item = NAV_ITEMS.find((i) => i.shortcut === key);
+      if (!item) return false;
+      navigate(item.path);
+      return true;
+    },
+    [navigate],
+  );
+  const openPalette = useCallback(() => setPaletteOpen(true), []);
+  const openHelp = useCallback(() => setHelpOpen(true), []);
+  useGlobalShortcuts({ onPalette: openPalette, onHelp: openHelp, onGoto: goto });
+
+  // Printing is physical, so the palette asks before sending the last job again.
+  const askReprintLast = async () => {
+    try {
+      const jobs = await tauriInvoke<HistoryJob[]>("list_jobs");
+      const last = [...jobs].sort((a, b) => b.id - a.id)[0];
+      if (!last) {
+        toast.info(t("shell.reprint_none"));
+        return;
+      }
+      setReprintJob(last);
+    } catch {
+      toast.error(t("shell.reprint_failed"));
+    }
   };
 
-  const NavList = ({ variant = "desktop" as "desktop" | "mobile" }) => (
-    <nav
-      className={cn(
-        "flex flex-col gap-1",
-        variant === "desktop" ? (collapsed ? "p-2" : "p-4") : "p-2",
-      )}
-    >
-      {navItems.map((item) => {
-        const active = isActivePath(location.pathname, item.path);
-        return (
-          <Button
-            key={item.path}
-            variant={active ? "secondary" : "ghost"}
-            className={cn(
-              "w-full touch-target min-h-11",
-              collapsed && variant === "desktop" ? "justify-center px-2" : "justify-start gap-3",
-              active && "bg-secondary font-medium",
-            )}
-            onClick={() => handleNavigate(item.path)}
-            aria-current={active ? "page" : undefined}
-            type="button"
-            title={collapsed && variant === "desktop" ? String(t(item.labelKey)) : undefined}
-          >
-            <item.icon className="h-5 w-5 shrink-0" />
-            {(!collapsed || variant !== "desktop") && t(item.labelKey)}
-          </Button>
-        );
-      })}
-    </nav>
-  );
+  const confirmReprint = async () => {
+    if (!reprintJob) return;
+    setReprinting(true);
+    try {
+      await tauriInvoke("reprint_job", { id: reprintJob.id });
+      toast.success(t("shell.reprint_done", { id: reprintJob.id }));
+      setReprintJob(null);
+    } catch {
+      toast.error(t("shell.reprint_failed"));
+    } finally {
+      setReprinting(false);
+    }
+  };
+
+  const modKey = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
-      {/* Desktop / Tablet Sidebar — toggleable */}
-      <aside className={cn("hidden md:flex flex-col border-r bg-card shadow-sm transition-all duration-200", collapsed ? "w-16" : "w-64")}>
-        <div className={cn("flex h-16 items-center border-b", collapsed ? "justify-center px-2" : "gap-2 px-6")}>
-          <Printer className="h-6 w-6 text-primary shrink-0" />
-          {!collapsed && <span className="text-lg font-bold truncate">PrintNinja</span>}
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn("ml-auto h-8 w-8 shrink-0", collapsed && "ml-0")}
-            onClick={() => setCollapsed((v) => !v)}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            title={collapsed ? "Expand" : "Collapse"}
-          >
-            <ChevronRight className={cn("h-4 w-4 transition-transform", !collapsed && "rotate-180")} />
-          </Button>
-        </div>
-        <div className="flex-1 overflow-y-auto">
-          <NavList variant="desktop" />
-        </div>
-        {!collapsed && (
-          <div className="p-3 border-t text-xs text-muted-foreground">
-            <p>Tip: collapse for more canvas.</p>
-          </div>
-        )}
-      </aside>
-
-      {/* Mobile Bottom Navigation */}
-      <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 z-50 border-t bg-card shadow-[0_-1px_8px_rgba(0,0,0,0.06)]"
-        aria-label="Primary"
+    <div className="flex h-screen flex-col overflow-hidden bg-background">
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-[60] focus:rounded-md focus:bg-primary focus:px-3 focus:py-2 focus:text-primary-foreground"
       >
-        <div className="flex items-stretch h-16">
-          {navItems.map((item) => {
-            const active = isActivePath(location.pathname, item.path);
-            return (
-              <button
-                key={item.path}
-                type="button"
-                onClick={() => handleNavigate(item.path)}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  // `flex-1 min-w-0` rather than a fixed `w-16`: five
-                  // 64px buttons are 320px of content plus their gaps, which
-                  // overflows a 320px-wide phone and clips the last item.
-                  // Sharing the row also keeps every target at least 44px
-                  // wide on the narrowest device we support.
-                  "flex flex-1 min-w-0 flex-col items-center justify-center gap-1 h-full px-0.5 text-xs transition-colors min-h-11",
-                  active ? "text-primary font-semibold" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <item.icon className="h-5 w-5 shrink-0" />
-                <span className="truncate max-w-full leading-none">{t(item.labelKey)}</span>
-              </button>
-            );
-          })}
-        </div>
-      </nav>
+        {t("shell.skip_to_content")}
+      </a>
 
-      {/* Mobile Header — no hamburger, bottom nav is the navigation */}
-      <header className="md:hidden fixed top-0 left-0 right-0 z-50 flex h-16 items-center border-b bg-card px-4 shadow-sm">
-        <div className="flex items-center gap-2">
-          <Printer className="h-6 w-6 text-primary" />
-          <span className="text-lg font-bold">PrintNinja</span>
+      {/* Top bar: same on every screen size */}
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b bg-card px-3 pt-[env(safe-area-inset-top)] md:px-4">
+        <Link to="/" className="flex items-center gap-2 rounded-md" aria-label={appName}>
+          <AppLogo src={logo} />
+          <span className="truncate text-base font-semibold tracking-tight">{appName}</span>
+        </Link>
+        <button
+          type="button"
+          onClick={openPalette}
+          className="ml-2 hidden h-8 w-full max-w-sm items-center gap-2 rounded-md border border-input bg-card px-2.5 text-sm text-muted-foreground hover:bg-accent md:flex"
+        >
+          <Search className="h-4 w-4" aria-hidden="true" />
+          <span className="flex-1 text-left">{t("shell.search")}</span>
+          <kbd className="rounded border bg-muted px-1.5 font-mono text-xs">{modKey}+K</kbd>
+        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <div className="hidden sm:block"><ShareIndicator /></div>
+          <Button variant="ghost" size="icon" className="md:hidden" onClick={openPalette} aria-label={t("shell.search")}>
+            <Search className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={openHelp} aria-label={t("shell.help")} title={t("shell.help")}>
+            <CircleHelp className="h-4 w-4" />
+          </Button>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-y-auto pt-16 pb-16 md:pt-0 md:pb-0">
-        <div className="container mx-auto p-4 md:p-8 max-w-7xl">
-          {children}
-        </div>
-      </main>
+      <div className="flex min-h-0 flex-1">
+        {/* Sidebar: grouped by job */}
+        <aside className={cn("hidden shrink-0 flex-col border-r bg-card transition-[width] duration-150 md:flex", collapsed ? "w-14" : "w-56")}>
+          <nav aria-label={t("shell.primary_nav")} className="flex-1 space-y-4 overflow-y-auto p-2">
+            {NAV_GROUPS.map((group) => (
+              <div key={group.id} className="space-y-0.5">
+                {!collapsed ? (
+                  <p className="px-2 pb-1 text-xs font-medium text-muted-foreground">{t(group.labelKey)}</p>
+                ) : (
+                  <div className="mx-2 border-t first:hidden" />
+                )}
+                {group.items.map((item) => {
+                  const active = isActivePath(location.pathname, item.path);
+                  const label = t(item.labelKey);
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      aria-current={active ? "page" : undefined}
+                      aria-label={collapsed ? label : undefined}
+                      title={collapsed ? label : undefined}
+                      className={cn(
+                        "flex h-control items-center gap-3 rounded-md px-2.5 text-sm transition-colors",
+                        collapsed && "justify-center px-0",
+                        active
+                          ? "bg-accent font-medium text-accent-foreground"
+                          : "text-foreground/80 hover:bg-muted hover:text-foreground",
+                      )}
+                    >
+                      <item.icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      {!collapsed && label}
+                    </Link>
+                  );
+                })}
+              </div>
+            ))}
+          </nav>
+          <div className="border-t p-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn("w-full", collapsed ? "justify-center px-0" : "justify-start gap-2")}
+              onClick={() => setCollapsed((v) => !v)}
+              aria-label={collapsed ? t("shell.expand") : t("shell.collapse")}
+              title={collapsed ? t("shell.expand") : t("shell.collapse")}
+            >
+              <ChevronRight className={cn("h-4 w-4 transition-transform", !collapsed && "rotate-180")} aria-hidden="true" />
+              {!collapsed && <span className="text-muted-foreground">{t("shell.collapse")}</span>}
+            </Button>
+          </div>
+        </aside>
+
+        <main id="main" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto focus:outline-none">
+          <div className="mx-auto w-full max-w-[1600px] space-y-4 px-4 py-4 md:px-6 md:py-5">{children}</div>
+        </main>
+      </div>
+
+      {/* Bottom bar on phones: same groups and labels as the sidebar */}
+      <nav
+        aria-label={t("shell.mobile_nav")}
+        className="shrink-0 border-t bg-card pb-[env(safe-area-inset-bottom)] md:hidden"
+      >
+        <ul className="flex items-stretch">
+          {NAV_ITEMS.map((item) => {
+            const active = isActivePath(location.pathname, item.path);
+            return (
+              <li key={item.path} className="min-w-0 flex-1">
+                <Link
+                  to={item.path}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "flex min-h-14 flex-col items-center justify-center gap-1 px-0.5 text-xs transition-colors",
+                    active ? "font-semibold text-primary" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <item.icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+                  <span className="max-w-full truncate leading-none">{t(item.labelKey)}</span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        onNavigate={(p) => navigate(p)}
+        onReprintLast={askReprintLast}
+      />
+      <ShortcutsDialog open={helpOpen} onOpenChange={setHelpOpen} />
+      <ConfirmDialog
+        open={reprintJob != null}
+        onOpenChange={(o) => { if (!o) setReprintJob(null); }}
+        title={t("shell.reprint_title", { id: reprintJob?.id })}
+        description={t("shell.reprint_body")}
+        confirmLabel={t("shell.reprint_confirm")}
+        busy={reprinting}
+        onConfirm={confirmReprint}
+      />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import Handlebars from "handlebars";
 import { buildTemplateCss, injectStyles } from "@/lib/templates/templateCss";
+import { sanitizeForRender } from "@/lib/render/sanitize";
 
 /**
  * Register the shared helper set once.
@@ -57,9 +58,30 @@ function registerHelpers() {
   });
 }
 
+const CSP_META =
+  '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'; font-src data:">';
+
+function injectCsp(html: string): string {
+  if (/http-equiv=["']Content-Security-Policy/i.test(html)) return html;
+  if (html.includes("</head>")) {
+    return html.replace("</head>", `${CSP_META}\n</head>`);
+  }
+  if (/<head[\s>]/i.test(html)) {
+    return html.replace(/<head[^>]*>/i, (m) => `${m}\n${CSP_META}`);
+  }
+  if (html.includes("<html")) {
+    return html.replace("<html", `<html>\n<head>${CSP_META}</head>`);
+  }
+  return `${CSP_META}\n${html}`;
+}
+
 /**
  * Compile a Handlebars template, render it with `data`, and wrap the result
  * in a complete HTML document with the bundled print stylesheet inlined.
+ *
+ * Hardened per V2.md §8.3: strips scripts/handlers and injects CSP before
+ * wrapping. The document is intended to be loaded in a sandboxed iframe
+ * with no `allow-scripts` or `allow-same-origin`.
  */
 export function renderTemplate(
   html: string,
@@ -74,21 +96,33 @@ export function renderTemplate(
   } catch {
     // A broken template must still produce a printable document showing the
     // raw source, rather than crashing the preview/print pipeline.
-    body = `<pre style="white-space:pre-wrap">${html}</pre>`;
+    // Escape HTML to prevent execution even inside <pre>.
+    const escaped = html
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    body = `<pre style="white-space:pre-wrap">${escaped}</pre>`;
   }
+
+  // Strip scripts and event handlers unconditionally — preview must never
+  // execute code, even from a compromised server row.
+  body = sanitizeForRender(body);
 
   const combined = buildTemplateCss(css);
 
   // If the template is already a full document, inject into it rather than
   // nesting a second <html>.
   if (/<html[\s>]/i.test(body)) {
-    return injectStyles(body, combined);
+    let doc = injectStyles(body, combined);
+    doc = injectCsp(doc);
+    return doc;
   }
 
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
+${CSP_META}
 <style data-printninja>${combined}</style>
 </head>
 <body>

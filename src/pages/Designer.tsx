@@ -1,11 +1,15 @@
 import { useTranslation } from "react-i18next";
+import { PageHeader } from "@/components/PageHeader";
+import { DesignerSidebar } from "@/components/designer/DesignerSidebar";
+import { DesignerToolbar } from "@/components/designer/DesignerToolbar";
+import { PublishBar } from "@/components/designer/PublishBar";
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -23,22 +27,16 @@ import {
 } from "@/components/ui/dialog";
 import {
   Plus,
-  FileText,
-  Download,
-  Upload,
-  RotateCcw,
   Trash2,
   ZoomIn,
   ZoomOut,
   Save,
-  GitCompare,
   Type,
   QrCode,
   Check,
 } from "lucide-react";
 import { useTemplateStore, type Template, type TemplateVersion } from "@/lib/store/templateStore";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
 import CodeMirror from "@uiw/react-codemirror";
 import { html } from "@codemirror/lang-html";
 import { css } from "@codemirror/lang-css";
@@ -48,6 +46,8 @@ import { VisualDesigner } from "@/components/VisualDesigner";
 import { renderTemplate } from "@/lib/render/renderTemplate";
 import { formatCss, formatHtml } from "@/lib/utils/format";
 import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
+import { ReadmeEditor } from "@/components/ReadmeEditor";
+import * as share from "@/lib/share/client";
 
 const PAGE_PRESETS = [
   { label: "A4", width: 210, height: 297 },
@@ -81,6 +81,12 @@ export function DesignerPage() {
   const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait");
   const [zoom, setZoom] = useState(1);
   const [activeTab, setActiveTab] = useState("canvas");
+  const [readme, setReadme] = useState("");
+  const [readmeSaving, setReadmeSaving] = useState(false);
+  const [remoteId, setRemoteId] = useState<string | null>(null);
+  const [publishedAt, setPublishedAt] = useState<string | null>(null);
+  const [templateUpdatedAt, setTemplateUpdatedAt] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
   const [debouncedHtml, setDebouncedHtml] = useState(htmlCode);
   const [debouncedCss, setDebouncedCss] = useState(cssCode);
   useEffect(() => {
@@ -91,7 +97,6 @@ export function DesignerPage() {
     return () => clearTimeout(id);
   }, [htmlCode, cssCode]);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Templates available in the designer — persisted in SQLite via
   // `list_templates` / `create_template`. Starter templates are the
@@ -110,7 +115,7 @@ export function DesignerPage() {
     },
   ]);
 
-  const loadTemplate = (tpl: { id: number; name: string; html: string; css: string; page_w_mm?: number; page_h_mm?: number; orientation?: string }) => {
+  const loadTemplate = (tpl: { id: number; name: string; html: string; css: string; page_w_mm?: number; page_h_mm?: number; orientation?: string; readme?: string }) => {
     setCurrentTemplateId(tpl.id);
     setTemplateName(tpl.name);
     setHtmlCode(formatHtml(tpl.html));
@@ -121,6 +126,28 @@ export function DesignerPage() {
     setCurrentTemplateDbId(tpl.id);
     setDiff(null);
     setShowDiff(false);
+    // Load readme and publish info if provided, otherwise fetch from DB
+    if (tpl.readme !== undefined) {
+      setReadme(tpl.readme);
+      setRemoteId((tpl as any).remote_id ?? null);
+      setPublishedAt((tpl as any).published_at ?? null);
+      setTemplateUpdatedAt((tpl as any).updated_at ?? null);
+    } else {
+      (async () => {
+        try {
+          const full = await invoke<any>("get_template", { id: tpl.id });
+          setReadme(full.readme ?? "");
+          setRemoteId(full.remote_id ?? null);
+          setPublishedAt(full.published_at ?? null);
+          setTemplateUpdatedAt(full.updated_at ?? null);
+        } catch {
+          setReadme("");
+          setRemoteId(null);
+          setPublishedAt(null);
+          setTemplateUpdatedAt(null);
+        }
+      })();
+    }
     // Load the persisted versions for the newly selected template.
     (async () => {
       try {
@@ -133,6 +160,98 @@ export function DesignerPage() {
       }
     })();
     toast.success(`Loaded "${tpl.name}"`);
+  };
+
+  const handlePublish = async () => {
+    if (!currentTemplateDbId) {
+      toast.error("No template selected");
+      return;
+    }
+    const serviceUrl = await share.getServiceUrl();
+    if (!serviceUrl) {
+      toast.error("Share service not configured — set it in Settings");
+      return;
+    }
+    const token = await share.getSessionToken();
+    if (!token) {
+      toast.error("Not signed in — sign in via Settings");
+      return;
+    }
+    setPublishing(true);
+    try {
+      const id = remoteId ?? crypto.randomUUID();
+      const isUpdate = !!remoteId;
+      const payload = {
+        id,
+        name: templateName,
+        summary: "",
+        page_w_mm: pageWidth,
+        page_h_mm: pageHeight,
+        language: "html",
+        body: htmlCode,
+        readme,
+      };
+      const res = await share.publishTemplate(payload);
+      // Persist remote_id and published_at locally
+      const publishedAt = res.updated_at ?? res.published_at ?? new Date().toISOString();
+      await invoke("set_publish_info", { req: { id: currentTemplateDbId, remote_id: id, published_at: publishedAt } });
+      setRemoteId(id);
+      setPublishedAt(publishedAt);
+      setTemplateUpdatedAt(publishedAt);
+      toast.success(isUpdate ? "Published update" : "Published");
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const handleUnpublish = async () => {
+    if (!currentTemplateDbId || !remoteId) return;
+    setPublishing(true);
+    try {
+      await share.unpublishTemplate(remoteId);
+      await invoke("clear_publish_info", { req: { id: currentTemplateDbId } });
+      setRemoteId(null);
+      setPublishedAt(null);
+      toast.success("Unpublished");
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const handleImportFile = async (file: File) => {
+    try {
+      const text = await file.text();
+      const isHtml = file.name.toLowerCase().endsWith(".html") || text.trim().toLowerCase().startsWith("<!doctype") || text.trim().toLowerCase().startsWith("<html");
+      if (isHtml) {
+        setTemplateName(file.name.replace(/\.html$/i, ""));
+        setHtmlCode(formatHtml(text));
+        toast.success("HTML template imported");
+      } else {
+        const data = JSON.parse(text);
+        setTemplateName(data.name || file.name.replace(/\.(json|html)$/, ""));
+        if (data.html) setHtmlCode(formatHtml(data.html));
+        if (data.css) setCssCode(formatCss(data.css));
+        toast.success("Template imported");
+      }
+    } catch {
+      toast.error("Invalid template file");
+    }
+  };
+
+  const handleExport = () => {
+    const data = { name: templateName, html: htmlCode, css: cssCode };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${templateName.replace(/\s+/g, "-")}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Template exported");
   };
 
   const createNewTemplate = async () => {
@@ -265,6 +384,19 @@ export function DesignerPage() {
           setPageHeight(hydrated[0].page_h_mm ?? 200);
           setOrientation((hydrated[0].orientation as "portrait" | "landscape") ?? "portrait");
           setCurrentTemplateDbId(hydrated[0].id);
+          // Load README and publish info for the first template
+          try {
+            const full = await invoke<any>("get_template", { id: hydrated[0].id });
+            setReadme(full.readme ?? "");
+            setRemoteId(full.remote_id ?? null);
+            setPublishedAt(full.published_at ?? null);
+            setTemplateUpdatedAt(full.updated_at ?? null);
+          } catch {
+            setReadme("");
+            setRemoteId(null);
+            setPublishedAt(null);
+            setTemplateUpdatedAt(null);
+          }
         } else {
           const starters = STARTER_TEMPLATES.map((t, i) => ({
             id: i + 1,
@@ -312,6 +444,13 @@ export function DesignerPage() {
       page_w_mm: pageWidth,
       page_h_mm: pageHeight,
       orientation,
+      readme: "",
+      summary: "",
+      remote_id: null,
+      published_at: null,
+      origin: "own",
+      origin_owner: null,
+      withdrawn: false,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -445,251 +584,73 @@ export function DesignerPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{t("designer.title")}</h1>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setShowNewTemplateDialog(true)}>
-            <Plus className="h-4 w-4" />
-            {t("designer.newTemplate")}
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
-            <Upload className="h-4 w-4" />
-            Import
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => {
-            const data = { name: templateName, html: htmlCode, css: cssCode };
-            const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = `${templateName.replace(/\s+/g, "-")}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-            toast.success("Template exported");
-          }}>
-            <Download className="h-4 w-4" />
-            Export
-          </Button>
-        </div>
-        <input
-          type="file"
-          accept="application/json,text/html"
-          ref={fileInputRef}
-          data-testid="template-import"
-          aria-hidden="true"
-          className="hidden"
-          onChange={async (e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            try {
-              const text = await file.text();
-              const isHtml = file.name.toLowerCase().endsWith(".html") || text.trim().toLowerCase().startsWith("<!doctype") || text.trim().toLowerCase().startsWith("<html");
-              if (isHtml) {
-                setTemplateName(file.name.replace(/\.html$/i, ""));
-                setHtmlCode(formatHtml(text));
-                toast.success("HTML template imported");
-              } else {
-                const data = JSON.parse(text);
-                setTemplateName(data.name || file.name.replace(/\.(json|html)$/, ""));
-                if (data.html) setHtmlCode(formatHtml(data.html));
-                if (data.css) setCssCode(formatCss(data.css));
-                toast.success("Template imported");
-              }
-            } catch {
-              toast.error("Invalid template file");
-            } finally {
-              if (fileInputRef.current) fileInputRef.current.value = "";
-            }
-          }}
-        />
-      </div>
+      <PageHeader title={t("designer.title")} description={t("pages.designer")}>
+        <DesignerToolbar onNew={() => setShowNewTemplateDialog(true)} onImportFile={handleImportFile} onExport={handleExport} />
+      </PageHeader>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* Left Panel - Template List & Page Setup */}
-        <div className="space-y-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Templates</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1">
-              {templates.map((tpl) => {
-                const active = tpl.id === currentTemplateId;
-                return (
-                  <button
-                    key={tpl.id}
-                    type="button"
-                    onClick={() => loadTemplate(tpl)}
-                    className={`flex w-full items-center gap-2 rounded-md p-2 text-left text-sm transition-colors ${active ? "bg-secondary font-medium" : "hover:bg-muted"}`}
-                  >
-                    <FileText className="h-4 w-4 shrink-0" />
-                    <span className="truncate">{tpl.name}</span>
-                    {active && (
-                      <span className="ml-auto rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
-                        Active
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">{t("designer.pageSetup")}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-1">
-                <Label className="text-xs">{t("designer.template_name")}</Label>
-                <Input value={templateName} onChange={(e) => setTemplateName(e.target.value)} />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">Width (mm)</Label>
-                  <Input type="number" value={pageWidth} onChange={(e) => setPageWidth(Number(e.target.value))} />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Height (mm)</Label>
-                  <Input type="number" value={pageHeight} onChange={(e) => setPageHeight(Number(e.target.value))} />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Presets</Label>
-                <div className="flex flex-wrap gap-1">
-                  {PAGE_PRESETS.map((preset) => (
-                    <Button
-                      key={preset.label}
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => {
-                        setPageWidth(preset.width);
-                        setPageHeight(preset.height);
-                      }}
-                    >
-                      {preset.label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">{t("designer.orientation")}</Label>
-                <Select value={orientation} onValueChange={(v) => setOrientation(v as "portrait" | "landscape")}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="portrait">{t("designer.portrait")}</SelectItem>
-                    <SelectItem value="landscape">{t("designer.landscape")}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Versions Panel */}
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">{t("designer.versions")}</CardTitle>
-                <Button variant="ghost" size="sm" className="h-6" onClick={() => setShowVersionDialog(true)}>
-                  <Plus className="h-3 w-3" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-1 max-h-48 overflow-y-auto">
-              {versions.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  No versions yet — use “Save Version” to snapshot.
-                </p>
-              ) : (
-                versions.map((v, i) => {
-                  const isCurrent = i === 0;
-                  const older = versions[i + 1];
-                  return (
-                    <div
-                      key={v.id}
-                      className={cn(
-                        "flex items-center justify-between p-2 rounded-md border",
-                        isCurrent && "bg-secondary",
-                      )}
-                    >
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium">
-                          v{v.version_no}
-                          {isCurrent && (
-                            <span className="ml-1 text-[10px] text-primary">
-                              current
-                            </span>
-                          )}
-                        </p>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {v.label || v.note || v.created_at.slice(0, 16)}
-                        </p>
-                      </div>
-                      <div className="flex gap-1 shrink-0">
-                        {older && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0"
-                            title={`Diff v${older.version_no} → v${v.version_no}`}
-                            aria-label={`Diff v${older.version_no} to v${v.version_no}`}
-                            onClick={() => openDiff(older, v)}
-                          >
-                            <GitCompare className="h-3 w-3" />
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0"
-                          title="Restore this version"
-                          aria-label={`Restore version ${v.version_no}`}
-                          disabled={isCurrent}
-                          onClick={() => handleRestoreVersion(v)}
-                        >
-                          <RotateCcw className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </CardContent>
-          </Card>
-        </div>
+        <DesignerSidebar
+          templates={templates}
+          currentTemplateId={currentTemplateId}
+          loadTemplate={loadTemplate}
+          templateName={templateName}
+          setTemplateName={setTemplateName}
+          pageWidth={pageWidth}
+          setPageWidth={setPageWidth}
+          pageHeight={pageHeight}
+          setPageHeight={setPageHeight}
+          presets={PAGE_PRESETS}
+          orientation={orientation}
+          setOrientation={setOrientation}
+          versions={versions}
+          onNewVersion={() => setShowVersionDialog(true)}
+          openDiff={openDiff}
+          handleRestoreVersion={handleRestoreVersion}
+        />
 
         {/* Main Canvas + Code */}
-        <div className="lg:col-span-2 space-y-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="lg:col-span-2 space-y-4">
           <div className="flex items-center justify-between">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full max-w-[420px] overflow-x-auto">
-              <TabsList className="grid w-full grid-cols-5">
-                <TabsTrigger value="canvas" className="text-xs">{t("designer.canvas")}</TabsTrigger>
-                <TabsTrigger value="visual" className="text-xs">Visual</TabsTrigger>
-                <TabsTrigger value="code" className="text-xs">{t("designer.code")}</TabsTrigger>
-                <TabsTrigger value="preview" className="text-xs">{t("designer.preview")}</TabsTrigger>
-                <TabsTrigger value="variables" className="text-xs">{t("designer.variables")}</TabsTrigger>
+            <div className="min-w-0 overflow-x-auto">
+              <TabsList aria-label="Designer views" className="h-8 w-max gap-0.5 p-0.5">
+                <TabsTrigger value="canvas" className="h-7 px-3 text-xs">{t("designer.canvas")}</TabsTrigger>
+                <TabsTrigger value="visual" className="h-7 px-3 text-xs">Visual</TabsTrigger>
+                <TabsTrigger value="code" className="h-7 px-3 text-xs">{t("designer.code")}</TabsTrigger>
+                <TabsTrigger value="readme" className="h-7 px-3 text-xs">README</TabsTrigger>
+                <TabsTrigger value="preview" className="h-7 px-3 text-xs">{t("designer.preview")}</TabsTrigger>
+                <TabsTrigger value="variables" className="h-7 px-3 text-xs">{t("designer.variables")}</TabsTrigger>
               </TabsList>
-            </Tabs>
+            </div>
             <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setZoom((z) => Math.max(0.25, z - 0.25))}>
+              <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Zoom out" title="Zoom out" onClick={() => setZoom((z) => Math.max(0.25, z - 0.25))}>
                 <ZoomOut className="h-4 w-4" />
               </Button>
               <span className="text-xs w-12 text-center">{Math.round(zoom * 100)}%</span>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setZoom((z) => Math.min(3, z + 0.25))}>
+              <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Zoom in" title="Zoom in" onClick={() => setZoom((z) => Math.min(3, z + 0.25))}>
                 <ZoomIn className="h-4 w-4" />
               </Button>
             </div>
           </div>
 
+          <PublishBar
+            templateName={templateName}
+            remoteId={remoteId}
+            publishedAt={publishedAt}
+            templateUpdatedAt={templateUpdatedAt}
+            publishing={publishing}
+            onPublish={handlePublish}
+            onUnpublish={handleUnpublish}
+          />
+
+          <TabsContent value={activeTab} className="mt-0 space-y-4">
           {activeTab === "canvas" && (
             <Card>
               <CardContent className="p-0">
-                <div className="flex items-center justify-center min-h-[500px] bg-gray-100 dark:bg-gray-900 rounded-b-lg overflow-auto">
+                <div className="flex items-center justify-center min-h-[500px] bg-muted rounded-b-lg overflow-auto">
                   <div
                     ref={canvasRef}
-                    className="bg-white shadow-lg border border-gray-200 relative"
+                    className="bg-white shadow-md border relative"
                     style={{ width: canvasWidth, height: canvasHeight, transformOrigin: "top left" }}
                   >
                     <iframe
@@ -705,6 +666,7 @@ export function DesignerPage() {
                           }
                         })(),
                       )}
+                      sandbox=""
                       className="pointer-events-none"
                       title="Canvas preview"
                       style={{ width: "100%", height: "100%", border: 0 }}
@@ -761,13 +723,53 @@ export function DesignerPage() {
             </div>
           )}
 
+          {activeTab === "readme" && (
+            <Card>
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm">README — {templateName}</CardTitle>
+                  <Button
+                    size="sm"
+                    onClick={async () => {
+                      if (!currentTemplateDbId) {
+                        toast.error("No template selected");
+                        return;
+                      }
+                      const bytes = new TextEncoder().encode(readme).length;
+                      if (bytes > 64 * 1024) {
+                        toast.error("README exceeds 64 KiB");
+                        return;
+                      }
+                      setReadmeSaving(true);
+                      try {
+                        await invoke("update_readme", { req: { id: currentTemplateDbId, readme } });
+                        toast.success("README saved");
+                      } catch (e) {
+                        toast.error(String(e));
+                      } finally {
+                        setReadmeSaving(false);
+                      }
+                    }}
+                    disabled={readmeSaving}
+                  >
+                    {readmeSaving ? "Saving…" : "Save README"}
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <ReadmeEditor value={readme} onChange={setReadme} templateName={templateName} />
+              </CardContent>
+            </Card>
+          )}
+
           {activeTab === "preview" && (
             <Card>
               <CardContent className="p-0">
-                <div className="flex items-center justify-center min-h-[500px] bg-gray-100 dark:bg-gray-900 rounded-b-lg">
+                <div className="flex items-center justify-center min-h-[500px] bg-muted rounded-b-lg">
                   <div className="bg-white shadow-lg border overflow-auto" style={{ width: pageWidth * MM_TO_PX, minHeight: pageHeight * MM_TO_PX }}>
                     <iframe
                       srcDoc={renderTemplate(htmlCode, cssCode, DEFAULT_MOCK_DATA as any)}
+                      sandbox=""
                       className="w-full border-0"
                       style={{ height: pageHeight * MM_TO_PX, width: "100%" }}
                       title="Preview"
@@ -813,7 +815,7 @@ export function DesignerPage() {
                                 onChange={() => setSelectedDatasetName(ds.name)}
                               />
                               <span className="text-sm font-medium">{ds.name}</span>
-                              {ds.isDefault && <Badge variant="secondary" className="text-[10px]">Default</Badge>}
+                              {ds.isDefault && <Badge variant="secondary" className="text-xs">Default</Badge>}
                             </div>
                             <div className="flex gap-1">
                               <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => {
@@ -841,7 +843,7 @@ export function DesignerPage() {
                                 <button
                                   key={f}
                                   type="button"
-                                  className="rounded-full border px-2 py-0.5 font-mono text-[10px] hover:bg-muted cursor-pointer"
+                                  className="rounded-full border px-2 py-0.5 font-mono text-xs hover:bg-muted cursor-pointer"
                                   onClick={async () => {
                                     const token = `{{${f}}}`;
                                     try { await navigator.clipboard.writeText(token); toast.success(`Copied ${token}`); }
@@ -856,7 +858,7 @@ export function DesignerPage() {
                           </div>
                           <details className="text-xs">
                             <summary className="cursor-pointer text-muted-foreground">View JSON</summary>
-                            <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted p-2 font-mono text-[10px]">{ds.json}</pre>
+                            <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted p-2 font-mono text-xs">{ds.json}</pre>
                           </details>
                         </div>
                       );
@@ -878,7 +880,7 @@ export function DesignerPage() {
                       <button
                         key={v}
                         type="button"
-                        className="rounded-full border px-2 py-0.5 font-mono text-[10px] hover:bg-primary hover:text-primary-foreground cursor-pointer"
+                        className="rounded-full border px-2 py-0.5 font-mono text-xs hover:bg-primary hover:text-primary-foreground cursor-pointer"
                         onClick={async () => {
                           const token = `{{${v}}}`;
                           try { await navigator.clipboard.writeText(token); toast.success(`Copied ${token}`); }
@@ -894,6 +896,7 @@ export function DesignerPage() {
             </div>
           )}
 
+          </TabsContent>
           {/* Action Bar */}
           <div className="flex items-center justify-between">
             <div className="flex gap-2">
@@ -912,6 +915,8 @@ export function DesignerPage() {
               </Button>
               <input
                 ref={fontInputRef}
+                aria-label="Upload font file"
+                tabIndex={-1}
                 type="file"
                 accept=".ttf,.otf,.woff,.woff2"
                 className="hidden"
@@ -948,7 +953,7 @@ export function DesignerPage() {
               </Button>
             </div>
           </div>
-        </div>
+        </Tabs>
 
         {/* Right Panel - Properties */}
         <div className="space-y-4">
@@ -1028,7 +1033,7 @@ export function DesignerPage() {
                   <p className="text-xs font-semibold mb-1">
                     v{diff.from_version_no} (before)
                   </p>
-                  <pre className="text-[10px] bg-muted p-2 rounded overflow-auto max-h-72 whitespace-pre-wrap">
+                  <pre className="text-xs bg-muted p-2 rounded overflow-auto max-h-72 whitespace-pre-wrap">
                     {diff.html_from || "(empty)"}
                   </pre>
                 </div>
@@ -1036,7 +1041,7 @@ export function DesignerPage() {
                   <p className="text-xs font-semibold mb-1">
                     v{diff.to_version_no} (after)
                   </p>
-                  <pre className="text-[10px] bg-muted p-2 rounded overflow-auto max-h-72 whitespace-pre-wrap">
+                  <pre className="text-xs bg-muted p-2 rounded overflow-auto max-h-72 whitespace-pre-wrap">
                     {diff.html_to || "(empty)"}
                   </pre>
                 </div>
@@ -1047,7 +1052,7 @@ export function DesignerPage() {
                     <p className="text-xs font-semibold mb-1">
                       CSS v{diff.from_version_no}
                     </p>
-                    <pre className="text-[10px] bg-muted p-2 rounded overflow-auto max-h-48 whitespace-pre-wrap">
+                    <pre className="text-xs bg-muted p-2 rounded overflow-auto max-h-48 whitespace-pre-wrap">
                       {diff.css_from || "(empty)"}
                     </pre>
                   </div>
@@ -1055,7 +1060,7 @@ export function DesignerPage() {
                     <p className="text-xs font-semibold mb-1">
                       CSS v{diff.to_version_no}
                     </p>
-                    <pre className="text-[10px] bg-muted p-2 rounded overflow-auto max-h-48 whitespace-pre-wrap">
+                    <pre className="text-xs bg-muted p-2 rounded overflow-auto max-h-48 whitespace-pre-wrap">
                       {diff.css_to || "(empty)"}
                     </pre>
                   </div>
@@ -1118,7 +1123,7 @@ export function DesignerPage() {
               <Label htmlFor="barcode-value">Value</Label>
               <Input id="barcode-value" placeholder="Enter barcode value" value={barcodeValue} onChange={(e) => { setBarcodeValue(e.target.value); setBarcodeError(null); }} />
               {barcodeError && (
-                <p id="barcode-error" role="alert" className="text-xs text-red-500">{barcodeError}</p>
+                <p id="barcode-error" role="alert" className="text-xs text-danger">{barcodeError}</p>
               )}
             </div>
           </div>
@@ -1155,7 +1160,7 @@ export function DesignerPage() {
                   basicSetup={{ lintKeymap: true }}
                 />
               </div>
-              {(() => { try { JSON.parse(datasetJson); return null; } catch (e) { return <p className="text-xs text-red-500">{String(e).split("\n")[0]}</p>; }})()}
+              {(() => { try { JSON.parse(datasetJson); return null; } catch (e) { return <p className="text-xs text-danger">{String(e).split("\n")[0]}</p>; }})()}
             </div>
           </div>
           <DialogFooter>
@@ -1195,7 +1200,7 @@ export function DesignerPage() {
                 theme="dark"
               />
             </div>
-            {(() => { try { JSON.parse(editJson); return null; } catch (e) { return <p className="text-xs text-red-500">{String(e).split("\n")[0]}</p>; }})()}
+            {(() => { try { JSON.parse(editJson); return null; } catch (e) { return <p className="text-xs text-danger">{String(e).split("\n")[0]}</p>; }})()}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEditDataset(false)}>Cancel</Button>

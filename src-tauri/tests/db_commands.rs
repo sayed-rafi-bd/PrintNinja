@@ -3,23 +3,25 @@
 //! These run against a real temp-file SQLite database so the SQL is actually
 //! exercised (not just type-checked). Tauri `State` is unwrapped via a helper.
 
-use printninja_lib::db::Database;
+use printninja::db::Database;
 use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
 
 /// Build an in-memory DB seeded with the app schema, returning the DbState
 /// and a guard so the connection stays alive.
 fn test_db() -> (Arc<Mutex<Database>>, Connection) {
-    let conn = Connection::open_in_memory().expect("open in-memory db");
+    let mut conn = Connection::open_in_memory().expect("open in-memory db");
     conn.execute_batch(include_str!("../src/db/schema.sql"))
         .expect("apply schema");
+    printninja::db::ensure_v2_schema(&mut conn).expect("apply v2 schema");
 
     let dir = std::env::temp_dir();
     let path = dir.join(format!("printninja_test_{}.db", uuid::Uuid::new_v4()));
-    let file_conn = Connection::open(&path).expect("open file db");
+    let mut file_conn = Connection::open(&path).expect("open file db");
     file_conn
         .execute_batch(include_str!("../src/db/schema.sql"))
         .expect("apply schema");
+    printninja::db::ensure_v2_schema(&mut file_conn).expect("apply v2 schema");
     drop(file_conn);
 
     let url = format!("sqlite:{}", path.display());

@@ -16,7 +16,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 If the disk is 32 G, `target/` can hit 5–7 G — `cargo clean` when needed and use `CARGO_INCREMENTAL=0 cargo test`.
 
-Playwright bypasses onboarding with `page.addInitScript(() => localStorage.setItem("printninja-onboarding-complete","true"))`. Settings fall back to `localStorage` key `printninja-setting:<key>` when not in Tauri.
+In a browser (no Tauri IPC) settings fall back to the `localStorage` key `printninja-setting:<key>`.
 
 ## Code style
 
@@ -48,11 +48,10 @@ Run before pushing:
 pnpm lint
 pnpm test
 npx tsc --noEmit
-npx playwright test   # 105 tests
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-Add a regression test for each fix (Vitest `src/test/*`, Rust `#[cfg(test)]` or `src-tauri/tests/*`, Playwright `e2e/*`). Watch for strict-mode collisions — scope with `.first()` or `getByRole("dialog")`.
+Add a regression test for each fix (Vitest `src/test/*`, Rust `#[cfg(test)]` or `src-tauri/tests/*`).
 
 ## Release
 
@@ -60,7 +59,7 @@ Local-only signing. See `docs/RELEASE.md` and `scripts/release.sh` (rename app, 
 
 ## Commit checklist
 
-- [ ] `pnpm lint` / `pnpm test` / `tsc` / `playwright` / `cargo test` green
+- [ ] `pnpm lint` / `pnpm test` / `tsc` / `cargo test` green
 - [ ] New/changed behaviour has a regression test
 - [ ] `templates.generated.ts` re-committed if print styles changed
 - [ ] No `window.open` for preview (use `setActiveTab("preview")`), no `canvas.toDataURL("image/svg+xml")`, no `cdn.tailwindcss.com`

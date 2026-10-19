@@ -49,6 +49,39 @@ pub fn verify_key(key: &str, hash: &str) -> bool {
     diff == 0
 }
 
+/// Rate limiter (simple token bucket)
+pub struct RateLimiter {
+    max_tokens: u32,
+    tokens: u32,
+    last_refill: std::time::Instant,
+    refill_rate: u32, // tokens per second
+}
+
+impl RateLimiter {
+    pub fn new(max_tokens: u32, refill_rate: u32) -> Self {
+        Self {
+            max_tokens,
+            tokens: max_tokens,
+            last_refill: std::time::Instant::now(),
+            refill_rate,
+        }
+    }
+
+    pub fn check(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        let elapsed = now.duration_since(self.last_refill).as_secs() as u32;
+        self.tokens = (self.tokens + elapsed * self.refill_rate).min(self.max_tokens);
+        self.last_refill = now;
+
+        if self.tokens > 0 {
+            self.tokens -= 1;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,38 +128,5 @@ mod tests {
         assert!(plain.starts_with("pn_live_"));
         assert_eq!(plain.len(), 40);
         assert_eq!(hash.len(), 64);
-    }
-}
-
-/// Rate limiter (simple token bucket)
-pub struct RateLimiter {
-    max_tokens: u32,
-    tokens: u32,
-    last_refill: std::time::Instant,
-    refill_rate: u32, // tokens per second
-}
-
-impl RateLimiter {
-    pub fn new(max_tokens: u32, refill_rate: u32) -> Self {
-        Self {
-            max_tokens,
-            tokens: max_tokens,
-            last_refill: std::time::Instant::now(),
-            refill_rate,
-        }
-    }
-
-    pub fn check(&mut self) -> bool {
-        let now = std::time::Instant::now();
-        let elapsed = now.duration_since(self.last_refill).as_secs() as u32;
-        self.tokens = (self.tokens + elapsed * self.refill_rate).min(self.max_tokens);
-        self.last_refill = now;
-
-        if self.tokens > 0 {
-            self.tokens -= 1;
-            true
-        } else {
-            false
-        }
     }
 }

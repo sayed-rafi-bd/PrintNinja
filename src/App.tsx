@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { lazy, Suspense, useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { Onboarding } from "./components/Onboarding";
@@ -7,7 +7,11 @@ import { PrintPage } from "./pages/Print";
 import { PrinterSetupPage } from "./pages/PrinterSetup";
 import { HistoryPage } from "./pages/History";
 import { SettingsPage } from "./pages/Settings";
+import { TemplatesPage } from "./pages/Templates";
 import { diagnostics } from "./lib/diagnostics";
+
+// Reference page for shared components. Not bundled into production builds.
+const UiKitPage = import.meta.env.DEV ? lazy(() => import("./pages/UiKit")) : null;
 
 export default function App() {
   const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(() => {
@@ -60,12 +64,14 @@ export default function App() {
     return () => { cancelled = true; clearTimeout(timer); };
   }, []);
 
-  const handleOnboardingComplete = async () => {
+  const handleOnboardingComplete = async (destination?: string) => {
     localStorage.setItem("printninja-onboarding-complete", "true");
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       await invoke("set_setting", { key: "onboarding_done", value: "true" }).catch(() => {});
     } catch {}
+    // The router has not mounted yet, so set the starting address before it does.
+    if (destination) window.history.replaceState(null, "", destination);
     setOnboardingComplete(true);
     diagnostics.info("Onboarding completed");
   };
@@ -83,10 +89,21 @@ export default function App() {
         <Routes>
           <Route path="/" element={<DesignerPage />} />
           <Route path="/template/:id" element={<DesignerPage />} />
+          <Route path="/templates" element={<TemplatesPage />} />
           <Route path="/print" element={<PrintPage />} />
           <Route path="/printers" element={<PrinterSetupPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          {UiKitPage && (
+            <Route
+              path="/__ui"
+              element={
+                <Suspense fallback={null}>
+                  <UiKitPage />
+                </Suspense>
+              }
+            />
+          )}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>
