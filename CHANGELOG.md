@@ -5,6 +5,9 @@ All notable changes to PrintNinja are documented here. The format is based on Ke
 ## [Unreleased] — Online-only server migration
 
 ### Added
+- **Per-template Tailwind CSS.** Each template version now carries a stylesheet compiled from the classes it actually uses, so any Tailwind class works, including arbitrary values such as `w-[37mm]`, `bg-rose-500` and `grid-cols-5`. Before, only the Designer's fixed palette had rules and anything else silently did nothing. Compilation runs in the app (Tailwind v4 `compile()`, installed as the `tailwind4` alias) when a template is saved, seeded, refreshed or downloaded; the result is stored as `compiled_css`/`compiled_key` on `template_versions`, and previews and the Rust print path inline the same CSS.
+- To style from data, write each full class in every branch (`{{#if urgent}}bg-red-600{{else}}bg-green-600{{/if}}`) or use a CSS variable. Class names built at render time (`bg-{{color}}-500`) cannot be compiled, and the Designer warns about them.
+- At startup the app compiles every stored version that has no compiled CSS or was compiled by an older compiler revision (`set_version_compiled_css`); this adds no history and does not move `updated_at`.
 - **Save to server** (migration phase 1). The Designer and every Templates row push the local copy to the server, HTML and CSS together. A first Save stores the template private; Publish makes it visible in Community as before. `remote_id` comes back and links the two copies.
 - **Refresh from server**, one button per template, asks first because it overwrites unsaved local edits. On success it rewrites the local HTML, CSS, README, name, page size and summary; on failure it says so and leaves the local copy alone, so it still prints.
 - **Get from server** dialog on Templates: lists the account's own templates and the ones saved from Community, and adds the chosen ones to this PC with their CSS and README. This is how a new PC gets its templates.
@@ -12,6 +15,9 @@ All notable changes to PrintNinja are documented here. The format is based on Ke
 - A 401 from the server, or signing out, returns to sign-in. The app stays loaded behind the sign-in screen, so edits that are not saved yet are still there after signing in again.
 - Once the app is open the gate never blocks on the network, so printing keeps working if the server goes away.
 - Sign-in gate (migration phase 2): the app opens on a sign-in and register screen until the server accepts a session. The screen includes the server address, so a new PC can be set up without visiting Settings first.
+
+### Removed
+- The shared, safelisted print bundle: `tailwind.templates.config.ts`, `scripts/build-template-css.mjs`, `src/styles/templates.src.css`, `src/lib/templates/templates.generated.ts`, `src-tauri/assets/template-print.css`, and the `build:templates:css` / `prebuild` scripts. Only the small base layer (reset, page-break helpers, barcode) remains.
 
 ### Changed
 - Template CSS is stored on the server and returned with the HTML. Until now a published template lost its CSS on the way to another PC.

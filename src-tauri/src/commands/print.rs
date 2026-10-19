@@ -107,30 +107,26 @@ fn resolve_template(
     Ok((html, css, compiled_css, version_id, w as f64, h as f64))
 }
 
-/// Bundled print stylesheets, byte-identical to what the Designer/Print
-/// preview inlines (`buildTemplateCss` in `src/lib/templates/templateCss.ts`).
+/// Base print stylesheet, byte-identical to `TEMPLATE_BASE_CSS` in
+/// `src/lib/templates/templateCss.ts`, which the Designer/Print preview inlines.
 ///
 /// Templates are authored with Tailwind utility classes (`text-xs`,
-/// `border-b-2`, `flex`, ...) and store little or no CSS of their own, so
-/// without these the PDF comes out completely unstyled even though the
-/// preview looks right. `template-print.css` is regenerated together with
-/// `templates.generated.ts` by `pnpm build:templates:css`.
+/// `border-b-2`, `flex`, ...). Each template version carries its own stylesheet
+/// compiled from the classes it uses (`compiled_css`), so the utilities are not
+/// bundled here.
 const TEMPLATE_BASE_CSS: &str = include_str!("../../assets/template-base.css");
-const TEMPLATE_PRINT_CSS: &str = include_str!("../../assets/template-print.css");
 
-/// Base reset, then the Tailwind stylesheet, then the template's own CSS last
-/// so it wins (same order as the frontend).
+/// Base reset, then the version's compiled Tailwind CSS, then the template's
+/// own CSS last so it wins (same order as the frontend).
 ///
-/// The Tailwind stylesheet is the template's own compiled CSS when it has one,
-/// otherwise the shared bundle, so versions saved before per-template
-/// compilation print exactly as they did.
+/// `compiled_css` is empty only for a version the frontend has not compiled yet
+/// (it backfills at startup); such a version prints with the base rules and its
+/// own CSS until then.
 fn build_template_css(user_css: &str, compiled_css: &str) -> String {
-    let tailwind = if compiled_css.trim().is_empty() {
-        TEMPLATE_PRINT_CSS.trim()
-    } else {
-        compiled_css.trim()
-    };
-    let mut parts = vec![TEMPLATE_BASE_CSS.trim(), tailwind];
+    let mut parts = vec![TEMPLATE_BASE_CSS.trim()];
+    if !compiled_css.trim().is_empty() {
+        parts.push(compiled_css.trim());
+    }
     if !user_css.trim().is_empty() {
         parts.push(user_css);
     }
@@ -712,29 +708,23 @@ mod tests {
     }
 
     #[test]
-    fn template_css_includes_tailwind_bundle_and_user_css_last() {
-        let css = build_template_css(".brand{color:#f00}", "");
-        assert!(css.contains(".text-xs"), "tailwind bundle missing");
-        assert!(css.contains(".border-b-2"), "tailwind bundle missing");
-        assert!(css.trim_end().ends_with(".brand{color:#f00}"));
-    }
-
-    #[test]
-    fn compiled_css_replaces_the_shared_bundle() {
+    fn template_css_is_base_compiled_then_user_css() {
         let css = build_template_css(".brand{color:#f00}", ".w-\\[37mm\\]{width:37mm}");
-        assert!(css.contains("37mm"), "compiled css missing");
-        // The shared bundle is a fallback, not an addition: it would add ~57 KB
-        // to every job and could override the compiled rules.
-        assert!(!css.contains(".border-b-2"), "shared bundle still present");
-        // Base reset first, template's own CSS last.
         assert!(css.starts_with(TEMPLATE_BASE_CSS.trim()));
+        let compiled = css.find("37mm").expect("compiled css missing");
+        let user = css.find(".brand{color:#f00}").expect("user css missing");
+        assert!(compiled < user, "user css must come last so it wins");
         assert!(css.trim_end().ends_with(".brand{color:#f00}"));
     }
 
     #[test]
-    fn blank_compiled_css_falls_back_to_the_shared_bundle() {
-        let css = build_template_css("", "  \n ");
-        assert!(css.contains(".border-b-2"), "fallback bundle missing");
+    fn blank_compiled_css_leaves_base_and_user_css_only() {
+        let css = build_template_css(".brand{color:#f00}", "  \n ");
+        assert_eq!(
+            css,
+            format!("{}\n.brand{{color:#f00}}", TEMPLATE_BASE_CSS.trim())
+        );
+        assert_eq!(build_template_css("", ""), TEMPLATE_BASE_CSS.trim());
     }
 
     #[test]

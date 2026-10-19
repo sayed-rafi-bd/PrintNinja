@@ -1,6 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import {
   COMPILER_REV,
   classSetKey,
@@ -8,6 +6,7 @@ import {
   flattenLayers,
   templateCssKey,
 } from "@/lib/templates/compileTemplateCss";
+import { extractClasses } from "@/lib/templates/extractClasses";
 
 const esc = (cls: string) => cls.replace(/[^a-zA-Z0-9_-]/g, "\\$&");
 const has = (css: string, cls: string) => css.includes(`.${esc(cls)}`);
@@ -115,21 +114,43 @@ describe("class set keys", () => {
   });
 });
 
-describe("compatibility with the v3 palette", () => {
-  it("emits a rule for every class the Designer palette offers", async () => {
-    const config = readFileSync(
-      resolve(__dirname, "../../tailwind.templates.config.ts"),
-      "utf8",
-    );
-    const body = config.match(/const PALETTE = \[([\s\S]*?)\n\];/)?.[1] ?? "";
-    const palette = [...body.matchAll(/"([^"]+)"/g)].map((m) =>
-      m[1].replace("\\/", "/"),
-    );
-    expect(palette.length).toBeGreaterThan(150);
+describe("classes templates commonly use", () => {
+  // The Designer's insert palette used to be a fixed safelist; all of these
+  // must still produce a rule now that classes are compiled on demand.
+  const COMMON = [
+    "block", "inline-block", "flex", "inline-flex", "grid", "table", "hidden",
+    "text-left", "text-center", "text-right",
+    "justify-between", "justify-center", "items-center",
+    "gap-1", "gap-4", "space-y-2", "p-0", "p-4", "px-2", "py-3", "pt-4", "mt-2", "mb-6", "mx-auto",
+    "grid-cols-2", "grid-cols-4", "col-span-2", "col-span-full",
+    "w-1/2", "w-full", "h-10", "min-h-full", "max-w-md",
+    "text-xs", "text-sm", "text-base", "text-2xl", "text-5xl",
+    "font-light", "font-medium", "font-bold", "font-mono", "font-serif",
+    "uppercase", "italic", "leading-tight", "tracking-widest", "whitespace-nowrap", "truncate",
+    "underline", "line-through", "align-top",
+    "text-white", "text-gray-500", "text-slate-900", "text-red-600", "text-emerald-700", "text-cyan-600",
+    "bg-white", "bg-black", "bg-transparent", "bg-gray-100", "bg-slate-800", "bg-red-50", "bg-emerald-600",
+    "border", "border-0", "border-2", "border-t", "border-b-2", "border-dashed", "border-none",
+    "border-gray-300", "border-slate-800", "border-red-500",
+    "rounded", "rounded-lg", "rounded-full", "rounded-t", "shadow", "shadow-md",
+    "opacity-50", "object-contain", "relative", "absolute", "inset-0", "top-0",
+    "table-fixed", "border-collapse", "list-none", "overflow-hidden",
+    // variants the Designer offered
+    "print:hidden", "print:flex", "dark:bg-black", "md:flex",
+  ];
 
-    const html = `<div class="${palette.join(" ")}"></div>`;
-    const { css } = await compileTemplateCss(html);
-    const missing = palette.filter((c) => !has(css, c));
-    expect(missing).toEqual([]);
+  it("emits a rule for every one", async () => {
+    const { css } = await compileTemplateCss(`<div class="${COMMON.join(" ")}"></div>`);
+    expect(COMMON.filter((c) => !has(css, c))).toEqual([]);
+  });
+
+  it("emits a rule for every class in the bundled starter templates", async () => {
+    const { STARTER_TEMPLATES } = await import("@/lib/templates/defaultTemplate");
+    for (const t of STARTER_TEMPLATES) {
+      const { candidates } = extractClasses(t.html);
+      const { css } = await compileTemplateCss(t.html);
+      expect(candidates.length).toBeGreaterThan(20);
+      expect(candidates.filter((c) => !has(css, c)), t.name).toEqual([]);
+    }
   });
 });

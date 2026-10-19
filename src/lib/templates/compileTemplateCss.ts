@@ -1,18 +1,18 @@
 /**
  * Per-template Tailwind compilation, run inside the app.
  *
- * The shared print bundle (`templates.generated.ts`) can only contain classes
- * that were safelisted at build time, so anything outside the Designer's
- * palette (`w-[37mm]`, `bg-rose-500`, `grid-cols-5`) silently does nothing.
- * Here the classes a template actually uses are compiled when the template is
- * designed, and the result is stored with the template version.
+ * Templates are written with Tailwind classes, and their markup is only known
+ * at run time, so nothing can be discovered by scanning source files at build
+ * time. The classes a template actually uses are therefore compiled when the
+ * template is saved, and the result is stored with the template version.
+ * Any class works, including arbitrary values like `w-[37mm]`.
  *
  * The compiler is Tailwind v4's `compile()`, which works on an in-memory
  * candidate list: no Node, no filesystem. It is installed under the alias
  * `tailwind4` so the app shell can stay on Tailwind v3.
  *
  * Output differs from a stock v4 build in three deliberate ways, so templates
- * keep the cascade and defaults they had with the v3 bundle:
+ * keep the cascade and defaults they had under Tailwind v3:
  *   1. Cascade layers are flattened. Unlayered CSS (the print base stylesheet
  *      and the template's own CSS) always beats layered CSS, which would make
  *      `table{width:100%}` beat `w-1/2`. v3 emitted plain rules, so we do too.
