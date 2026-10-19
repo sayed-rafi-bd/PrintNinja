@@ -5,6 +5,7 @@ pub mod db;
 mod deeplink;
 mod error;
 pub mod queue;
+pub mod readme;
 pub mod render;
 pub mod transport;
 
@@ -50,8 +51,9 @@ pub fn run() {
             // The plugin migrates on first `get` (lazy), but `rusqlite`
             // commands need tables immediately on setup. `IF NOT EXISTS` in
             // `schema.sql` makes the double-apply safe.
-            let conn = rusqlite::Connection::open(&db_path)?;
+            let mut conn = rusqlite::Connection::open(&db_path)?;
             conn.execute_batch(include_str!("db/schema.sql"))?;
+            db::ensure_v2_schema(&mut conn)?;
             drop(conn);
 
             let db_url = format!("sqlite:{}", db_path.display());
@@ -73,6 +75,12 @@ pub fn run() {
             commands::printer::test_printer,
             commands::template::list_templates,
             commands::template::create_template,
+            commands::template::get_template,
+            commands::template::update_readme,
+            commands::template::update_template_meta,
+            commands::template::set_publish_info,
+            commands::template::clear_publish_info,
+            commands::template::update_template_origin,
             commands::template::delete_template,
             commands::history::list_jobs,
             commands::history::get_job,

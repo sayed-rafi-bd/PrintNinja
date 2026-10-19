@@ -7,9 +7,10 @@ use rusqlite::Connection;
 // ───────────────────────────────────────────────────────────────
 
 fn db() -> Connection {
-    let c = Connection::open_in_memory().expect("open");
+    let mut c = Connection::open_in_memory().expect("open");
     c.execute_batch(include_str!("../src/db/schema.sql"))
         .expect("schema");
+    printninja::db::ensure_v2_schema(&mut c).expect("v2 schema");
     c
 }
 

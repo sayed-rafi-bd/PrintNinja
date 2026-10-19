@@ -1,6 +1,5 @@
-use crate::transport::{PrinterInfo, PrinterLanguage, PrinterTransport, PrinterType, RenderedJob};
+use crate::transport::{PrinterInfo, PrinterTransport, RenderedJob};
 use async_trait::async_trait;
-use std::collections::HashMap;
 
 /// Windows USB transport using rus1 (libusb) for raw USB thermal printers
 pub struct WindowsUsbPrinter {
@@ -28,7 +27,6 @@ impl WindowsUsbPrinter {
         // without installing the "libusb" feature. For Windows, fallback to spooler.
         #[cfg(feature = "rusb")]
         {
-            use rusb::{Device, UsbContext};
             let timeout = std::time::Duration::from_secs(10);
 
             match rusb::Context::new() {
@@ -70,7 +68,10 @@ impl WindowsUsbPrinter {
     }
 
     /// List USB devices that match known thermal printer vendor IDs
+    #[cfg(feature = "rusb")]
     pub fn discover_thermal_usb() -> Vec<PrinterInfo> {
+        use crate::transport::{PrinterLanguage, PrinterType};
+
         let known_vendor_ids: [u16; 10] = [
             0x04B8, // Epson
             0x0483, // STMicroelectronics (various Chinese printers)
@@ -86,36 +87,36 @@ impl WindowsUsbPrinter {
 
         let mut printers = Vec::new();
 
-        #[cfg(feature = "rusb")]
-        {
-            if let Ok(context) = rusb::Context::new() {
-                for device in context.devices().unwrap_or_default() {
-                    if let Ok(desc) = device.device_descriptor() {
-                        if known_vendor_ids.contains(&desc.vendor_id()) {
-                            let name = format!(
-                                "USB Printer {:04x}:{:04x}",
-                                desc.vendor_id(),
-                                desc.product_id()
-                            );
-                            printers.push(PrinterInfo {
-                                id: name.clone(),
-                                name,
-                                address: format!(
-                                    "{:04x}:{:04x}",
-                                    desc.vendor_id(),
-                                    desc.product_id()
-                                ),
-                                printer_type: PrinterType::Usb,
-                                language: PrinterLanguage::Escpos,
-                                status: "online".to_string(),
-                            });
-                        }
+        if let Ok(context) = rusb::Context::new() {
+            for device in context.devices().unwrap_or_default() {
+                if let Ok(desc) = device.device_descriptor() {
+                    if known_vendor_ids.contains(&desc.vendor_id()) {
+                        let name = format!(
+                            "USB Printer {:04x}:{:04x}",
+                            desc.vendor_id(),
+                            desc.product_id()
+                        );
+                        printers.push(PrinterInfo {
+                            id: name.clone(),
+                            name,
+                            address: format!("{:04x}:{:04x}", desc.vendor_id(), desc.product_id()),
+                            printer_type: PrinterType::Usb,
+                            language: PrinterLanguage::Escpos,
+                            status: "online".to_string(),
+                        });
                     }
                 }
             }
         }
 
         printers
+    }
+
+    /// Without the `rusb` crate there is nothing to enumerate: USB printers
+    /// are reached through the Windows spooler instead.
+    #[cfg(not(feature = "rusb"))]
+    pub fn discover_thermal_usb() -> Vec<PrinterInfo> {
+        Vec::new()
     }
 }
 

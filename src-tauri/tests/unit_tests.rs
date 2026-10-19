@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use printninja_lib::render::raster::RasterImage;
+    use printninja::render::raster::RasterImage;
 
     #[test]
     fn test_raster_image_creation() {
@@ -43,7 +43,6 @@ mod tests {
 
     #[test]
     fn test_floyd_steinberg() {
-        let mut img = RasterImage::new(4, 4);
         let grayscale = vec![0u8; 16];
         let mut raster_img = RasterImage::new(4, 4);
         raster_img.floyd_steinberg(&grayscale, 4, 4);

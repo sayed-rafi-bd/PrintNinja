@@ -32,7 +32,7 @@ pub fn list_jobs(db: State<DbState>) -> AppResult<Vec<PrintJob>> {
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
     let conn = guard.connection()?;
 
-    let mut stmt = conn.prepare(&format!("{}", SELECT_JOB_COLUMNS))?;
+    let mut stmt = conn.prepare(SELECT_JOB_COLUMNS)?;
     let jobs = stmt
         .query_map([], map_job)?
         .collect::<Result<Vec<_>, _>>()?;

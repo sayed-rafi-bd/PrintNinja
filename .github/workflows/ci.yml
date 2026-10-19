@@ -2,15 +2,19 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # develop runs the checks only. Release jobs are gated on `v*` tags, and
+    # version-check rejects any tag that is not on main.
+    branches: [main, develop]
     # `create` events do not support tag filters, so tag builds must use `push`.
     tags: ["v*"]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 permissions:
   contents: read
 
+# Rust toolchain is pinned (dtolnay/rust-toolchain@1.90.0 below and
+# rust-toolchain.toml). Bump all of them together.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
@@ -30,13 +34,22 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm build
+      # Reused by the Rust jobs (tauri::generate_context! embeds ../dist),
+      # so the frontend is only built once per run.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 1
       - run: pnpm test
 
   rust-check:
     runs-on: ubuntu-latest
+    needs: [web-check]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.90.0
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
@@ -50,21 +63,31 @@ jobs:
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
             libsoup-3.0-dev patchelf
       # tauri::generate_context! embeds ../dist, so the frontend must exist.
-      - uses: pnpm/action-setup@v4
+      - uses: actions/download-artifact@v4
         with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
+          name: web-dist
+          path: dist
+      # 1. Rust failures block: clippy and tests must pass (no continue-on-error).
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-      # Advisory for now: results show up in the log without blocking a release.
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-        continue-on-error: true
       - run: cargo test --manifest-path src-tauri/Cargo.toml
-        continue-on-error: true
+
+  # 5. Windows is the shipped desktop target, so run the Rust tests there on
+  # every PR/push instead of only discovering breakage during the tag build.
+  rust-test-windows:
+    runs-on: windows-latest
+    needs: [web-check]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: dist
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
 
   # Tag builds must match the version in every manifest, otherwise the
   # artifacts get published under the wrong version. Runs for every
@@ -74,6 +97,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag must be strict semver (vX.Y.Z)
+        run: |
+          if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag '$GITHUB_REF_NAME' is not vX.Y.Z. Pre-release suffixes are not supported by the release pipeline."
+            exit 1
+          fi
+      - name: Tagged commit must be on main
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME points at $GITHUB_SHA which is not reachable from main. Merge to main first, then tag."
+            exit 1
+          fi
+          echo "[ok] $GITHUB_SHA is on main"
       - name: Compare tag with all manifests
         run: |
           TAG_VERSION="${GITHUB_REF_NAME#v}"
@@ -100,7 +139,7 @@ jobs:
   windows-build:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
-    needs: [web-check, rust-check, version-check]
+    needs: [web-check, rust-check, rust-test-windows, version-check]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -110,7 +149,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.90.0
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
@@ -145,7 +184,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.90.0
         with:
           targets: aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
@@ -178,6 +217,9 @@ jobs:
           RES=src-tauri/gen/android/app/src/main/res
           cp -r src-tauri/icons/android/. "$RES"/
           find "$RES" -name 'ic_launcher*.png' -printf '%p %s\n' | sort
+      # Light status and navigation bars, to match the app's single light theme.
+      - name: Apply light Android theme
+        run: node scripts/patch-android-theme.mjs
       - name: Make gradlew executable
         run: chmod +x src-tauri/gen/android/gradlew || true
       # arm64-v8a only (new mobiles). Debug APK is signed with debug keystore and installable for testing;

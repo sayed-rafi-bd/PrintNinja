@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { AppearanceSettings } from "@/components/AppearanceSettings";
+import { PageHeader } from "@/components/PageHeader";
+import { SetupChecklist } from "@/components/SetupChecklist";
+import { parseSection, type SettingsSection } from "@/lib/setup/checklist";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,19 +12,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Palette,
+  Type,
+  Archive,
+  Activity,
   Globe,
   Key,
-  Link,
   Shield,
   Download,
   Eye,
@@ -28,10 +27,11 @@ import {
   Upload,
   Plus,
   Info,
+  ListChecks,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useTheme } from "@/lib/theme/ThemeProvider";
 import { diagnostics } from "@/lib/diagnostics";
+import * as share from "@/lib/share/client";
 
 interface ApiStatus {
   running: boolean;
@@ -82,8 +82,15 @@ async function writeSetting(key: string, value: string): Promise<boolean> {
 
 export function SettingsPage() {
   const { t } = useTranslation();
-  const { theme, setTheme } = useTheme();
   const [appVersion, setAppVersion] = useState<string>("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const section = parseSection(searchParams.get("section"));
+  const openSection = (next: SettingsSection) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === "general") params.delete("section");
+    else params.set("section", next);
+    setSearchParams(params, { replace: true });
+  };
 
   const [apiPort, setApiPort] = useState("17717");
   const [lanAccess, setLanAccess] = useState(false);
@@ -92,6 +99,8 @@ export function SettingsPage() {
   const [apiStatus, setApiStatus] = useState<ApiStatus | null>(null);
   const [starting, setStarting] = useState(false);
 
+  const [retentionError, setRetentionError] = useState("");
+  const [maxError, setMaxError] = useState("");
   const [retentionDays, setRetentionDays] = useState("30");
   const [maxRecords, setMaxRecords] = useState("10000");
 
@@ -103,6 +112,12 @@ export function SettingsPage() {
 
   const [fonts, setFonts] = useState<FontRow[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const [shareUrl, setShareUrl] = useState("");
+  const [shareHandle, setShareHandle] = useState("");
+  const [sharePassword, setSharePassword] = useState("");
+  const [shareUser, setShareUser] = useState<{ handle: string } | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
 
   const loadFonts = useCallback(async () => {
     try {
@@ -173,10 +188,37 @@ export function SettingsPage() {
       } catch {
         setTrusted([]);
       }
+      // Share service
+      try {
+        const url = await share.getServiceUrl();
+        if (url) setShareUrl(url);
+        const token = await share.getSessionToken();
+        if (token && url) {
+          try {
+            const res = await fetch(`${url}/v1/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+            if (res.ok) {
+              const u = await res.json();
+              setShareUser({ handle: u.handle });
+            }
+          } catch {}
+        }
+      } catch {}
     })();
     loadApiStatus();
     loadFonts();
   }, [loadApiStatus, loadFonts]);
+
+  // Same behaviour for every numeric setting: validate, save, and say so.
+  const saveNumber = async (key: string, value: string, min: number, label: string, setErr: (m: string) => void) => {
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < min) {
+      setErr(`${label} must be a whole number of at least ${min}.`);
+      return;
+    }
+    setErr("");
+    await writeSetting(key, String(n));
+    toast.success("Setting saved");
+  };
 
   const startApi = async () => {
     setStarting(true);
@@ -260,119 +302,103 @@ export function SettingsPage() {
     }
   };
 
-  return (
-    <div className="space-y-6">
-      <h1 className="text-3xl font-bold">{t("settings_page.title")}</h1>
+  const saveShareUrl = async () => {
+    await share.setServiceUrl(shareUrl.trim() || null);
+    toast.success("Service URL saved");
+  };
 
-      <Tabs defaultValue="general" className="w-full">
-        <TabsList className="w-full overflow-x-auto flex-nowrap justify-start gap-1 h-auto p-1">
-          <TabsTrigger value="general" className="gap-2">
-            <Palette className="h-4 w-4" />
+  const doRegister = async () => {
+    if (!shareUrl.trim() || !shareHandle.trim() || !sharePassword) {
+      toast.error("Service URL, handle and password required");
+      return;
+    }
+    setShareBusy(true);
+    try {
+      const res = await share.register(shareHandle.trim(), sharePassword);
+      setShareUser({ handle: res.user.handle });
+      setSharePassword("");
+      toast.success(`Registered as ${res.user.handle}`);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const doLogin = async () => {
+    if (!shareUrl.trim() || !shareHandle.trim() || !sharePassword) {
+      toast.error("Service URL, handle and password required");
+      return;
+    }
+    setShareBusy(true);
+    try {
+      const res = await share.login(shareHandle.trim(), sharePassword);
+      setShareUser({ handle: res.user.handle });
+      setSharePassword("");
+      toast.success(`Signed in as ${res.user.handle}`);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  const doLogout = async () => {
+    setShareBusy(true);
+    try {
+      await share.logout();
+      setShareUser(null);
+      toast.success("Signed out");
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setShareBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <PageHeader title={t("settings_page.title")} description={t("pages.settings")} />
+
+      <Tabs value={section} onValueChange={(v) => openSection(v as SettingsSection)} orientation="vertical" className="flex flex-col gap-4 md:flex-row md:items-start md:gap-8">
+        <TabsList aria-label="Settings sections" className="h-auto w-full shrink-0 flex-row items-stretch justify-start gap-1 overflow-x-auto bg-transparent p-0 md:w-56 md:flex-col md:overflow-visible">
+          <TabsTrigger value="setup" className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none">
+            <ListChecks className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Setup
+          </TabsTrigger>
+          <TabsTrigger value="general" className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none">
+            <Type className="h-4 w-4 shrink-0" aria-hidden="true" />
             General
           </TabsTrigger>
-          <TabsTrigger value="fonts" className="gap-2">
-            <Globe className="h-4 w-4" />
-            {t("settings_page.fonts")}
+          <TabsTrigger value="share" className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none">
+            <Globe className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Share
           </TabsTrigger>
-          <TabsTrigger value="api" className="gap-2">
-            <Key className="h-4 w-4" />
-            {t("settings_page.api")}
+          <TabsTrigger value="api" className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none">
+            <Key className="h-4 w-4 shrink-0" aria-hidden="true" />
+            API and automation
           </TabsTrigger>
-          <TabsTrigger value="deeplinks" className="gap-2">
-            <Link className="h-4 w-4" />
-            {t("settings_page.deep_links")}
+          <TabsTrigger value="data" className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none">
+            <Shield className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Data sources
           </TabsTrigger>
-          <TabsTrigger value="security" className="gap-2">
-            <Shield className="h-4 w-4" />
-            Security
+          <TabsTrigger value="retention" className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none">
+            <Archive className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Retention
+          </TabsTrigger>
+          <TabsTrigger value="diagnostics" className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none">
+            <Activity className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Diagnostics
           </TabsTrigger>
         </TabsList>
 
-        {/* ── General ─────────────────────────────────────────────── */}
-        <TabsContent value="general" className="mt-4 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">
-                {t("settings_page.theme")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <Select value={theme} onValueChange={(v) => setTheme(v as "light" | "dark" | "system")}>
-                <SelectTrigger className="w-[200px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="light">
-                    {t("settings_page.light")}
-                  </SelectItem>
-                  <SelectItem value="dark">{t("settings_page.dark")}</SelectItem>
-                  <SelectItem value="system">
-                    {t("settings_page.system")}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">
-                {t("settings_page.retention")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label htmlFor="retention-days">Keep history for (days)</Label>
-                <Input
-                  id="retention-days"
-                  type="number"
-                  min="1"
-                  value={retentionDays}
-                  onChange={(e) => setRetentionDays(e.target.value)}
-                  onBlur={() => writeSetting("retention_days", retentionDays)}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="max-records">Max records</Label>
-                <Input
-                  id="max-records"
-                  type="number"
-                  min="100"
-                  value={maxRecords}
-                  onChange={(e) => setMaxRecords(e.target.value)}
-                  onBlur={() => writeSetting("max_records", maxRecords)}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Diagnostics</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Export application logs and diagnostics for troubleshooting.
-              </p>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  diagnostics.download();
-                  toast.success("Diagnostics exported");
-                }}
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Export Diagnostics
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                Secrets and API tokens are redacted from the export.
-              </p>
-            </CardContent>
-          </Card>
+        <div className="min-w-0 max-w-3xl flex-1">
+        <TabsContent value="setup" className="mt-0 space-y-4">
+          <SetupChecklist onOpenSection={openSection} />
         </TabsContent>
 
-        {/* ── Fonts ───────────────────────────────────────────────── */}
-        <TabsContent value="fonts" className="mt-4 space-y-4">
+        <TabsContent value="general" className="mt-0 space-y-4">
+          <AppearanceSettings />
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Installed Fonts</CardTitle>
@@ -417,6 +443,8 @@ export function SettingsPage() {
               <input
                 ref={fileRef}
                 type="file"
+                aria-label="Upload font file"
+                tabIndex={-1}
                 accept=".ttf,.otf,.woff,.woff2"
                 className="hidden"
                 onChange={(e) => {
@@ -433,8 +461,80 @@ export function SettingsPage() {
           </Card>
         </TabsContent>
 
-        {/* ── API ─────────────────────────────────────────────────── */}
-        <TabsContent value="api" className="mt-4 space-y-4">
+        <TabsContent value="share" className="mt-0 space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Share Service</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-1">
+                <Label htmlFor="share-url">Service URL</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="share-url"
+                    placeholder="https://share.printninja.example"
+                    value={shareUrl}
+                    onChange={(e) => setShareUrl(e.target.value)}
+                  />
+                  <Button variant="outline" onClick={saveShareUrl}>
+                    Save
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Leave empty to hide sharing features (V1 behaviour). No database credentials are bundled in the app — the service keeps its own database.
+                </p>
+              </div>
+
+              {!shareUser ? (
+                <div className="space-y-3 border-t pt-4">
+                  <p className="text-sm font-medium">Sign in to publish</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="share-handle">Handle</Label>
+                      <Input
+                        id="share-handle"
+                        placeholder="alice"
+                        value={shareHandle}
+                        onChange={(e) => setShareHandle(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="share-password">Password</Label>
+                      <Input
+                        id="share-password"
+                        type="password"
+                        value={sharePassword}
+                        onChange={(e) => setSharePassword(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button onClick={doLogin} disabled={shareBusy}>
+                      {shareBusy ? "…" : "Sign in"}
+                    </Button>
+                    <Button variant="outline" onClick={doRegister} disabled={shareBusy}>
+                      {shareBusy ? "…" : "Register"}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Handle: 1–32 chars, alphanumeric + _ -. Password ≥ 8 chars. Throttled 5/min per handle/IP.</p>
+                </div>
+              ) : (
+                <div className="space-y-3 border-t pt-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm">
+                      Signed in as <span className="font-medium">{shareUser.handle}</span>
+                    </p>
+                    <Button variant="outline" size="sm" onClick={doLogout} disabled={shareBusy}>
+                      Sign out
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="api" className="mt-0 space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Local REST API</CardTitle>
@@ -492,7 +592,7 @@ export function SettingsPage() {
               </div>
 
               {lanAccess && (
-                <p className="text-xs text-amber-600 dark:text-amber-400">
+                <p className="text-xs text-warning">
                   LAN access is enabled: anyone on your network who has an API
                   key can trigger prints.
                 </p>
@@ -540,10 +640,7 @@ export function SettingsPage() {
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
 
-        {/* ── Deep links ──────────────────────────────────────────── */}
-        <TabsContent value="deeplinks" className="mt-4 space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Trusted Sources</CardTitle>
@@ -581,6 +678,7 @@ export function SettingsPage() {
 
               <div className="flex gap-2">
                 <Input
+                  aria-label="Trusted source"
                   placeholder="pos.local or com.example.app"
                   value={newTrusted}
                   onChange={(e) => setNewTrusted(e.target.value)}
@@ -594,8 +692,7 @@ export function SettingsPage() {
           </Card>
         </TabsContent>
 
-        {/* ── Security ────────────────────────────────────────────── */}
-        <TabsContent value="security" className="mt-4 space-y-4">
+        <TabsContent value="data" className="mt-0 space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Data Sources</CardTitle>
@@ -632,12 +729,79 @@ export function SettingsPage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="retention" className="mt-0 space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">
+                {t("settings_page.retention")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="retention-days">Keep history for (days)</Label>
+                <Input
+                  id="retention-days"
+                  type="number"
+                  min="1"
+                  value={retentionDays}
+                  aria-invalid={!!retentionError}
+                  aria-describedby={retentionError ? "retention-days-error" : undefined}
+                  onChange={(e) => { setRetentionDays(e.target.value); setRetentionError(""); }}
+                  onBlur={() => saveNumber("retention_days", retentionDays, 1, "Keep history for", setRetentionError)}
+                />
+                {retentionError && <p id="retention-days-error" role="alert" className="text-xs text-danger">{retentionError}</p>}
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="max-records">Max records</Label>
+                <Input
+                  id="max-records"
+                  type="number"
+                  min="100"
+                  value={maxRecords}
+                  aria-invalid={!!maxError}
+                  aria-describedby={maxError ? "max-records-error" : undefined}
+                  onChange={(e) => { setMaxRecords(e.target.value); setMaxError(""); }}
+                  onBlur={() => saveNumber("max_records", maxRecords, 100, "Max records", setMaxError)}
+                />
+                {maxError && <p id="max-records-error" role="alert" className="text-xs text-danger">{maxError}</p>}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="diagnostics" className="mt-0 space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Diagnostics</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Export application logs and diagnostics for troubleshooting.
+              </p>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  diagnostics.download();
+                  toast.success("Diagnostics exported");
+                }}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export Diagnostics
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Secrets and API tokens are redacted from the export.
+              </p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+        </div>
       </Tabs>
 
       {/* Version footer */}
       <div className="flex items-center justify-center gap-2 pt-4 text-xs text-muted-foreground border-t">
         <Info className="h-3 w-3" />
-        <span>PrintNinja {appVersion ? `v${appVersion}` : "v0.1.4"}</span>
+        <span>PrintNinja {appVersion ? `v${appVersion}` : "v0.5.0"}</span>
         <span className="opacity-50">·</span>
         <span className="hidden sm:inline">com.printninja.desktop</span>
       </div>

@@ -210,7 +210,7 @@ pub async fn run_print(
     let copies = req.copies.unwrap_or(1).max(1);
 
     // ── 1. Resolve content ───────────────────────────────────────────
-    let (mut html, mut css, template_version_id, mut w_mm, mut h_mm) = match req.template_id {
+    let (mut html, css, template_version_id, mut w_mm, mut h_mm) = match req.template_id {
         Some(tid) => {
             let guard = db
                 .lock()

@@ -4,8 +4,8 @@
 //! `reqwest`, so routing/middleware bugs surface here instead of at runtime.
 
 use axum::http::{Request, StatusCode};
-use printninja_lib::api::auth::ApiKey;
-use printninja_lib::db::Database;
+use printninja::api::auth::ApiKey;
+use printninja::db::Database;
 use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
@@ -21,9 +21,10 @@ fn setup() -> (Db, String) {
             .as_nanos()
     ));
 
-    let conn = Connection::open(&path).expect("open db");
+    let mut conn = Connection::open(&path).expect("open db");
     conn.execute_batch(include_str!("../src/db/schema.sql"))
         .expect("apply schema");
+    printninja::db::ensure_v2_schema(&mut conn).expect("apply v2 schema");
     drop(conn);
 
     let db: Db = Arc::new(Mutex::new(Database {
@@ -303,10 +304,10 @@ fn router(db: &Db) -> axum::Router {
             .unwrap()
             .as_nanos()
     ));
-    printninja_lib::api::routes::router_with_state(
-        printninja_lib::api::routes::ApiState {
+    printninja::api::routes::router_with_state(
+        printninja::api::routes::ApiState {
             db: db.clone(),
-            queue: std::sync::Arc::new(printninja_lib::queue::PrintQueue::new().0),
+            queue: std::sync::Arc::new(printninja::queue::PrintQueue::new().0),
             cache_dir: cache,
         },
         false,
@@ -526,8 +527,8 @@ async fn verify_stored_key_matches_hashed_value() {
     let guard = db.lock().unwrap();
     let conn = guard.connection().unwrap();
 
-    assert!(printninja_lib::verify_api_key(&conn, &plain));
-    assert!(!printninja_lib::verify_api_key(&conn, "pn_live_nope"));
+    assert!(printninja::verify_api_key(&conn, &plain));
+    assert!(!printninja::verify_api_key(&conn, "pn_live_nope"));
 }
 /// Regression for #18: nothing ever wrote `print_jobs.idempotency_key`, so the
 /// replay guard in `check_auth` — which looks for an existing row with that
@@ -678,7 +679,7 @@ async fn openapi_documents_the_print_response_codes() {
             spec["paths"]["/v1/print"]["post"]["requestBody"]["content"]["application/json"]
                 ["schema"]["required"]
                 .as_array()
-                .map_or(false, |a| a.iter().any(|v| v.as_str() == Some(field))),
+                .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(field))),
             "{field} must be documented as required"
         );
     }

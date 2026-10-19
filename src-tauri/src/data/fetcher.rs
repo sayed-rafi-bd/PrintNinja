@@ -120,6 +120,41 @@ fn extract_json_path(data: &serde_json::Value, path: &str) -> serde_json::Value 
 mod tests {
     use super::*;
 
+    /// Accepts one connection, reads the request, sends `resp`, then closes
+    /// cleanly. The server must read the request before closing: on Windows,
+    /// closing a socket with unread data sends a RST, which discards the
+    /// response before the client reads it (os error 10053).
+    async fn serve_once(resp: String) -> std::net::SocketAddr {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut req = Vec::new();
+            let mut buf = [0u8; 1024];
+            while !req.windows(4).any(|w| w == b"\r\n\r\n") {
+                match socket.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => req.extend_from_slice(&buf[..n]),
+                }
+            }
+            let _ = socket.write_all(resp.as_bytes()).await;
+            let _ = socket.flush().await;
+            let _ = socket.shutdown().await;
+            // Wait for the client to close its side before dropping the socket.
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                while let Ok(n) = socket.read(&mut buf).await {
+                    if n == 0 {
+                        break;
+                    }
+                }
+            })
+            .await;
+        });
+        addr
+    }
+
     #[test]
     fn method_validation_trims_and_uppercases() {
         assert_eq!(normalize_method("get"), reqwest::Method::GET);
@@ -163,21 +198,15 @@ mod tests {
     #[tokio::test]
     async fn size_limit_is_enforced_on_chunked_bodies() {
         // Spin up a tiny server that streams without Content-Length.
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            use tokio::io::AsyncWriteExt;
-            // Chunked: no Content-Length, body is 200 bytes of JSON.
-            let body = "a".repeat(200);
-            let json = format!("\"{}\"", body);
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Type: application/json\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n",
-                json.len(),
-                json
-            );
-            let _ = socket.write_all(resp.as_bytes()).await;
-        });
+        // Chunked: no Content-Length, body is 200 bytes of JSON.
+        let body = "a".repeat(200);
+        let json = format!("\"{}\"", body);
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Type: application/json\r\n\r\n{:x}\r\n{}\r\n0\r\n\r\n",
+            json.len(),
+            json
+        );
+        let addr = serve_once(resp).await;
 
         let fetcher = DataFetcher::new();
         let opts = FetchOptions {
@@ -195,19 +224,13 @@ mod tests {
 
     #[tokio::test]
     async fn size_limit_allows_small_bodies() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            use tokio::io::AsyncWriteExt;
-            let json = r#"{"ok": true}"#;
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n{}",
-                json.len(),
-                json
-            );
-            let _ = socket.write_all(resp.as_bytes()).await;
-        });
+        let json = r#"{"ok": true}"#;
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n{}",
+            json.len(),
+            json
+        );
+        let addr = serve_once(resp).await;
 
         let fetcher = DataFetcher::new();
         let opts = FetchOptions {

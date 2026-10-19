@@ -2,15 +2,18 @@
 
 Silent print for Windows and Android — design HTML templates, fetch JSON data, print via IPP / raw TCP / USB / Bluetooth / system spooler, with history, batch, profiles, and automation.
 
-![Tauri 2](https://img.shields.io/badge/Tauri-2-blue) ![React](https://img.shields.io/badge/React-19-blue) ![Rust](https://img.shields.io/badge/Rust-stable-orange)
+![Tauri 2](https://img.shields.io/badge/Tauri-2-blue) ![React](https://img.shields.io/badge/React-18-blue) ![Rust](https://img.shields.io/badge/Rust-stable-orange)
 
 ## Features
 
-- **Designer** — HTML/CSS (CodeMirror) + visual canvas, page presets (A4, 80 mm roll, 4×6 label…), zoom, Handlebars helpers (`currency`, `date`, `padLeft`…), `bwip-js` barcodes (14 symbologies → inline SVG), custom fonts, version history with diff/restore
-- **Print** — printer + template selectors, data URL / test-data switch, orientation / margins / fit mode / copies, live preview, batch (JSON array or CSV upload with column mapping), per-printer profiles
-- **Printer Setup** — Wi-Fi/LAN (IPP / raw TCP 9100), USB, Bluetooth, system spooler; test print, validation, language/paper/DPI
-- **History** — filters (status/source/printer/search + date range), batch-grouped expandable rows, reprint/retry/delete, CSV export (RFC 4180), retention
+- **Designer** — HTML/CSS (CodeMirror) + visual canvas, page presets (A4, 80 mm roll, 4×6 label…), zoom, Handlebars helpers (`currency`, `date`, `padLeft`…), `bwip-js` barcodes (14 symbologies → inline SVG), custom fonts, version history with diff/restore, **README** tab (markdown, 64 KiB cap) and **Publish** with a Draft/Published badge and an unpublished-changes strip. Compact view switcher; unpublish asks first and names the template.
+- **Print** — choose printer, template, data source and copies on the left, one **Print** button (with the reason when it is disabled), live preview on the right. Orientation, fit, margins, page range, grayscale and the test page sit under **Advanced options**. Batch (JSON array or CSV with column mapping), per-printer profiles, clear success/failure banners with Try again.
+- **Templates** — Mine and Saved as tables (status, page size, updated); Community stays a gallery with search and sort. Print and Edit straight from a row. Save, download as a read-only copy, and print offline.
+- **Printers** — grouped Network, USB, Bluetooth and System; test print per row; setup in a side panel (IPP / raw TCP 9100, language, paper, DPI). Status shows only when known.
+- **History** — sticky filter bar (status, source, printer, search, dates), saved filter sets, bulk reprint and retry (each confirmed), CSV export, retention.
 - **Automation** — local REST API (`axum`, `127.0.0.1:17717`, Bearer + idempotency, CORS scoped, LAN off by default) and `printninja://` deep links with trust list and confirmation sheet
+- **Share** — hosted `server/` (`axum` + `rusqlite`/SQLite, `scrypt` + sha256 sessions, throttle 5/min) at `share_service_url` + `share_session_token` (Settings → Share: Register/Login/Logout, handle `alphanumeric+_-` 1–32, password ≥8), `PUT/DELETE /v1/templates/{id}` (client UUID, owner 403, 404, size caps 512K/64K, remote-ref `data: URIs`), `GET /v1/templates` public, `POST /v1/templates/{id}/use`, `PUT/DELETE/GET /v1/saved`
+- **Corporate UI** — one light theme in a restrained slate teal; IBM Plex bundled for identical rendering on every workstation, offline. One status vocabulary (colour + icon + word) on every screen. `Ctrl/Cmd+K` palette, `G` then `P/H/D/T/R/S` navigation, full keyboard path, WCAG 2.1 AA as the internal bar. **Comfortable/Compact density** and optional **name and logo** in Settings → General; **Settings → Setup** checklist for admins. See [`docs/UI_GUIDE.md`](docs/UI_GUIDE.md).
 - **Queue** — per-printer `Semaphore` (no byte interleaving), bounded admission, `POST /v1/print` runs the same pipeline as the UI
 
 ## Tech Stack
@@ -18,19 +21,23 @@ Silent print for Windows and Android — design HTML templates, fetch JSON data,
 | Layer | Choice |
 |---|---|
 | App shell | Tauri 2 (Windows + Android) |
-| UI | React 19 + Vite 7 + TypeScript 5 + Tailwind 3 + shadcn/ui + Zustand + TanStack Query/Table |
+| UI | React 18 + Vite 6 + TypeScript 5 + Tailwind 3 + shadcn/ui + Zustand + TanStack Query/Table, IBM Plex via `@fontsource` |
 | DB | SQLite (`tauri-plugin-sql` migrations + `rusqlite` commands) — 11 tables |
 | Template | Handlebars (singleton registry), `buildTemplateCss` inlines a committed minified Tailwind bundle (`pnpm build:templates:css`) |
 | Barcodes | `bwip-js` `toSVG()` (inline SVG, no canvas data-URI) |
-| API | `axum` + `tower-http` |
+| Markdown | `react-markdown` + `remark-gfm` (no `rehype-raw` → XSS as text, links `http/https/mailto` only) |
+| Sanitize | `sanitize.ts` + `handlebars.rs` strip `<script>`/`on*`, `find_remote_refs` → `data: URIs`, CSP `default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:`, `sandbox=""` iframes |
+| API | `axum` + `tower-http` (local `127.0.0.1:17717` + share `server/` at `share_service_url`) |
+| Share service | `server/` (`axum`, `rusqlite`/SQLite, `scrypt` + sha256 sessions, throttle) |
 | Secrets | `keyring` (redacted from `print_jobs` / diagnostics) |
 | Android | Kotlin plugins: WebView → PDF, `UsbManager`, RFCOMM |
 
 ## Architecture
 
 ```
-UI (Designer / Print / PrinterSetup / History) ──invoke()──► Rust core
-                                                          Data fetcher → Handlebars → Layout (@page) → PDF → Queue (per-printer) → Transport (ipp/raw_tcp/usb/bt/spooler) → History
+UI (Designer + README + Templates / Print / PrinterSetup / History) ──invoke()──► Rust core
+  Designer: canvas/visual/code/readme/preview + Publish (remote_id/published_at)        Data fetcher → Handlebars (sanitize + CSP) → Layout (@page) → PDF → Queue (per-printer) → Transport → History
+  Templates: Community (search/sort, offline) / Mine (Draft / Published badge) / Saved / Withdrawn badges  Share client ──fetch──► server (`share_service_url` + Bearer)
 REST API ──┐
 Deep link ─┼──► same queue/pipeline (idempotency, copies, redaction)
 Batch ─────┘
@@ -40,20 +47,23 @@ Batch ─────┘
 
 ## Data Model
 
-`printers` · `templates` + `template_versions` · `sample_datasets` · `fonts` · `printer_profiles` (unique `printer_id, template_id`) · `presets` · `batches` · `print_jobs` (`batch_id` + `idempotency_key`) · `api_clients` · `settings` · see `src-tauri/src/db/schema.sql`.
+App SQLite (`src-tauri/src/db/schema.sql` + `db::ensure_v2_schema`): `printers` · `templates` (`readme`, `summary`, `remote_id` UUID, `published_at`, `origin` `own`/`saved`, `origin_owner`, `withdrawn`, `idx_templates_remote`) + `template_versions` · `sample_datasets` · `fonts` · `printer_profiles` · `presets` · `batches` · `print_jobs` · `api_clients` · `settings` (`share_service_url`, `share_session_token`, `onboarding_done` etc.).
+
+Server SQLite file (`server/src/db.rs`, path from `DATABASE_URL`): `users` (`handle` `UNIQUE COLLATE NOCASE`, `password_hash` scrypt) · `sessions` (`token_hash` sha256, `expires_at`) · `templates` (`id` UUID PK, `owner_id`, `name`, `summary`, `page_w_mm`, `page_h_mm`, `language`, `body` 512K, `readme` 64K, `use_count`, `published_at`, `updated_at`, `idx_tpl_owner/updated`) · `saved_templates` (`user_id`, `template_id` PK).
 
 ## Project Structure
 
 ```
 src/                         # React
-  pages/Designer  Print  PrinterSetup  History  Settings
-  components/ui  Layout  VisualDesigner
-  lib/{store,render,templates,hooks,utils}
+  pages/Designer (canvas/visual/code/readme/preview + Publish)  Templates (Community/Mine/Saved)  Print  PrinterSetup  History  Settings (Share)
+  components/ui  Layout  VisualDesigner  ReadmeEditor
+  lib/{store,render{renderTemplate,sanitize},templates,share/client,hooks,utils}
   styles/templates.src.css   # print stylesheet source → templates.generated.ts
 src-tauri/src/
-  commands/{print,printer,template,version,history,batch,font,profile,settings,api}
-  api/{routes,auth,openapi}  queue.rs  transport/{ipp,raw_tcp,windows_*,android_bridge}
-  data/fetcher.rs  deeplink.rs  render/handlebars.rs
+  commands/{print,printer,template{readme, publish info, origin},version,history,batch,font,profile,settings,api}
+  api/{routes,auth,openapi}  queue.rs  transport/{...}  data/fetcher.rs  deeplink.rs  render/handlebars.rs (sanitize)  db (ensure_v2_schema)  readme.rs
+server/                      # share service (axum, rusqlite/SQLite, scrypt)
+  src/{main.rs (v1 auth/templates/saved), db.rs, auth.rs (throttle, sessions), error.rs}
 ```
 
 ## Getting Started
@@ -75,7 +85,6 @@ Prerequisites: Node 22, Rust stable, pnpm 10; for Android: Java 17, Android SDK/
 | `pnpm build:templates:css` | Tailwind → `src/lib/templates/templates.generated.ts` (commit the output) |
 | `pnpm lint` / `pnpm format` | Biome (`src/**/*.{ts,tsx}` + `index.html` + `vite.config.ts`) |
 | `pnpm test` | Vitest (jsdom) |
-| `pnpm test:e2e` | Playwright (`http://localhost:1420`, `localStorage["printninja-onboarding-complete"]="true"` bypass) |
 | `cargo test` (in `src-tauri`) | Rust (lib + integration) — `CARGO_INCREMENTAL=0 cargo test` on low-disk hosts |
 
 ## Building
@@ -99,7 +108,6 @@ Disabled by default, `127.0.0.1:17717`. `Authorization: Bearer pn_live_…`, opt
 
 - `vitest` — barcode SVG vs data-URI, encoder-name mapping, template helpers, Tailwind bundle safelist drift, history CSV/date logic
 - `cargo test` — queue serialisation/parallelism, `Box<dyn PrinterTransport>` dispatch, idempotency, `print_runs_the_real_pipeline` (was lying `202 queued`)
-- `playwright` — nav at 280–430 px, barcode dialog, batch, font, onboarding bypass
 
 ## License
 

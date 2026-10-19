@@ -16,7 +16,9 @@ pub struct TemplateVersion {
     pub created_by: String,
 }
 
-const VALID_CREATED_BY: &[&str] = &["manual", "autosave", "restore"];
+/// `sync` marks the version a Refresh from the server produced, so history
+/// shows which copy came from where.
+const VALID_CREATED_BY: &[&str] = &["manual", "autosave", "restore", "sync"];
 
 #[tauri::command]
 pub fn list_versions(db: State<DbState>, template_id: i64) -> AppResult<Vec<TemplateVersion>> {
@@ -69,6 +71,12 @@ pub fn create_version(db: State<DbState>, req: CreateVersionRequest) -> AppResul
         return Err(AppError::Validation(format!(
             "Invalid created_by '{}'. Expected one of {:?}",
             created_by, VALID_CREATED_BY
+        )));
+    }
+    if let Some(issues) = crate::render::handlebars::find_remote_refs(&req.html, &req.css) {
+        return Err(AppError::Validation(format!(
+            "Template contains remote references ({}). Use data: URIs instead.",
+            issues.join("; ")
         )));
     }
 

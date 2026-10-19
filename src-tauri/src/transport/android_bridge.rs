@@ -16,3 +16,9 @@ impl AndroidBridge {
         Vec::new()
     }
 }
+
+impl Default for AndroidBridge {
+    fn default() -> Self {
+        Self::new()
+    }
+}

@@ -51,7 +51,7 @@ fn bool_from_settings(db: &DbState, key: &str, default: bool) -> bool {
 }
 
 #[tauri::command]
-pub fn get_api_status(app: AppHandle, db: State<DbState>) -> AppResult<ApiStatus> {
+pub fn get_api_status(_app: AppHandle, db: State<DbState>) -> AppResult<ApiStatus> {
     let port = port_from_settings(&db, "api_port", 17717);
     let lan = bool_from_settings(&db, "api_lan_access", false);
 
@@ -136,11 +136,7 @@ pub fn start_api_server(
     let listener = tokio::net::TcpListener::from_std(listener)
         .map_err(|e| AppError::Internal(format!("Listener setup failed: {}", e)))?;
 
-    let display_addr = if lan {
-        host.to_string()
-    } else {
-        host.to_string()
-    };
+    let display_addr = host.to_string();
     app.manage(ApiServerHandle {
         address: display_addr,
         port,
@@ -292,7 +288,7 @@ pub fn spawn_test_server(port: u16) -> std::io::Result<(tokio::net::TcpListener,
 }
 
 /// Used by `routes` to authenticate requests.
-pub fn db_for_auth(db: &DbState) -> Option<Arc<rusqlite::Connection>> {
+pub fn db_for_auth(_db: &DbState) -> Option<Arc<rusqlite::Connection>> {
     None
 }
 
