@@ -47,7 +47,14 @@ impl PdfRenderer {
         use std::process::Command;
         use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 
-        let pdf_path = self.cache_dir.join("output.pdf");
+        // Unique per job: a shared `output.pdf` could be stale (Edge exits 0
+        // without writing when it hands off to a running instance) or be
+        // overwritten by a concurrent job.
+        let job = uuid::Uuid::new_v4();
+        let pdf_path = self.cache_dir.join(format!("output-{job}.pdf"));
+        // A throwaway profile makes headless Edge start its own process
+        // instead of delegating to the user's already-open Edge window.
+        let profile_dir = self.cache_dir.join(format!("edge-profile-{job}"));
         let width_in = page_width_mm / 25.4;
         let height_in = page_height_mm / 25.4;
         let (w, h) = if orientation == "landscape" {
@@ -72,15 +79,29 @@ impl PdfRenderer {
                     "--no-first-run",
                     "--no-default-browser-check",
                     "--print-to-pdf-no-header",
+                    "--no-pdf-header-footer",
+                    &format!("--user-data-dir={}", profile_dir.to_string_lossy()),
                     &format!("--print-to-pdf={}", pdf_path.to_string_lossy()),
                     &html_url,
                 ])
                 .creation_flags(CREATE_NO_WINDOW.0)
                 .output()?;
 
+            let _ = std::fs::remove_dir_all(&profile_dir);
+
             if output.status.success() && pdf_path.exists() {
-                return tokio::fs::read(&pdf_path).await.map_err(Into::into);
+                let bytes = tokio::fs::read(&pdf_path).await;
+                let _ = std::fs::remove_file(&pdf_path);
+                tracing::info!(html = %html_url, bytes = bytes.as_ref().map_or(0, |b| b.len()), "rendered PDF with Edge");
+                return bytes.map_err(Into::into);
             }
+
+            tracing::warn!(
+                status = ?output.status,
+                pdf_written = pdf_path.exists(),
+                stderr = %String::from_utf8_lossy(&output.stderr),
+                "Edge print-to-pdf did not produce a PDF"
+            );
         }
 
         tracing::warn!("Edge print-to-pdf failed or msedge.exe not found; using placeholder PDF");

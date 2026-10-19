@@ -137,7 +137,11 @@ pub fn apply_layout(html: &str, css: &str, w_mm: f64, h_mm: f64, req: &PrintRequ
     // dropped entirely whenever the HTML was a full document (which every
     // bundled starter template is), so custom styling never reached the
     // printer. User CSS first so the @page/fit rules win.
-    let styles = format!("{cleaned_css}\n{page_rule}\n{fit_rule}");
+    // Chromium drops background colours/images when printing unless told
+    // otherwise, which looks like "CSS not applied" (shaded headers, table
+    // fills, badges vanish). Force them on for every element.
+    let color_rule = "*{-webkit-print-color-adjust:exact;print-color-adjust:exact;}";
+    let styles = format!("{cleaned_css}\n{page_rule}\n{fit_rule}\n{color_rule}");
 
     if let Some(idx) = html.find("</head>") {
         format!("{}<style>{}</style>{}", &html[..idx], styles, &html[idx..])
