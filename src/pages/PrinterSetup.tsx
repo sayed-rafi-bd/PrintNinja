@@ -259,7 +259,12 @@ export function PrinterSetupPage() {
             <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             <div className="min-w-0">
               <p className="truncate font-medium">{p.name}</p>
-              <p className="truncate font-mono text-xs text-muted-foreground">{p.address}</p>
+              <p
+                className="max-w-[260px] truncate font-mono text-xs text-muted-foreground"
+                title={p.address}
+              >
+                {p.address}
+              </p>
             </div>
           </div>
         );

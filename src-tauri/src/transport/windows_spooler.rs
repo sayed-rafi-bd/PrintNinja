@@ -16,12 +16,12 @@ mod winapi {
     pub type BOOL = i32;
     pub type DWORD = u32;
     pub type LPSTR = *mut c_char;
-    pub type LPCSTR = *const c_char;
     pub type LPVOID = *mut c_void;
     pub type LPDWORD = *mut DWORD;
     pub type LPBYTE = *mut u8;
 
     #[repr(C)]
+    #[allow(non_snake_case)]
     pub struct DOC_INFO_1A {
         pub pDocName: LPSTR,
         pub pOutputFile: LPSTR,
@@ -190,7 +190,6 @@ impl WindowsSpooler {
 
     /// Send raw bytes to the printer via the spooler
     pub fn send_raw(&self, data: &[u8]) -> Result<(), String> {
-        use std::ffi::CStr;
         use winapi::*;
 
         let printer_name = CString::new(self.printer_name.clone()).map_err(|e| e.to_string())?;
@@ -198,8 +197,8 @@ impl WindowsSpooler {
         let datatype = CString::new("RAW").map_err(|e| e.to_string())?;
 
         unsafe {
-            let mut hPrinter: HANDLE = null_mut();
-            let result = OpenPrinterA(printer_name.as_ptr() as *mut _, &mut hPrinter, null_mut());
+            let mut h_printer: HANDLE = null_mut();
+            let result = OpenPrinterA(printer_name.as_ptr() as *mut _, &mut h_printer, null_mut());
             if result == 0 {
                 return Err(format!("OpenPrinter failed: {}", GetLastError()));
             }
@@ -210,30 +209,30 @@ impl WindowsSpooler {
                 pDatatype: datatype.as_ptr() as *mut _,
             };
 
-            let result = StartDocPrinterA(hPrinter, 1, &doc_info as *const _ as *mut _);
+            let result = StartDocPrinterA(h_printer, 1, &doc_info as *const _ as *mut _);
             if result == 0 {
-                ClosePrinter(hPrinter);
+                ClosePrinter(h_printer);
                 return Err(format!("StartDocPrinter failed: {}", GetLastError()));
             }
 
-            let result = StartPagePrinter(hPrinter);
+            let result = StartPagePrinter(h_printer);
             if result == 0 {
-                EndDocPrinter(hPrinter);
-                ClosePrinter(hPrinter);
+                EndDocPrinter(h_printer);
+                ClosePrinter(h_printer);
                 return Err(format!("StartPagePrinter failed: {}", GetLastError()));
             }
 
             let mut written: DWORD = 0;
             let result = WritePrinter(
-                hPrinter,
+                h_printer,
                 data.as_ptr() as *mut _,
                 data.len() as DWORD,
                 &mut written,
             );
 
-            EndPagePrinter(hPrinter);
-            EndDocPrinter(hPrinter);
-            ClosePrinter(hPrinter);
+            EndPagePrinter(h_printer);
+            EndDocPrinter(h_printer);
+            ClosePrinter(h_printer);
 
             if result == 0 {
                 return Err(format!("WritePrinter failed: {}", GetLastError()));
