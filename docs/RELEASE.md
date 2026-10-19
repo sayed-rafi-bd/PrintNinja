@@ -7,25 +7,46 @@ This guide explains how to version, sign, and ship a new PrintNinja release.
 - **Android**: JDK 17, Android SDK (34), NDK 27+, `cargo ndk`
 - For signing locally: Windows code-signing certificate (`.pfx`) OR Android keystore
 
-## 1. Bump version + rename (optional)
+## 1. Bump version and tag
+
+Run this from a clean `main` that is up to date with `origin`:
 
 ```bash
-# Bump patch and tag a release
-./scripts/release.sh 1.0.0 --tag
+pnpm release patch          # 0.5.0 -> 0.5.1
+pnpm release minor          # 0.5.0 -> 0.6.0
+pnpm release major          # 0.5.0 -> 1.0.0
+pnpm release 1.2.3          # exact version (must be higher than the current one)
 
-# With new app name
-./scripts/release.sh --name "PrintNinja" --version 1.0.0 --tag
-
-# Just bump patch (auto-increments z)
-./scripts/release.sh --bump --tag
+pnpm release patch --dry-run   # show what would happen, change nothing
+pnpm release patch --push      # also push main + the tag (starts the CI release)
 ```
 
-The script updates:
-- `src-tauri/Cargo.toml` (name, version)
-- `src-tauri/tauri.conf.json` (productName, version, identifier)
-- `package.json` (name, version)
+(`pnpm release:patch`, `release:minor` and `release:major` are shortcuts.)
 
-Then commits and (optionally) tags.
+The script (`scripts/release.mjs`, needs only Node and git) updates every place CI's
+`version-check` reads:
+- `package.json`
+- `src-tauri/tauri.conf.json`
+- `src-tauri/Cargo.toml` (`[package]` version)
+- `src-tauri/Cargo.lock` (the crate's own entry)
+- `src/pages/Settings.tsx` (the `"vX.Y.Z"` fallback literal)
+
+Then it commits `release: vX.Y.Z` and creates an annotated tag `vX.Y.Z`. It refuses to run
+if:
+- you are not on `main` (CI rejects tags that are not on `main`),
+- the working tree is not clean,
+- local `main` is behind `origin/main`,
+- the new version is not higher than the current one, or the tag already exists
+  (locally or on `origin`),
+- the five files above do not all agree on the current version.
+
+Without `--push` nothing leaves your machine, and you finish with
+`git push --atomic origin main vX.Y.Z`. To undo an unpushed release:
+`git tag -d vX.Y.Z && git reset --hard HEAD~1`.
+
+To rename the app, use the older script instead:
+`./scripts/release.sh --name "NewName" --version 1.0.0 --tag` (needs bash, python3 and
+GNU sed).
 
 ## 2. Sign app locally (for now)
 
@@ -66,17 +87,26 @@ By default, **CI does not sign anything**. Code signing is intentionally local-o
 ## 4. Trigger the CI release
 
 ```bash
-git push origin main
-git push origin v1.0.0
+pnpm release patch --push        # or run without --push and push by hand:
+git push --atomic origin main v1.0.0
 ```
 
-Pushing a `v*` tag runs the `CI` workflow (a `create` trigger cannot filter by tag, so it uses `push`):
-- **web-check**: lint + type-check + vite build + vitest
-- **rust-check**: cargo fmt (blocking), clippy and cargo test (advisory)
-- **version-check**: the tag must match `package.json`, `Cargo.toml` and `tauri.conf.json`
+Pushing a `v*` tag runs the `CI` workflow (a `create` trigger cannot filter by tag, so it uses `push`).
+Pushes and pull requests on `main` and `develop` run the checks only; `develop` never releases.
+
+Checks (every push / PR):
+- **web-check**: lint + type-check + vite build + vitest. Uploads `dist` once for the Rust jobs.
+- **rust-check** (Linux): cargo fmt, clippy (`-D warnings`) and cargo test. All blocking.
+- **rust-test-windows**: cargo test on Windows, blocking.
+
+Release jobs (tags only):
+- **version-check**: the tag must be `vX.Y.Z`, the tagged commit must be on `main`, and the tag
+  must match `package.json`, `tauri.conf.json`, `Cargo.toml`, `Cargo.lock` and `Settings.tsx`
 - **windows-build**: MSI only (`--bundles msi`, output in `src-tauri/target/release/bundle/msi`)
 - **android-build**: `aarch64` (arm64-v8a) unsigned APK + AAB
 - **github-release**: creates a **draft** GitHub Release with the MSI/APK/AAB attached
+
+The build jobs wait for every check and for `version-check`, so a failing Rust test blocks the release.
 
 Artifacts are also kept as workflow artifacts for 30 days.
 
