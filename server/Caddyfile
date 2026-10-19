@@ -1,0 +1,7 @@
+# Optional HTTPS front end (see docker-compose.yml, profile "https").
+# Caddy gets and renews a certificate for SHARE_DOMAIN automatically.
+# The domain must point at this host and ports 80 and 443 must be reachable.
+{$SHARE_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy printninja-server:3001
+}

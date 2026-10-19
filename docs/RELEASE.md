@@ -109,19 +109,75 @@ versioned separately from the app. Deploy it by hand.
 
 ### Prerequisites
 - A host that stays up, with a persistent disk.
+- Docker with the Compose plugin (for the Docker route), or Rust (for the manual route).
 - HTTPS in front of the service. The app sends session tokens as Bearer headers,
   so plain HTTP must not be used outside a trusted network.
-- Rust stable on the build machine. `server/Cargo.lock` is lockfile version 4,
-  which needs Cargo 1.78 or newer.
+- Manual route only: Rust stable on the build machine. `server/Cargo.lock` is
+  lockfile version 4, which needs Cargo 1.78 or newer (the Docker build image
+  already has a recent one).
 
-### Build
+### Deploy with Docker (recommended)
+Files: `server/Dockerfile`, `server/.dockerignore` and `docker-compose.yml`.
+
+```bash
+git clone <repo> && cd PrintNinja && git checkout v2
+
+# Listens on 127.0.0.1:3001. Put your own HTTPS reverse proxy on the same host in front:
+docker compose up -d --build
+```
+
+What this sets up:
+- The image is built in two stages and runs as a non-root user (`uid 10001`).
+- The database file is `/data/printninja-server.db` inside the container, on the
+  named volume `printninja-data`. The volume survives rebuilds and restarts, so
+  accounts and templates are kept. Do not run `docker compose down -v` unless you
+  want to delete them.
+- The port is published on `127.0.0.1` only, so nothing outside the host can
+  reach the plain HTTP service. A reverse proxy on the same host must forward to it
+  and should set `X-Forwarded-For` to the real client address. Without a proxy,
+  other machines cannot connect; the comment in `docker-compose.yml` explains how to
+  open the port, at the cost of unencrypted traffic.
+- The container has a health check on `/health`. See `docker compose ps`.
+
+Check it:
+```bash
+docker compose ps                                  # printninja-server should be "healthy"
+curl http://127.0.0.1:3001/health                  # ok
+curl https://share.example.com/v1/templates        # JSON (through your proxy)
+docker compose logs -f printninja-server
+```
+
+Then continue with "Verify" below (the app part is the same).
+
+Back up (stop, copy, start, so the file is consistent):
+```bash
+docker compose stop printninja-server
+docker run --rm -v printninja_printninja-data:/data -v "$PWD":/backup busybox \
+  cp /data/printninja-server.db /backup/printninja-$(date +%F).db
+docker compose start printninja-server
+```
+The volume name is `<project folder>_printninja-data`; check it with
+`docker volume ls`.
+
+Update and roll back:
+```bash
+git pull
+docker compose up -d --build        # rebuilds the image and replaces the container
+```
+To roll back, check out the previous commit and run the same command, or keep the
+previous image by tagging it before you rebuild
+(`docker tag printninja-server:local printninja-server:prev`). The data volume is
+not touched either way. As described below, a release that changes the database
+schema needs a manual migration first.
+
+### Without Docker: build
 ```bash
 cargo build --release --manifest-path server/Cargo.toml
 # binary: server/target/release/printninja-server
 ```
 Copy that one file to the host.
 
-### Configure
+### Without Docker: configure
 The service reads environment variables only (see `env.example`). It does not load
 a `.env` file by itself.
 
@@ -136,7 +192,7 @@ Put the database file on persistent storage, for example
 ephemeral disk (many container platforms) the file, and so every account and
 published template, is lost on each redeploy.
 
-### Run
+### Without Docker: run
 Run it under a service manager so it restarts on failure. Example `systemd` unit
 (`/etc/systemd/system/printninja-server.service`):
 
@@ -161,7 +217,7 @@ WantedBy=multi-user.target
 sudo systemctl enable --now printninja-server
 ```
 
-Put a reverse proxy (nginx, Caddy, or your platform's TLS) in front, forward to
+Put a reverse proxy (nginx, your company proxy, or your platform's TLS) in front, forward to
 `127.0.0.1:3001`, and block direct access to the port from outside. The proxy
 should set `X-Forwarded-For`, because the login throttle (5 per minute) keys on
 that header. If the service is reachable directly, clients can fake it.
@@ -175,7 +231,7 @@ Then in the app open **Settings, Share**, enter the service address (for example
 `https://share.example.com`), register, publish a template, and check it appears
 in the **Templates, Community** tab.
 
-### Back up
+### Back up (without Docker)
 The SQLite file holds all accounts and templates. Make a consistent copy while
 the service is running with:
 
@@ -185,7 +241,7 @@ sqlite3 /var/lib/printninja/printninja-server.db ".backup '/backups/printninja-$
 Do not copy the file with plain `cp` while the service is writing. Test a restore
 at least once.
 
-### Update and roll back
+### Update and roll back (without Docker)
 1. Build the new binary and copy it to the host next to the old one.
 2. Stop the service, swap the binary, start it, and run the checks above.
 3. Rollback: put the previous binary back and restart.
@@ -195,8 +251,9 @@ already exist. A release that adds or changes columns needs a manual migration o
 the live database (back it up first) before the new binary starts.
 
 ### Not automated
-Nothing here runs in CI. Adding a `server/` build and test job, and later a
-deploy job, is a possible next step once you have chosen a host.
+Nothing here runs in CI: the image is built on the host that runs it. Adding a
+CI job that builds `server/` (and the Docker image) and runs its tests is a
+possible next step.
 
 ## Clean up cache
 

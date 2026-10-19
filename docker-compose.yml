@@ -1,0 +1,24 @@
+# PrintNinja share service.
+#
+#   docker compose up -d --build        # service on 127.0.0.1:3001
+#
+# Compose reads variables from a `.env` file next to this file (see env.example).
+
+services:
+  printninja-server:
+    build: ./server
+    image: printninja-server:local
+    restart: unless-stopped
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+    volumes:
+      - printninja-data:/data
+    # Reachable from this host only. Put a reverse proxy on the same host in front
+    # of it (your company proxy, nginx, ...) to serve HTTPS to the network.
+    # To open the plain HTTP port to the network instead, change the mapping to
+    # "3001:3001", but passwords and tokens then travel unencrypted.
+    ports:
+      - "127.0.0.1:3001:3001"
+
+volumes:
+  printninja-data:
