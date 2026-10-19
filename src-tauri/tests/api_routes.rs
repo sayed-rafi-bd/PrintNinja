@@ -13,12 +13,11 @@ use tower::ServiceExt;
 type Db = Arc<Mutex<Database>>;
 
 fn setup() -> (Db, String) {
+    // A UUID, not a timestamp: Windows' clock is coarse enough that parallel
+    // tests could get the same file name and share (and lock) one SQLite DB.
     let path = std::env::temp_dir().join(format!(
         "printninja_api_{}.db",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        uuid::Uuid::new_v4()
     ));
 
     let mut conn = Connection::open(&path).expect("open db");
@@ -299,10 +298,7 @@ async fn duplicate_idempotency_key_does_not_create_a_second_job() {
 fn router(db: &Db) -> axum::Router {
     let cache = std::env::temp_dir().join(format!(
         "printninja_api_cache_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        uuid::Uuid::new_v4()
     ));
     printninja_lib::api::routes::router_with_state(
         printninja_lib::api::routes::ApiState {
