@@ -481,7 +481,7 @@ export function SettingsPage() {
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Leave empty to hide sharing features (V1 behaviour). No token is ever bundled — the service holds TURSO_AUTH_TOKEN.
+                  Leave empty to hide sharing features (V1 behaviour). No database credentials are bundled in the app — the service keeps its own database.
                 </p>
               </div>
 

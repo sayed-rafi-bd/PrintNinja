@@ -80,6 +80,9 @@ Pushing a `v*` tag runs the `CI` workflow (a `create` trigger cannot filter by t
 
 Artifacts are also kept as workflow artifacts for 30 days.
 
+The `server/` share service is **not** built, tested or deployed by this workflow.
+It is deployed by hand, see section 7.
+
 ## 5. Publish
 
 Open the draft release on GitHub. If you sign locally, replace the unsigned files with your signed builds, then publish.
@@ -90,6 +93,110 @@ Open the draft release on GitHub. If you sign locally, replace the unsigned file
 |---|---|---|---|
 | Windows | MSI only | `signtool` with `.pfx` | `x86_64-pc-windows-msvc` |
 | Android | arm64-v8a | Android keystore | `aarch64-linux-android` (x86_64 optional for emulator) |
+
+## 7. Deploy the share service (`server/`)
+
+The share service (community templates: accounts, publish, browse, save) is a
+separate Rust binary. It is **not** part of the tag release or CI, and it is
+versioned separately from the app. Deploy it by hand.
+
+### When to deploy
+- First time, before anyone can use the Community library.
+- When `server/` changes. The app only knows the service address, so an app
+  release does not require a server deploy unless the `/v1` API changed. If it
+  did, deploy the server first and keep the change backward compatible, because
+  users update the app at different times.
+
+### Prerequisites
+- A host that stays up, with a persistent disk.
+- HTTPS in front of the service. The app sends session tokens as Bearer headers,
+  so plain HTTP must not be used outside a trusted network.
+- Rust stable on the build machine. `server/Cargo.lock` is lockfile version 4,
+  which needs Cargo 1.78 or newer.
+
+### Build
+```bash
+cargo build --release --manifest-path server/Cargo.toml
+# binary: server/target/release/printninja-server
+```
+Copy that one file to the host.
+
+### Configure
+The service reads environment variables only (see `env.example`). It does not load
+a `.env` file by itself.
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `DATABASE_URL` | Path of the SQLite file (accounts, sessions, templates) | `printninja-server.db` in the working directory |
+| `PORT` | Listen port (binds `0.0.0.0`) | `3001` |
+| `RUST_LOG` | Log level, for example `info` or `debug` | `info` |
+
+Put the database file on persistent storage, for example
+`DATABASE_URL=/var/lib/printninja/printninja-server.db`. On a host with an
+ephemeral disk (many container platforms) the file, and so every account and
+published template, is lost on each redeploy.
+
+### Run
+Run it under a service manager so it restarts on failure. Example `systemd` unit
+(`/etc/systemd/system/printninja-server.service`):
+
+```ini
+[Unit]
+Description=PrintNinja share service
+After=network.target
+
+[Service]
+ExecStart=/opt/printninja/printninja-server
+Environment=DATABASE_URL=/var/lib/printninja/printninja-server.db
+Environment=PORT=3001
+Environment=RUST_LOG=info
+Restart=on-failure
+User=printninja
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now printninja-server
+```
+
+Put a reverse proxy (nginx, Caddy, or your platform's TLS) in front, forward to
+`127.0.0.1:3001`, and block direct access to the port from outside. The proxy
+should set `X-Forwarded-For`, because the login throttle (5 per minute) keys on
+that header. If the service is reachable directly, clients can fake it.
+
+### Verify
+```bash
+curl https://your-host/health          # prints: ok
+curl https://your-host/v1/templates    # JSON list (empty at first)
+```
+Then in the app open **Settings, Share**, enter the service address (for example
+`https://share.example.com`), register, publish a template, and check it appears
+in the **Templates, Community** tab.
+
+### Back up
+The SQLite file holds all accounts and templates. Make a consistent copy while
+the service is running with:
+
+```bash
+sqlite3 /var/lib/printninja/printninja-server.db ".backup '/backups/printninja-$(date +%F).db'"
+```
+Do not copy the file with plain `cp` while the service is writing. Test a restore
+at least once.
+
+### Update and roll back
+1. Build the new binary and copy it to the host next to the old one.
+2. Stop the service, swap the binary, start it, and run the checks above.
+3. Rollback: put the previous binary back and restart.
+
+`db::init_db` uses `CREATE TABLE IF NOT EXISTS`, which does not change tables that
+already exist. A release that adds or changes columns needs a manual migration of
+the live database (back it up first) before the new binary starts.
+
+### Not automated
+Nothing here runs in CI. Adding a `server/` build and test job, and later a
+deploy job, is a possible next step once you have chosen a host.
 
 ## Clean up cache
 

@@ -1,6 +1,6 @@
 /**
  * Share service client — thin HTTP wrapper for the hosted service (V2.md §10).
- * The app never sees TURSO_AUTH_TOKEN; it only talks to the service over HTTPS
+ * The app holds no database credentials; it only talks to the service over HTTPS
  * with a Bearer token stored in local settings.
  */
 

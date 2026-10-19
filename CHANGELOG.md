@@ -47,7 +47,7 @@ All notable changes to PrintNinja are documented here. The format is based on Ke
 ## [0.3.0] - 2026-10-18 — Phase 2: Identity & Publish (B3+B4)
 
 ### Added
-- **Share service** (`server/` crate, `axum` + `rusqlite`/`Turso`): `POST /v1/auth/{register,login,logout}`, `GET /v1/auth/me`, `PUT/DELETE /v1/templates/{id}` (client UUID, idempotent, owner 403, 404, size caps 512K body / 64K readme, remote-ref `data: URIs` check, server `updated_at`), `POST /v1/templates/{id}/use`, `PUT/DELETE/GET /v1/saved` (idempotent). Passwords via `scrypt` + per-user salt, sessions as 32B base64url sha256 30d, throttle 5/min per handle/IP, `CORS` permissive, `TURSO_AUTH_TOKEN` never in client.
+- **Share service** (`server/` crate, `axum` + `rusqlite`/SQLite): `POST /v1/auth/{register,login,logout}`, `GET /v1/auth/me`, `PUT/DELETE /v1/templates/{id}` (client UUID, idempotent, owner 403, 404, size caps 512K body / 64K readme, remote-ref `data: URIs` check, server `updated_at`), `POST /v1/templates/{id}/use`, `PUT/DELETE/GET /v1/saved` (idempotent). Passwords via `scrypt` + per-user salt, sessions as 32B base64url sha256 30d, throttle 5/min per handle/IP, `CORS` permissive, no database credentials in the client.
 - **App publish**: Designer header shows Draft (amber) / Published (emerald) chip, amber “You have changes that aren’t published” strip when `updated_at > published_at`, Publish (emerald) vs Update published copy + Unpublish (destructive). Service URL + token stored via `get_setting`/`set_setting` (fallback `localStorage`), Settings → Share tab (service URL, Register/Login/Logout, signed-in handle).
 
 ### Changed

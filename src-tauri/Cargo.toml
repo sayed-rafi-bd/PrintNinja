@@ -1,48 +1,27 @@
 [package]
-name = "printninja"
-version = "0.5.0"
-description = "Cross-platform silent print app"
-authors = ["PrintNinja"]
+name = "printninja-server"
+version = "0.1.0"
 edition = "2021"
+description = "PrintNinja share service (SQLite-backed)"
 
-[lib]
-name = "printninja"
-crate-type = ["staticlib", "cdylib", "rlib"]
-
-[build-dependencies]
-tauri-build = { version = "2", features = [] }
+[[bin]]
+name = "printninja-server"
+path = "src/main.rs"
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+axum = { version = "0.8", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-anyhow = "1"
-thiserror = "2"
 rusqlite = { version = "0.32", features = ["bundled"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
-async-trait = "0.1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-base64 = "0.22"
-handlebars = "6"
-axum = { version = "0.8", features = ["ws"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "trace"] }
-http-body-util = "0.1"
 sha2 = "0.10"
-urlencoding = "2"
+scrypt = { version = "0.11", features = ["password-hash"] }
+rand = { version = "0.8" }
 hex = "0.4"
-rand = "0.8"
-
-[features]
-# Optional hardware backends gated in the Windows transports — declared so
-# `cfg(feature = ...)` is a known cfg (check-cfg); neither crate is bundled.
-serialport = []
-rusb = []
-
-[target.'cfg(windows)'.dependencies]
-windows = { version = "0.58", features = ["Win32_System_Threading", "Win32_Security", "Win32_System_Com"] }
+base64 = "0.22"
+tower-http = { version = "0.6", features = ["cors"] }
+tower = "0.5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
