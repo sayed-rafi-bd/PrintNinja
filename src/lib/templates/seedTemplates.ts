@@ -10,13 +10,13 @@ export interface TemplateRow {
 }
 
 /**
- * Return the templates, seeding the bundled starters on first run.
+ * Return the templates, seeding the bundled starter on first run.
  *
- * The starter templates used to live only in the Designer's in-memory
+ * The starter template used to live only in the Designer's in-memory
  * fallback, so on a fresh install `list_templates` came back empty and the
  * Print tab showed "No templates — create one in Designer" even though the app
- * ships three ready-to-print layouts. They are persisted here instead, so they
- * have real rows and a real version 1 to render.
+ * ships a ready-to-print layout. It is persisted here instead, so it has a
+ * real row and a real version 1 to render.
  *
  * A module-level promise dedupes concurrent callers (Designer and Print both
  * call this on mount), so the starters are only created once.
