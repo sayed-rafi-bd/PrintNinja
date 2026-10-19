@@ -27,8 +27,9 @@ import utilities from "tailwind4/utilities.css?raw";
 import { extractClasses } from "@/lib/templates/extractClasses";
 
 /**
- * Bump when INPUT or the post-processing changes, so stored CSS is recompiled.
- * It is part of the key saved next to every compiled stylesheet.
+ * Bump when INPUT or the post-processing changes. It is part of the key saved
+ * next to every compiled stylesheet, so a stored stylesheet can be told apart
+ * from one the current compiler would produce.
  */
 export const COMPILER_REV = "tw4.3-r1";
 

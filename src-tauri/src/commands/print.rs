@@ -119,9 +119,9 @@ const TEMPLATE_BASE_CSS: &str = include_str!("../../assets/template-base.css");
 /// Base reset, then the version's compiled Tailwind CSS, then the template's
 /// own CSS last so it wins (same order as the frontend).
 ///
-/// `compiled_css` is empty only for a version the frontend has not compiled yet
-/// (it backfills at startup); such a version prints with the base rules and its
-/// own CSS until then.
+/// `compiled_css` is empty for a version saved before per-template compilation
+/// existed, or whose compile failed; it then prints with the base rules and its
+/// own CSS only. Re-saving the template compiles it.
 fn build_template_css(user_css: &str, compiled_css: &str) -> String {
     let mut parts = vec![TEMPLATE_BASE_CSS.trim()];
     if !compiled_css.trim().is_empty() {

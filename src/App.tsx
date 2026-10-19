@@ -48,19 +48,6 @@ function AppContent() {
     diagnostics.info("App started", { platform: navigator.platform });
   }, []);
 
-  // Bring versions saved before per-template CSS up to date, off the startup path.
-  useEffect(() => {
-    const id = setTimeout(() => {
-      import("@/lib/templates/backfillCompiledCss")
-        .then((m) => m.ensureCompiledCss())
-        .then((n) => {
-          if (n > 0) diagnostics.info("Compiled template CSS", { versions: String(n) });
-        })
-        .catch(() => {});
-    }, 1500);
-    return () => clearTimeout(id);
-  }, []);
-
   // DB is source of truth, localStorage is cache. Wait for DB before deciding
   // to avoid flashing onboarding on every reload.
   useEffect(() => {

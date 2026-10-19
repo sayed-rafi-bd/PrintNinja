@@ -29,7 +29,7 @@ In a browser (no Tauri IPC) settings fall back to the `localStorage` key `printn
 
 - Tailwind is compiled per template, not loaded from a CDN and not shared. `compileTemplateCss` (Tailwind v4, installed as the `tailwind4` alias; the app shell stays on v3) compiles the classes `extractClasses` finds in a template's HTML and the result is stored with the version as `compiled_css`. The Rust print path inlines the same CSS.
 - In a template, write every class name in full in each branch (`{{#if urgent}}bg-red-600{{else}}bg-green-600{{/if}}`). A name built from data (`bg-{{color}}-500`) cannot be compiled; use a CSS variable (`style="--c:{{color}}" class="bg-[var(--c)]"`).
-- Changing `compileTemplateCss` output (its input CSS or post-processing)? Bump `COMPILER_REV`: the startup backfill then recompiles every stored version.
+- Changing `compileTemplateCss` output (its input CSS or post-processing)? Bump `COMPILER_REV`, which is part of the key stored with each compiled stylesheet. Existing versions are not recompiled automatically; they pick up the change when their template is next saved.
 - Barcodes: `bwip-js` `toSVG()` → inline SVG via `buildBarcodeHtml` (no `canvas.toDataURL`). Friendly id → `bcid` mapping lives in `src/lib/utils/barcode.ts` (`itf→interleaved2of5`, `codabar→rationalizedCodabar`, `aztec→azteccode`, `qr→qrcode`).
 - `renderTemplate` registers Handlebars helpers once (`helpersRegistered`); `padLeft` honours the pad char and `date` parses RFC 3339.
 - `PrintQueue` is `Clone + Send + Sync` (`Arc<Mutex<HashMap<String, Semaphore>>>`, `&self` everywhere, `with_permit`). `PrinterTransport::discover(&self)` must stay `dyn`-dispatchable.

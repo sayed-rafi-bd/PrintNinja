@@ -34,9 +34,9 @@ svg{shape-rendering:crispEdges}
 /**
  * Combine the base print CSS with the template's compiled Tailwind CSS.
  *
- * `compiledCss` may be blank, for a version that has not been compiled yet
- * (the startup backfill compiles those) or whose compile failed; the document
- * then has the base rules and the template's own CSS only. The Rust print path
+ * `compiledCss` may be blank, for a version saved before per-template
+ * compilation existed or whose compile failed; the document then has the base
+ * rules and the template's own CSS only. The Rust print path
  * assembles the same three parts in the same order (`build_template_css`), so
  * preview and print agree.
  *

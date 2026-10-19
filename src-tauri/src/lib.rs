@@ -123,7 +123,6 @@ pub fn run() {
             commands::version::create_version,
             commands::version::delete_version,
             commands::version::restore_version,
-            commands::version::set_version_compiled_css,
             commands::version::diff_versions,
             commands::font::list_fonts,
             commands::font::upload_font,
