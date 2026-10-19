@@ -19,7 +19,7 @@
  * installs never need the Tailwind toolchain.
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,6 +27,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const INPUT = resolve(ROOT, "src/styles/templates.src.css");
 const CONFIG = resolve(ROOT, "tailwind.templates.config.ts");
 const OUT = resolve(ROOT, "src/lib/templates/templates.generated.ts");
+
+// The Rust print pipeline embeds the same stylesheet (include_str!), so the
+// PDF is styled identically to the preview.
+const CSS_OUT = resolve(ROOT, "src-tauri/assets/template-print.css");
 
 const RAW = `${OUT}.raw`;
 
@@ -88,6 +92,9 @@ export default TEMPLATE_PRINT_CSS;
 `,
   "utf8",
 );
+
+mkdirSync(dirname(CSS_OUT), { recursive: true });
+writeFileSync(CSS_OUT, `${css}\n`, "utf8");
 
 process.stdout.write(
   `[templates:css] wrote ${OUT.replace(ROOT + "/", "")} (${css.length} bytes)\n`,
