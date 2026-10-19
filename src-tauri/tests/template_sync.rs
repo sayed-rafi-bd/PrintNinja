@@ -65,7 +65,10 @@ fn update_template_meta_writes_name_page_size_and_summary() {
     assert_eq!(updated.page_h_mm, 297);
     assert_eq!(updated.summary, "A4");
     let (name, w, h, orientation, summary, _) = columns(&conn);
-    assert_eq!((name.as_str(), w, h, summary.as_str()), ("Invoice A4", 210, 297, "A4"));
+    assert_eq!(
+        (name.as_str(), w, h, summary.as_str()),
+        ("Invoice A4", 210, 297, "A4")
+    );
     assert_eq!(orientation, "portrait");
 }
 
@@ -103,7 +106,10 @@ fn update_template_meta_trims_the_name_and_leaves_content_alone() {
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .unwrap();
-    assert_eq!((html.as_str(), css.as_str(), readme.as_str()), ("<p>local</p>", ".local {}", "# Invoice"));
+    assert_eq!(
+        (html.as_str(), css.as_str(), readme.as_str()),
+        ("<p>local</p>", ".local {}", "# Invoice")
+    );
 }
 
 #[test]
@@ -122,7 +128,10 @@ fn update_template_meta_reports_a_missing_template() {
     let conn = seeded_db();
     let err = write_template_meta(
         &conn,
-        &UpdateTemplateMetaRequest { id: 999, ..meta("Nope", 80, 200, "") },
+        &UpdateTemplateMetaRequest {
+            id: 999,
+            ..meta("Nope", 80, 200, "")
+        },
     )
     .unwrap_err();
     assert!(matches!(err, printninja::AppError::NotFound(_)), "{err:?}");
@@ -137,17 +146,26 @@ fn a_null_publish_time_links_the_template_without_publishing_it() {
     let conn = seeded_db();
     let t = write_publish_info(
         &conn,
-        &SetPublishInfoRequest { id: 1, remote_id: REMOTE_ID.into(), published_at: None },
+        &SetPublishInfoRequest {
+            id: 1,
+            remote_id: REMOTE_ID.into(),
+            published_at: None,
+        },
     )
     .unwrap();
 
     assert_eq!(t.remote_id.as_deref(), Some(REMOTE_ID));
-    assert_eq!(t.published_at, None, "a first Save keeps the template private");
+    assert_eq!(
+        t.published_at, None,
+        "a first Save keeps the template private"
+    );
     let (_, _, _, _, _, published) = columns(&conn);
     assert!(!published);
 
     let updated_at: String = conn
-        .query_row("SELECT updated_at FROM templates WHERE id = 1", [], |r| r.get(0))
+        .query_row("SELECT updated_at FROM templates WHERE id = 1", [], |r| {
+            r.get(0)
+        })
         .unwrap();
     assert!(
         updated_at.len() >= 10,
@@ -160,7 +178,11 @@ fn a_publish_time_marks_the_row_as_in_step_with_the_server() {
     let conn = seeded_db();
     write_publish_info(
         &conn,
-        &SetPublishInfoRequest { id: 1, remote_id: REMOTE_ID.into(), published_at: None },
+        &SetPublishInfoRequest {
+            id: 1,
+            remote_id: REMOTE_ID.into(),
+            published_at: None,
+        },
     )
     .unwrap();
     let t = write_publish_info(
@@ -184,8 +206,15 @@ fn set_publish_info_rejects_an_id_that_is_not_a_uuid() {
     let conn = seeded_db();
     let err = write_publish_info(
         &conn,
-        &SetPublishInfoRequest { id: 1, remote_id: "not-a-uuid".into(), published_at: None },
+        &SetPublishInfoRequest {
+            id: 1,
+            remote_id: "not-a-uuid".into(),
+            published_at: None,
+        },
     )
     .unwrap_err();
-    assert!(matches!(err, printninja::AppError::Validation(_)), "{err:?}");
+    assert!(
+        matches!(err, printninja::AppError::Validation(_)),
+        "{err:?}"
+    );
 }

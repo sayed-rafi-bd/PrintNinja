@@ -11,12 +11,24 @@
 
 /// Every file a print can travel through.
 const PRINT_PATH: &[(&str, &str)] = &[
-    ("commands/print.rs", include_str!("../src/commands/print.rs")),
+    (
+        "commands/print.rs",
+        include_str!("../src/commands/print.rs"),
+    ),
     ("api/routes.rs", include_str!("../src/api/routes.rs")),
     ("deeplink.rs", include_str!("../src/deeplink.rs")),
-    ("commands/batch.rs", include_str!("../src/commands/batch.rs")),
-    ("commands/history.rs", include_str!("../src/commands/history.rs")),
-    ("render/handlebars.rs", include_str!("../src/render/handlebars.rs")),
+    (
+        "commands/batch.rs",
+        include_str!("../src/commands/batch.rs"),
+    ),
+    (
+        "commands/history.rs",
+        include_str!("../src/commands/history.rs"),
+    ),
+    (
+        "render/handlebars.rs",
+        include_str!("../src/render/handlebars.rs"),
+    ),
     ("render/raster.rs", include_str!("../src/render/raster.rs")),
 ];
 
@@ -60,8 +72,12 @@ fn the_one_data_fetch_is_reachable_only_through_a_job_data_url() {
         1,
         "a print should fetch at most one dataset, and only the one asked for"
     );
-    let guard_at = print_rs.find(guard).unwrap_or_else(|| panic!("no {guard} guard"));
-    let call_at = print_rs.find(call).unwrap_or_else(|| panic!("no {call} call"));
+    let guard_at = print_rs
+        .find(guard)
+        .unwrap_or_else(|| panic!("no {guard} guard"));
+    let call_at = print_rs
+        .find(call)
+        .unwrap_or_else(|| panic!("no {call} call"));
     assert!(
         guard_at < call_at,
         "the fetch must sit behind the job's data_url, not run for every print"

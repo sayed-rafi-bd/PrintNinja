@@ -216,7 +216,10 @@ pub struct UpdateTemplateMetaRequest {
 /// use it, because no other local command writes those fields (MIGRATION_PLAN.md
 /// phase 1). Orientation follows the page size, as elsewhere in the app.
 #[tauri::command]
-pub fn update_template_meta(db: State<DbState>, req: UpdateTemplateMetaRequest) -> AppResult<Template> {
+pub fn update_template_meta(
+    db: State<DbState>,
+    req: UpdateTemplateMetaRequest,
+) -> AppResult<Template> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
@@ -249,7 +252,14 @@ pub fn write_template_meta(
         "UPDATE templates SET name = ?1, page_w_mm = ?2, page_h_mm = ?3, orientation = ?4,
              summary = ?5, updated_at = datetime('now')
          WHERE id = ?6",
-        rusqlite::params![name, req.page_w_mm, req.page_h_mm, orientation, req.summary.clone().unwrap_or_default(), req.id],
+        rusqlite::params![
+            name,
+            req.page_w_mm,
+            req.page_h_mm,
+            orientation,
+            req.summary.clone().unwrap_or_default(),
+            req.id
+        ],
     )?;
     if affected == 0 {
         return Err(AppError::NotFound(format!("Template {} not found", req.id)));

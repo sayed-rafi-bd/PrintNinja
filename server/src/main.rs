@@ -7,17 +7,14 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
-    routing::{delete, get, post, put},
+    routing::{get, post, put},
     Json, Router,
 };
 use chrono::{Duration, Utc};
 use error::AppError;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
@@ -111,7 +108,7 @@ async fn register(State(state): State<AppState>, headers: HeaderMap, Json(req): 
         t.check_and_record(&format!("register:ip:{ip}"))?;
     }
 
-    let mut conn = state.db.lock().await;
+    let conn = state.db.lock().await;
     // Check handle exists (case-insensitive due to COLLATE NOCASE)
     let exists: i64 = conn
         .query_row("SELECT COUNT(*) FROM users WHERE handle = ?1", [&handle], |r| r.get(0))
@@ -153,7 +150,7 @@ async fn login(State(state): State<AppState>, headers: HeaderMap, Json(req): Jso
         t.check_and_record(&format!("login:ip:{ip}"))?;
     }
 
-    let mut conn = state.db.lock().await;
+    let conn = state.db.lock().await;
     let mut stmt = conn
         .prepare("SELECT id, handle, password_hash, created_at FROM users WHERE handle = ?1 COLLATE NOCASE")
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -425,23 +422,23 @@ async fn put_template(
 ) -> Result<impl IntoResponse, AppError> {
     // Auth required
     let token = extract_bearer(&headers)?;
-    let mut conn = state.db.lock().await;
+    let conn = state.db.lock().await;
     let sess = {
         // Need to validate while holding lock, but we have &Connection, not &mut
         // We have a tokio::sync::Mutex, we can get &Connection via &*conn
         auth::validate_session(&conn, &token)?
     };
 
-    // Validate sizes
-    if req.body.as_bytes().len() > 512 * 1024 {
+    // Validate sizes. `String::len` is the byte length, which is what the caps are in.
+    if req.body.len() > 512 * 1024 {
         return Err(AppError::BadRequest("Template body exceeds 512 KiB".into()));
     }
     let css = req.css.as_deref().unwrap_or_default();
-    if css.as_bytes().len() > 256 * 1024 {
+    if css.len() > 256 * 1024 {
         return Err(AppError::BadRequest("Template CSS exceeds 256 KiB".into()));
     }
     let readme = req.readme.unwrap_or_default();
-    if readme.as_bytes().len() > 64 * 1024 {
+    if readme.len() > 64 * 1024 {
         return Err(AppError::BadRequest("README exceeds 64 KiB".into()));
     }
     // Validate handlebars-ish body doesn't contain remote refs (re-sanitize)
@@ -629,7 +626,7 @@ mod tests {
         body::Body,
         http::{Request, StatusCode},
     };
-    use tower::{Service, ServiceExt};
+    use tower::ServiceExt;
 
     fn test_app() -> Router {
         let conn = db::open_db(":memory:").unwrap();
