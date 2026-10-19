@@ -22,7 +22,10 @@ impl TemplateEngine {
     }
 
     pub fn render(&self, template: &str, data: &serde_json::Value) -> Result<String> {
-        let out = self.hb.render_template(template, data).map_err(|e| anyhow::anyhow!(e))?;
+        let out = self
+            .hb
+            .render_template(template, data)
+            .map_err(|e| anyhow::anyhow!(e))?;
         Ok(sanitize_html(&out))
     }
 }
@@ -109,10 +112,7 @@ pub fn sanitize_html(input: &str) -> String {
                                 l += 1;
                             }
                         } else {
-                            while l < chars.len()
-                                && !chars[l].is_whitespace()
-                                && chars[l] != '>'
-                            {
+                            while l < chars.len() && !chars[l].is_whitespace() && chars[l] != '>' {
                                 l += 1;
                             }
                         }
@@ -144,17 +144,41 @@ pub fn find_remote_refs(html: &str, css: &str) -> Option<Vec<String>> {
     let lower_html = html.to_lowercase();
     let lower_css = css.to_lowercase();
 
-    for needle in ["src=\"http", "src='http", "href=\"http", "href='http", "src=\"//", "href=\"//"] {
+    for needle in [
+        "src=\"http",
+        "src='http",
+        "href=\"http",
+        "href='http",
+        "src=\"//",
+        "href=\"//",
+    ] {
         if lower_html.contains(needle) {
-            issues.push(format!("Remote reference in HTML: {} — use data: URIs", &needle[..20]));
+            issues.push(format!(
+                "Remote reference in HTML: {} — use data: URIs",
+                &needle[..20]
+            ));
         }
     }
-    for needle in ["url(\"http", "url('http", "url(http", "url(\"//", "url('//", "url(//"] {
+    for needle in [
+        "url(\"http",
+        "url('http",
+        "url(http",
+        "url(\"//",
+        "url('//",
+        "url(//",
+    ] {
         if lower_html.contains(needle) || lower_css.contains(needle) {
-            issues.push(format!("Remote url() in CSS/HTML: {} — use data: URIs", needle));
+            issues.push(format!(
+                "Remote url() in CSS/HTML: {} — use data: URIs",
+                needle
+            ));
         }
     }
-    if lower_html.contains("@import") && (lower_html.contains("http://") || lower_html.contains("https://") || lower_html.contains("//")) {
+    if lower_html.contains("@import")
+        && (lower_html.contains("http://")
+            || lower_html.contains("https://")
+            || lower_html.contains("//"))
+    {
         issues.push("@import with remote URL — use data: URIs".to_string());
     }
 

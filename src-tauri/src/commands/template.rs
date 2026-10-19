@@ -328,7 +328,9 @@ pub fn write_publish_info(
 ) -> AppResult<Template> {
     // Validate UUID
     if uuid::Uuid::parse_str(&req.remote_id).is_err() {
-        return Err(AppError::Validation("Invalid remote_id (must be UUID)".into()));
+        return Err(AppError::Validation(
+            "Invalid remote_id (must be UUID)".into(),
+        ));
     }
     // A null `published_at` links the template to the server without publishing it:
     // the row is private, and `updated_at` records when it was last touched. Any other
@@ -376,7 +378,9 @@ pub struct UpdateOriginRequest {
 #[tauri::command]
 pub fn update_template_origin(db: State<DbState>, req: UpdateOriginRequest) -> AppResult<Template> {
     if req.origin != "own" && req.origin != "saved" {
-        return Err(AppError::Validation("origin must be 'own' or 'saved'".into()));
+        return Err(AppError::Validation(
+            "origin must be 'own' or 'saved'".into(),
+        ));
     }
     let guard = db
         .lock()
