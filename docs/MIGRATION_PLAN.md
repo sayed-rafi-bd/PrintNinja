@@ -41,6 +41,8 @@ All decided except the last item below.
 | A template deleted on the server | Refresh shows an error and the local copy stays as it is. No special state |
 | Version history and sample datasets | Not synced |
 | Fonts | Stay local on each device |
+| CSS transport | Add a `css` column on the server so template CSS is stored and returned with the HTML. Save, Refresh and Get from server all carry it, so CSS is no longer lost |
+| Local metadata writes | Add an `update_template_meta` local command that writes a template's name, page size and summary. Refresh and Get from server use it, because no existing local command does this (only the readme and new versions) |
 | Shared PCs | Local templates stay on the device and are visible to anyone who signs in. The Print page lists every local template on the PC, whoever saved it. Saving someone else's template returns 403 from the server |
 | Accounts | Anyone who can reach the server can register, as today. Restrict access at the network level when deploying |
 
@@ -50,28 +52,17 @@ Still open:
 
 ## 3. Phases
 
-### Phase 1: Server
+### Phase 1: Save, Refresh and Get from server
 
-- Allow private templates: let the existing PUT store a template with `published_at` empty, and make the public list return published rows only.
-- Add a list-mine route and a full-template GET for the owner. Reuse the existing owner checks, saved routes and size caps (512K body, 64K readme).
-- Done when: server tests cover private versus published visibility, owner-only access, caps and delete.
-
-### Phase 2: Sign-in gate
-
-- Add a login and register screen shown before the app shell when there is no valid session.
-- Add a "cannot reach server" screen with a Retry button for when sign-in cannot reach the server at start.
-- Return to sign-in on a 401. Unsaved edits are safe because they live in the local copy.
-- Done when: the app cannot be used without a session, and printing keeps working if the server drops after sign-in.
-
-### Phase 3: Save, Refresh and Get from server
-
-- Add Save to the Designer and Templates rows. It sends the current local version to the server through the existing publish routine in `src/lib/share/client.ts`, as private unless the user publishes, and stores the returned `remote_id`.
-- Add a Refresh button per template. After a confirmation, it fetches the template and overwrites the local copy through the existing local commands. If the fetch fails, show the error and leave the copy as it is.
-- Add a Get from server dialog that lists the user's Mine and Saved templates and downloads the chosen ones into the local database with `remote_id` set. This is how a new PC gets its templates.
+- Add a `css` column to the server's template storage, and return it from the owner GET and the public routes.
+- Add an `update_template_meta` local command that updates a template's name, page size and summary.
+- Add Save to the Designer and Templates rows. It sends the current local version (html and css) to the server through the existing publish routine in `src/lib/share/client.ts`, as private unless the user publishes, and stores the returned `remote_id`. Extend the routine to send the CSS, since today only the HTML is sent.
+- Add a Refresh button per template. After a confirmation, it fetches the template and overwrites the local copy: html and css through the existing local commands, and name, page size and summary through `update_template_meta`. If the fetch fails, show the error and leave the copy as it is.
+- Add a Get from server dialog that lists the user's Mine and Saved templates and downloads the chosen ones into the local database with `remote_id` set, including their CSS, name, page size and summary (written through `update_template_meta`). This is how a new PC gets its templates.
 - Make Saved (community) templates read-only: hide Edit, Save and Publish on them, using the existing local `origin` value `saved`.
 - Done when: a template saved on one PC appears on another through Get from server, an edit shows up there after Refresh, and prints from the local copy.
 
-### Phase 4: Check the print path
+### Phase 2: Check the print path
 
 - Confirm that `print_html`, `api/routes.rs`, `deeplink.rs`, `commands/batch.rs` and reprint read only the local copy and make no network call.
 - Done when: every print route works with the network off.
