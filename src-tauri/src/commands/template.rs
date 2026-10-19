@@ -204,6 +204,51 @@ pub fn get_template(db: State<DbState>, id: i64) -> AppResult<Template> {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct UpdateTemplateMetaRequest {
+    pub id: i64,
+    pub name: String,
+    pub page_w_mm: i64,
+    pub page_h_mm: i64,
+    pub summary: Option<String>,
+}
+
+/// Writes a template's name, page size and summary. Refresh and Get from server
+/// use it, because no other local command writes those fields (MIGRATION_PLAN.md
+/// phase 1). Orientation follows the page size, as elsewhere in the app.
+#[tauri::command]
+pub fn update_template_meta(db: State<DbState>, req: UpdateTemplateMetaRequest) -> AppResult<Template> {
+    let name = req.name.trim();
+    if name.is_empty() {
+        return Err(AppError::Validation("Template name required".into()));
+    }
+    if req.page_w_mm <= 0 || req.page_h_mm <= 0 {
+        return Err(AppError::Validation(
+            "Page dimensions must be positive".into(),
+        ));
+    }
+    let orientation = if req.page_w_mm > req.page_h_mm {
+        "landscape"
+    } else {
+        "portrait"
+    };
+
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    let conn = guard.connection()?;
+    let affected = conn.execute(
+        "UPDATE templates SET name = ?1, page_w_mm = ?2, page_h_mm = ?3, orientation = ?4,
+             summary = ?5, updated_at = datetime('now')
+         WHERE id = ?6",
+        rusqlite::params![name, req.page_w_mm, req.page_h_mm, orientation, req.summary.unwrap_or_default(), req.id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("Template {} not found", req.id)));
+    }
+    tx_guard_to_template(&conn, req.id).map_err(Into::into)
+}
+
+#[derive(Debug, Deserialize)]
 pub struct UpdateReadmeRequest {
     pub id: i64,
     pub readme: String,
@@ -244,7 +289,8 @@ pub fn delete_template(db: State<DbState>, id: i64) -> AppResult<()> {
 pub struct SetPublishInfoRequest {
     pub id: i64,
     pub remote_id: String,
-    pub published_at: String,
+    /// `None` links the template to the server and leaves it private.
+    pub published_at: Option<String>,
 }
 
 #[tauri::command]
@@ -257,8 +303,13 @@ pub fn set_publish_info(db: State<DbState>, req: SetPublishInfoRequest) -> AppRe
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
     let conn = guard.connection()?;
+    // A null `published_at` links the template to the server without publishing it:
+    // the row is private, and `updated_at` records when it was last touched. Any other
+    // value is the moment the copy on the server was published, and marks this row as
+    // being in step with it.
     let affected = conn.execute(
-        "UPDATE templates SET remote_id = ?1, published_at = ?2, updated_at = ?2 WHERE id = ?3",
+        "UPDATE templates SET remote_id = ?1, published_at = ?2,
+             updated_at = COALESCE(?2, datetime('now')) WHERE id = ?3",
         rusqlite::params![req.remote_id, req.published_at, req.id],
     )?;
     if affected == 0 {

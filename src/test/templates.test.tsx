@@ -10,8 +10,25 @@ const share = vi.hoisted(() => ({
   getSessionToken: vi.fn(async () => null as string | null),
   hasUnpublishedChanges: (t: { remote_id: string | null; published_at: string | null; updated_at: string }) =>
     !!t.remote_id && !!t.published_at && t.updated_at > t.published_at,
+  fetchRemoteTemplate: vi.fn(async (_id: string) => ({ id: _id })),
+  saveRemoteTemplate: vi.fn(async () => {}),
+  unsaveRemoteTemplate: vi.fn(async () => {}),
+  RemoteTemplateNotFoundError: class extends Error {},
+  ServerUnreachableError: class extends Error {},
 }));
 vi.mock("@/lib/share/client", () => share);
+const sync = vi.hoisted(() => ({
+  saveToServer: vi.fn(async () => ({ remoteId: "new-uuid", updatedAt: "2026-03-01T00:00:00Z", published: false })),
+  refreshFromServer: vi.fn(async (t: { name: string }) => ({
+    template: { id: "r2", body: "<p>new</p>", css: ".a{}", readme: "", published_at: "2026-03-01 00:00:00", updated_at: "2026-03-01 00:00:00" },
+    name: t.name,
+    page_w_mm: 80,
+    page_h_mm: 200,
+  })),
+  downloadToLocal: vi.fn(async () => ({ id: 9, created: true })),
+  listAvailableRemoteTemplates: vi.fn(async () => ({ mine: [], saved: [] })),
+}));
+vi.mock("@/lib/share/sync", () => sync);
 
 import { TemplatesPage } from "@/pages/Templates";
 import { usePrintStore } from "@/lib/store/printStore";
@@ -36,7 +53,17 @@ beforeAll(() => {
 beforeEach(() => {
   invoke.mockReset();
   share.getServiceUrl.mockResolvedValue(null);
-  invoke.mockImplementation(async (cmd: string) => (cmd === "list_templates" ? LIST : cmd === "delete_template" ? null : null));
+  share.fetchRemoteTemplate.mockResolvedValue({ id: "x1" } as any);
+  share.saveRemoteTemplate.mockResolvedValue(undefined);
+  share.unsaveRemoteTemplate.mockResolvedValue(undefined);
+  sync.saveToServer.mockResolvedValue({ remoteId: "new-uuid", updatedAt: "2026-03-01T00:00:00Z", published: false });
+  sync.refreshFromServer.mockResolvedValue({
+    template: { id: "r2", body: "<p>new</p>", css: ".a{}", readme: "", published_at: "2026-03-01 00:00:00", updated_at: "2026-03-01 00:00:00" },
+    name: "Receipt", page_w_mm: 80, page_h_mm: 200,
+  } as any);
+  sync.downloadToLocal.mockResolvedValue({ id: 9, created: true });
+  sync.listAvailableRemoteTemplates.mockResolvedValue({ mine: [], saved: [] });
+  invoke.mockImplementation(async (cmd: string) => (cmd === "list_templates" ? LIST : null));
 });
 
 describe("Templates page", () => {
@@ -45,9 +72,9 @@ describe("Templates page", () => {
     expect(await screen.findByText("Shipping label")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Mine (3)" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "Saved (2)" })).toBeInTheDocument();
-    expect(screen.getByText("Draft")).toBeInTheDocument();
+    expect(screen.getByText("Not on the server")).toBeInTheDocument();
     expect(screen.getByText("Published")).toBeInTheDocument();
-    expect(screen.getByText("Changes not published")).toBeInTheDocument();
+    expect(screen.getByText("Changes not saved")).toBeInTheDocument();
   });
 
   it("Print selects the template and goes to the Print page", async () => {
@@ -67,10 +94,75 @@ describe("Templates page", () => {
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/template/2"));
   });
 
+  it("Save pushes the local copy to the server", async () => {
+    renderPage();
+    await screen.findByText("Shipping label");
+    fireEvent.click(screen.getByRole("button", { name: "Save Shipping label to the server" }));
+    await waitFor(() => expect(sync.saveToServer).toHaveBeenCalledWith(expect.objectContaining({ id: 1 })));
+  });
+
+  it("Refresh asks first, then pulls the server copy over the local one", async () => {
+    renderPage();
+    await screen.findByText("Receipt");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh Receipt from the server" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Refresh “Receipt” from the server?")).toBeInTheDocument();
+    expect(sync.refreshFromServer).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Refresh template" }));
+    await waitFor(() => expect(sync.refreshFromServer).toHaveBeenCalledWith(expect.objectContaining({ id: 2 })));
+  });
+
+  it("keeps the local copy when Refresh fails", async () => {
+    sync.refreshFromServer.mockRejectedValueOnce(new Error("Cannot reach the server"));
+    renderPage();
+    await screen.findByText("Receipt");
+    fireEvent.click(screen.getByRole("button", { name: "Refresh Receipt from the server" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Refresh template" }));
+    await waitFor(() => expect(sync.refreshFromServer).toHaveBeenCalled());
+    // Nothing local is written on the way out, so the copy still prints.
+    const row = screen.getByText("Receipt").closest("tr")!;
+    expect(within(row).getByRole("button", { name: /Print/ })).toBeInTheDocument();
+  });
+
+  it("keeps saved copies read-only: no Edit, no Save, but Refresh and Print", async () => {
+    renderPage();
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: /Saved/ }));
+    const row = (await screen.findByText("Saved A")).closest("tr")!;
+    expect(within(row).queryByRole("button", { name: /Edit/ })).not.toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: /^Save/ })).not.toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Refresh Saved A from the server" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: /Print/ })).toBeInTheDocument();
+    expect(screen.getByText("Withdrawn by author")).toBeInTheDocument();
+  });
+
+  it("marks a saved copy withdrawn when the server says it is gone", async () => {
+    share.fetchRemoteTemplate.mockImplementation(async (id: string) => {
+      if (id === "x1") throw new share.RemoteTemplateNotFoundError("x1");
+      return { id } as any;
+    });
+    renderPage();
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: /Saved/ }));
+    const table = await screen.findByRole("table", { name: "Saved templates" });
+    await waitFor(() => {
+      const row = within(table).getByText("Saved A").closest("tr")!;
+      expect(within(row).getByText("Withdrawn by author")).toBeInTheDocument();
+    });
+  });
+
+  it("does not call a saved copy withdrawn when the server cannot be reached", async () => {
+    share.fetchRemoteTemplate.mockRejectedValue(new share.ServerUnreachableError("http://srv"));
+    renderPage();
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: /Saved/ }));
+    const table = await screen.findByRole("table", { name: "Saved templates" });
+    await waitFor(() => expect(share.fetchRemoteTemplate).toHaveBeenCalledWith("x1"));
+    const row = within(table).getByText("Saved A").closest("tr")!;
+    expect(within(row).queryByText("Withdrawn by author")).not.toBeInTheDocument();
+  });
+
   it("asks before removing a saved template, naming it", async () => {
     renderPage();
     fireEvent.mouseDown(await screen.findByRole("tab", { name: /Saved/ }));
-    fireEvent.keyDown(screen.getByRole("tab", { name: /Saved/ }), { key: "Enter" });
     const row = (await screen.findByText("Saved A")).closest("tr")!;
     expect(within(screen.getByRole("table", { name: "Saved templates" })).getByText("Withdrawn by author")).toBeInTheDocument();
     fireEvent.click(within(row).getByRole("button", { name: "Remove" }));
@@ -79,6 +171,33 @@ describe("Templates page", () => {
     expect(invoke.mock.calls.some((c) => c[0] === "delete_template")).toBe(false);
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove template" }));
     await waitFor(() => expect(invoke).toHaveBeenCalledWith("delete_template", { id: 4 }));
+  });
+
+  it("Get from server lists the account's templates and adds the chosen one", async () => {
+    sync.listAvailableRemoteTemplates.mockResolvedValue({
+      mine: [{ id: "m1", owner_id: "u1", owner_handle: "ana", name: "Invoice", summary: "A4", page_w_mm: 210, page_h_mm: 297, language: "html", use_count: 0, published_at: "2026-03-01 00:00:00", updated_at: "2026-03-01 00:00:00" }],
+      saved: [{ id: "s1", owner_id: "u2", owner_handle: "bo", name: "Community label", summary: "", page_w_mm: 80, page_h_mm: 200, language: "html", use_count: 2, published_at: "2026-03-01 00:00:00", updated_at: "2026-03-01 00:00:00" }],
+    } as any);
+    renderPage();
+    await screen.findByText("Shipping label");
+    fireEvent.click(screen.getByRole("button", { name: /Get from server/ }));
+    expect(await screen.findByText("Invoice")).toBeInTheDocument();
+    expect(screen.getByText("Community label")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select row m1" }));
+    fireEvent.click(screen.getByRole("button", { name: /Add 1 to this PC/ }));
+
+    await waitFor(() =>
+      expect(sync.downloadToLocal).toHaveBeenCalledWith("m1", "own", "ana"),
+    );
+  });
+
+  it("says the server cannot be reached in Get from server", async () => {
+    sync.listAvailableRemoteTemplates.mockRejectedValueOnce(new Error("Cannot reach the server at http://srv"));
+    renderPage();
+    await screen.findByText("Shipping label");
+    fireEvent.click(screen.getByRole("button", { name: /Get from server/ }));
+    expect(await screen.findByText("Can’t reach the server")).toBeInTheDocument();
   });
 
   it("explains when no share service is configured", async () => {

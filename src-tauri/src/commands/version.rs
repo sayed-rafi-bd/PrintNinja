@@ -16,7 +16,9 @@ pub struct TemplateVersion {
     pub created_by: String,
 }
 
-const VALID_CREATED_BY: &[&str] = &["manual", "autosave", "restore"];
+/// `sync` marks the version a Refresh from the server produced, so history
+/// shows which copy came from where.
+const VALID_CREATED_BY: &[&str] = &["manual", "autosave", "restore", "sync"];
 
 #[tauri::command]
 pub fn list_versions(db: State<DbState>, template_id: i64) -> AppResult<Vec<TemplateVersion>> {

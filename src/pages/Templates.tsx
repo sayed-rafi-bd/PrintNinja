@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ColumnDef } from "@tanstack/react-table";
-import { Bookmark, BookmarkCheck, Eye, Pencil, Printer } from "lucide-react";
+import { Bookmark, BookmarkCheck, CloudDownload, CloudUpload, Eye, Pencil, Printer, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataTable } from "@/components/DataTable";
 import { EmptyState } from "@/components/EmptyState";
+import { GetFromServerDialog } from "@/components/GetFromServerDialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePrintStore } from "@/lib/store/printStore";
 import { DEFAULT_MOCK_DATA } from "@/lib/templates/defaultTemplate";
@@ -26,6 +27,8 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import * as share from "@/lib/share/client";
+import { downloadToLocal, refreshFromServer, saveToServer } from "@/lib/share/sync";
+import { cn } from "@/lib/utils";
 
 interface LocalTemplate {
   id: number;
@@ -62,6 +65,8 @@ export function TemplatesPage() {
   const [activeTab, setActiveTab] = useState("mine");
   const [configured, setConfigured] = useState(true);
   const [removeTarget, setRemoveTarget] = useState<LocalTemplate | null>(null);
+  const [refreshTarget, setRefreshTarget] = useState<LocalTemplate | null>(null);
+  const [getOpen, setGetOpen] = useState(false);
   const [previewTpl, setPreviewTpl] = useState<ServerSummary | null>(null);
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewError, setPreviewError] = useState("");
@@ -72,7 +77,10 @@ export function TemplatesPage() {
   const [mine, setMine] = useState<LocalTemplate[]>([]);
   const [saved, setSaved] = useState<LocalTemplate[]>([]);
   const [saving, setSaving] = useState<Set<string>>(new Set());
+  const [syncing, setSyncing] = useState<number | null>(null);
   const [offline, setOffline] = useState(false);
+  /** Saved copies the server no longer has. The local copy still prints. */
+  const [gone, setGone] = useState<Set<number>>(new Set());
 
   const loadMine = useCallback(async () => {
     try {
@@ -119,34 +127,63 @@ export function TemplatesPage() {
     if (activeTab === "community") loadCommunity();
   }, [activeTab, loadCommunity]);
 
-  // Also load saved withdrawn check on mount for Saved tab
+  // A saved copy whose template is no longer on the server is withdrawn by its
+  // author. Nothing is written locally: the copy stays, and still prints.
   useEffect(() => {
-    if (activeTab === "saved" && saved.length > 0) {
-      (async () => {
-        const url = await share.getServiceUrl();
-        if (!url) return;
-        for (const tpl of saved) {
-          if (!tpl.remote_id) continue;
-          try {
-            const res = await fetch(`${url}/v1/templates/${tpl.remote_id}`);
-            if (res.status === 404 && !tpl.withdrawn) {
-              // Mark as withdrawn locally
-              try {
-                await invoke("set_publish_info", {
-                  req: { id: tpl.id, remote_id: tpl.remote_id, published_at: tpl.published_at ?? "" },
-                });
-                // Actually need to set withdrawn flag — we don't have a direct command,
-                // so we update via a custom invoke that sets withdrawn=1
-                // For now, just update local state and try to persist via direct DB
-                // We'll use a simple approach: update via SQL through a new command if needed
-                // For Phase 3, just mark in UI
-              } catch {}
-            }
-          } catch {}
+    if (activeTab !== "saved" || saved.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const missing = new Set<number>();
+      for (const tpl of saved) {
+        if (!tpl.remote_id) continue;
+        try {
+          await share.fetchRemoteTemplate(tpl.remote_id);
+        } catch (e) {
+          // Only a template the server says is gone counts. An unreachable server
+          // or an ended session says nothing about the template itself.
+          if (e instanceof share.RemoteTemplateNotFoundError) missing.add(tpl.id);
         }
-      })();
-    }
+      }
+      if (!cancelled) {
+        // Only re-render when the answer changed; the table is expensive to rebuild.
+        setGone((prev) =>
+          prev.size === missing.size && [...missing].every((id) => prev.has(id)) ? prev : missing,
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [activeTab, saved]);
+
+  const handleSaveToServer = async (tpl: LocalTemplate) => {
+    if (syncing != null) return;
+    setSyncing(tpl.id);
+    try {
+      await saveToServer(tpl);
+      toast.success(`Saved “${tpl.name}” to the server`);
+      await loadMine();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(null);
+    }
+  };
+
+  const handleRefresh = async (tpl: LocalTemplate) => {
+    if (syncing != null) return;
+    setSyncing(tpl.id);
+    try {
+      const result = await refreshFromServer(tpl);
+      toast.success(`Refreshed “${result.name}” from the server`);
+      await loadMine();
+    } catch (e) {
+      // The local copy is untouched when the fetch fails, so it still prints.
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(null);
+    }
+  };
 
   const handleSave = async (serverTpl: ServerSummary) => {
     if (saving.has(serverTpl.id)) return;
@@ -164,63 +201,21 @@ export function TemplatesPage() {
     // Optimistic: show filled star immediately
     setSaving((s) => new Set(s).add(serverTpl.id));
     try {
-      // 1. Record save on server (idempotent)
-      const res = await fetch(`${url}/v1/saved/${serverTpl.id}`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error(`Save failed: ${res.status}`);
-
-      // 2. Download full template
-      const detailRes = await fetch(`${url}/v1/templates/${serverTpl.id}`);
-      if (!detailRes.ok) throw new Error("Failed to download template");
-      const detail = await detailRes.json();
-
-      // 3. Store locally as read-only copy
-      // Check if already saved locally
-      const existing = saved.find((t) => t.remote_id === serverTpl.id);
-      if (existing) {
+      // 1. Record the save on the server (idempotent), 2. put a local copy on
+      // this PC with its CSS and README, marked read-only.
+      await share.saveRemoteTemplate(serverTpl.id);
+      const result = await downloadToLocal(serverTpl.id, "saved", serverTpl.owner_handle);
+      if (!result.created) {
         toast.success("Already saved");
         return;
       }
-
-      // Create local template as saved copy
-      // We use a special Tauri command to create a saved copy directly
-      // For now, use create_template then update its origin
-      const created = await invoke<any>("create_template", {
-        req: {
-          name: detail.name,
-          page_w_mm: Math.round(detail.page_w_mm),
-          page_h_mm: Math.round(detail.page_h_mm),
-          orientation: "portrait",
-          html: detail.body,
-          css: "",
-          readme: detail.readme,
-          summary: detail.summary,
-        },
-      });
-
-      // Update the newly created template to be a saved copy
-      await invoke("set_publish_info", {
-        req: { id: created.id, remote_id: serverTpl.id, published_at: detail.updated_at },
-      });
-      // Also set origin to saved and owner
-      // We need a direct DB update — use a new command or just update via SQL
-      // For now, do a raw update via a custom command if available, otherwise
-      // we can call a generic execute
-      try {
-        await invoke("update_template_origin", {
-          req: { id: created.id, origin: "saved", origin_owner: serverTpl.owner_handle },
-        });
-      } catch {
-        // Fallback: try via direct SQL if command not yet implemented
-        // The template will still be origin='own' but we can handle in UI by checking remote_id
-      }
-
-      toast.success(`Saved "${detail.name}"`);
+      toast.success(`Saved "${serverTpl.name}"`);
       await loadMine();
     } catch (e) {
-      toast.error(String(e), { description: "Tap to retry", action: { label: "Retry", onClick: () => handleSave(serverTpl) } } as any);
+      toast.error(e instanceof Error ? e.message : String(e), {
+        description: "Tap to retry",
+        action: { label: "Retry", onClick: () => handleSave(serverTpl) },
+      });
     } finally {
       setSaving((s) => {
         const n = new Set(s);
@@ -232,15 +227,10 @@ export function TemplatesPage() {
 
   const handleUnsave = async (localTpl: LocalTemplate) => {
     if (!localTpl.remote_id) return;
-    const url = await share.getServiceUrl();
-    const token = await share.getSessionToken();
-    if (url && token) {
-      try {
-        await fetch(`${url}/v1/saved/${localTpl.remote_id}`, {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      } catch {}
+    try {
+      await share.unsaveRemoteTemplate(localTpl.remote_id);
+    } catch {
+      // The local copy is removed either way; the server list catches up next time.
     }
     try {
       await invoke("delete_template", { id: localTpl.id });
@@ -303,9 +293,10 @@ export function TemplatesPage() {
       id: "status", header: "Status",
       cell: (c) => {
         const tpl = c.row.original;
-        if (!tpl.remote_id) return <StatusBadge status="draft" />;
+        if (!tpl.remote_id) return <StatusBadge status="draft" label="Not on the server" />;
+        if (!tpl.published_at) return <StatusBadge status="draft" label="Private" />;
         return share.hasUnpublishedChanges(tpl)
-          ? <StatusBadge status="draft" label="Changes not published" />
+          ? <StatusBadge status="draft" label="Changes not saved" />
           : <StatusBadge status="published" />;
       },
     },
@@ -313,19 +304,42 @@ export function TemplatesPage() {
     { id: "updated", header: "Updated", accessorFn: (r) => r.updated_at, enableSorting: true, meta: { className: "hidden md:table-cell" }, cell: (c) => c.row.original.updated_at.slice(0, 10) },
     {
       id: "actions", header: () => <span className="sr-only">Actions</span>, meta: { className: "text-right" },
-      cell: (c) => (
-        <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-          <Button size="sm" variant="outline" onClick={() => navigate(`/template/${c.row.original.id}`)}>
-            <Pencil className="h-4 w-4" aria-hidden="true" />Edit
-          </Button>
-          <Button size="sm" onClick={() => handleUse(c.row.original, false)}>
-            <Printer className="h-4 w-4" aria-hidden="true" />Print
-          </Button>
-        </div>
-      ),
+      cell: (c) => {
+        const tpl = c.row.original;
+        return (
+          <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label={`Save ${tpl.name} to the server`}
+              title="Save to the server"
+              disabled={syncing != null}
+              onClick={() => handleSaveToServer(tpl)}
+            >
+              <CloudUpload className="h-4 w-4" aria-hidden="true" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label={`Refresh ${tpl.name} from the server`}
+              title="Refresh from the server"
+              disabled={syncing != null}
+              onClick={() => setRefreshTarget(tpl)}
+            >
+              <RefreshCw className={cn("h-4 w-4", syncing === tpl.id && "motion-safe:animate-spin")} aria-hidden="true" />
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => navigate(`/template/${tpl.id}`)}>
+              <Pencil className="h-4 w-4" aria-hidden="true" />Edit
+            </Button>
+            <Button size="sm" onClick={() => handleUse(tpl, false)}>
+              <Printer className="h-4 w-4" aria-hidden="true" />Print
+            </Button>
+          </div>
+        );
+      },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], []);
+  ], [syncing]);
 
   const savedColumns = useMemo<ColumnDef<LocalTemplate>[]>(() => [
     {
@@ -340,27 +354,46 @@ export function TemplatesPage() {
     { id: "from", header: "Saved from", meta: { className: "hidden md:table-cell" }, cell: (c) => c.row.original.origin_owner ?? "unknown" },
     {
       id: "status", header: "Status",
-      cell: (c) => c.row.original.withdrawn
-        ? <StatusBadge status="withdrawn" label="Withdrawn by author" />
-        : <StatusBadge status="saved" />,
+      cell: (c) =>
+        c.row.original.withdrawn || gone.has(c.row.original.id)
+          ? <StatusBadge status="withdrawn" label="Withdrawn by author" />
+          : <StatusBadge status="saved" />,
     },
     {
       id: "actions", header: () => <span className="sr-only">Actions</span>, meta: { className: "text-right" },
-      cell: (c) => (
-        <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-          <Button size="sm" onClick={() => handleUse(c.row.original, true)}>
-            <Printer className="h-4 w-4" aria-hidden="true" />Print
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setRemoveTarget(c.row.original)}>Remove</Button>
-        </div>
-      ),
+      cell: (c) => {
+        const tpl = c.row.original;
+        return (
+          <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label={`Refresh ${tpl.name} from the server`}
+              title="Refresh from the server"
+              disabled={syncing != null}
+              onClick={() => setRefreshTarget(tpl)}
+            >
+              <RefreshCw className={cn("h-4 w-4", syncing === tpl.id && "motion-safe:animate-spin")} aria-hidden="true" />
+            </Button>
+            <Button size="sm" onClick={() => handleUse(tpl, true)}>
+              <Printer className="h-4 w-4" aria-hidden="true" />Print
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setRemoveTarget(tpl)}>Remove</Button>
+          </div>
+        );
+      },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], []);
+  ], [syncing, gone]);
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Templates" description={t("pages.templates")} />
+      <PageHeader title="Templates" description={t("pages.templates")}>
+        <Button variant="outline" onClick={() => setGetOpen(true)}>
+          <CloudDownload className="h-4 w-4" aria-hidden="true" />
+          Get from server
+        </Button>
+      </PageHeader>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
@@ -453,6 +486,21 @@ export function TemplatesPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      <ConfirmDialog
+        open={refreshTarget != null}
+        onOpenChange={(o) => { if (!o) setRefreshTarget(null); }}
+        title={`Refresh “${refreshTarget?.name ?? ""}” from the server?`}
+        description="The copy on the server replaces the one on this computer, including changes you have not saved."
+        confirmLabel="Refresh template"
+        onConfirm={async () => { if (refreshTarget) await handleRefresh(refreshTarget); setRefreshTarget(null); }}
+      />
+
+      <GetFromServerDialog
+        open={getOpen}
+        onOpenChange={setGetOpen}
+        onDownloaded={() => { void loadMine(); setActiveTab("mine"); }}
+      />
 
       <ConfirmDialog
         open={removeTarget != null}

@@ -1,6 +1,6 @@
 # PrintNinja: Online-Only Server Migration Plan
 
-Branch: `v2` · Status: Proposed · Date: 2026-10-19
+Branch: `v2` · Status: Phase 1 implemented, phase 2 checked by reading · Date: 2026-10-19
 
 Minimum scope: the server stores a copy of each user's templates and owns sign-in. Editing and printing keep working on the local copy exactly as they do today. Save pushes the template to the server, and a Refresh button pulls it back on another PC. Printing never contacts the server, and almost everything reuses columns, screens and server routes that already exist.
 
@@ -62,10 +62,16 @@ Still open:
 - Make Saved (community) templates read-only: hide Edit, Save and Publish on them, using the existing local `origin` value `saved`.
 - Done when: a template saved on one PC appears on another through Get from server, an edit shows up there after Refresh, and prints from the local copy.
 
+**Built.** `update_template_meta` and the `sync` version marker were added to `src-tauri` (see "Known gap" below); the `css` column, the client sync module and the three actions live in `server/src/db.rs`, `src/lib/share/sync.ts` and the Designer and Templates screens. The manual walk-through in section 4 has not been run.
+
 ### Phase 2: Check the print path
 
 - Confirm that `print_html`, `api/routes.rs`, `deeplink.rs`, `commands/batch.rs` and reprint read only the local copy and make no network call.
 - Done when: every print route works with the network off.
+
+**Checked by reading, not by running.** `print_html` resolves the template and its current version from SQLite; the only network call in the crate is `data::fetcher`, and it runs only when a job carries a `data_url` that the person set. `api/routes.rs`, `deeplink.rs`, `commands/batch.rs` and `reprint_job` query SQLite or replay the `rendered_html` stored on the original job. Nothing in the print path calls the share service.
+
+**Known gap.** `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` hold the *server's* manifest in this repository, so the desktop crate does not build (`tauri_build` is not a dependency) and none of the Rust changes could be compiled or tested here. The Rust test asked for in section 4 is still to be added, and the manual check with the network off is still to be run.
 
 ## 4. Testing
 
