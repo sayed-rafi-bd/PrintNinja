@@ -154,6 +154,36 @@ pub fn create_version(db: State<DbState>, req: CreateVersionRequest) -> AppResul
     Ok(version)
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SetCompiledCssRequest {
+    pub id: i64,
+    pub compiled_css: String,
+    pub compiled_key: String,
+}
+
+/// Store the Tailwind CSS compiled from a version's HTML.
+///
+/// This is a cache of a pure function of `html`, so it deliberately leaves
+/// history alone: no new version, and `updated_at` and `current_version_id`
+/// stay as they are (the "changes not saved" badge compares `updated_at`).
+/// The frontend calls it at startup for versions that were saved before
+/// compilation existed, or by an older compiler revision.
+#[tauri::command]
+pub fn set_version_compiled_css(db: State<DbState>, req: SetCompiledCssRequest) -> AppResult<()> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    let conn = guard.connection()?;
+    let affected = conn.execute(
+        "UPDATE template_versions SET compiled_css = ?1, compiled_key = ?2 WHERE id = ?3",
+        rusqlite::params![req.compiled_css, req.compiled_key, req.id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("Version {} not found", req.id)));
+    }
+    Ok(())
+}
+
 /// Restore must never overwrite history (PLANNING.md 7.3):
 /// it creates a NEW version whose content matches the old one.
 #[tauri::command]

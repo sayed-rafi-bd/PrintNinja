@@ -408,3 +408,73 @@ fn history_retry_resets_error_and_timestamps() {
     assert!(err.is_none());
     assert!(fin.is_none());
 }
+
+#[test]
+fn set_compiled_css_updates_one_version_without_touching_history() {
+    let (_state, conn) = test_db();
+
+    conn.execute(
+        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation)
+         VALUES ('T', 120, 200, 'portrait')",
+        [],
+    )
+    .unwrap();
+    let tid = conn.last_insert_rowid();
+    for no in 1..=2 {
+        conn.execute(
+            "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
+             VALUES (?1, ?2, '<p>x</p>', '', 'manual')",
+            [tid, no],
+        )
+        .unwrap();
+    }
+    let v1 = conn.last_insert_rowid() - 1;
+    conn.execute(
+        "UPDATE templates SET current_version_id = ?1, updated_at = '2020-01-01 00:00:00' WHERE id = ?2",
+        [v1 + 1, tid],
+    )
+    .unwrap();
+
+    // The statement behind `set_version_compiled_css`.
+    let affected = conn
+        .execute(
+            "UPDATE template_versions SET compiled_css = ?1, compiled_key = ?2 WHERE id = ?3",
+            rusqlite::params![".p{margin:0}", "k", v1],
+        )
+        .unwrap();
+    assert_eq!(affected, 1);
+
+    let rows: Vec<(String, String)> = conn
+        .prepare("SELECT compiled_css, compiled_key FROM template_versions ORDER BY version_no")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(rows[0], (".p{margin:0}".to_string(), "k".to_string()));
+    assert_eq!(rows[1], (String::new(), String::new()));
+
+    let (count, updated_at, current): (i64, String, i64) = conn
+        .query_row(
+            "SELECT (SELECT COUNT(*) FROM template_versions WHERE template_id = ?1),
+                    updated_at, current_version_id FROM templates WHERE id = ?1",
+            [tid],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(count, 2, "no version may be added");
+    assert_eq!(
+        updated_at, "2020-01-01 00:00:00",
+        "updated_at must not move"
+    );
+    assert_eq!(current, v1 + 1, "current version must not move");
+
+    // An unknown id matches nothing; the command turns that into NotFound.
+    let none = conn
+        .execute(
+            "UPDATE template_versions SET compiled_css = 'x', compiled_key = 'y' WHERE id = 9999",
+            [],
+        )
+        .unwrap();
+    assert_eq!(none, 0);
+}
