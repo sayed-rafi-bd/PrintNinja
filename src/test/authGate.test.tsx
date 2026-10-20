@@ -23,11 +23,18 @@ beforeEach(() => {
   localStorage.clear();
   calls = [];
   handler = () => json({ error: "unexpected request" }, 500);
+  // openapi-fetch calls fetch with a single Request object, not
+  // (url, init) — normalize so handlers keep seeing (url, init).
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (url: string, init?: RequestInit) => {
-      calls.push({ url, method: init?.method ?? "GET" });
-      return handler(url, init);
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = input instanceof Request ? input : new Request(input as string, init);
+      calls.push({ url: req.url, method: req.method });
+      return handler(req.url, {
+        ...init,
+        method: req.method,
+        headers: Object.fromEntries(req.headers.entries()),
+      });
     }),
   );
 });
@@ -37,7 +44,7 @@ afterEach(() => {
 });
 
 function signedInServer(): Handler {
-  return (url) => (url.endsWith("/v1/auth/me") ? json({ id: "u1", handle: "sam" }) : json({}, 404));
+  return (url) => (url.endsWith("/v2/auth/me") ? json({ id: "u1", handle: "sam" }) : json({}, 404));
 }
 
 function renderGate() {
@@ -113,7 +120,7 @@ describe("checkSession", () => {
     localStorage.setItem(URL_KEY, SERVER);
     handler = (url) => (url.endsWith("/health") ? new Response("ok") : json({}, 404));
     expect(await checkSession()).toEqual({ state: "signed_out", url: SERVER });
-    expect(calls.map((c) => c.url)).toEqual([`${SERVER}/health`]);
+    expect(calls.map((c) => c.url)).toEqual([`${SERVER}/v2/health`]);
   });
 });
 
@@ -145,7 +152,7 @@ describe("sign-in gate", () => {
 
   it("signs in, saves the address and session, and opens the app", async () => {
     handler = (url, init) =>
-      url === `${SERVER}/v1/auth/login` && init?.method === "POST"
+      url === `${SERVER}/v2/auth/login` && init?.method === "POST"
         ? json({ token: "fresh", user: { id: "u1", handle: "sam" } })
         : json({}, 404);
     renderGate();
@@ -156,11 +163,11 @@ describe("sign-in gate", () => {
     expect(await screen.findByText("The app")).toBeVisible();
     expect(localStorage.getItem(URL_KEY)).toBe(SERVER);
     expect(localStorage.getItem(TOKEN_KEY)).toBe("fresh");
-    expect(calls.map((c) => c.url)).toEqual([`${SERVER}/v1/auth/login`]);
+    expect(calls.map((c) => c.url)).toEqual([`${SERVER}/v2/auth/login`]);
   });
 
   it("shows the server's message when sign-in fails and stays closed", async () => {
-    handler = () => json({ error: "Invalid handle or password" }, 401);
+    handler = () => json({ error: { code: "invalid_credentials", message: "Invalid handle or password", request_id: "r1" } }, 401);
     renderGate();
     await screen.findByLabelText("Password");
     fillSignIn();
@@ -196,7 +203,7 @@ describe("sign-in gate", () => {
 
   it("registers a new account with the same rules as the server", async () => {
     handler = (url) =>
-      url === `${SERVER}/v1/auth/register` ? json({ token: "new", user: { id: "u2", handle: "newbie" } }) : json({}, 404);
+      url === `${SERVER}/v2/auth/register` ? json({ token: "new", user: { id: "u2", handle: "newbie" } }) : json({}, 404);
     renderGate();
     await screen.findByLabelText("Password");
     fireEvent.click(screen.getByRole("button", { name: /create an account/i }));

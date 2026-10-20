@@ -49,7 +49,7 @@ export async function checkSession(): Promise<SessionCheck> {
   const token = await getSessionToken();
   try {
     if (token) {
-      const res = await fetchWithTimeout(`${url}/v1/auth/me`, {
+      const res = await fetchWithTimeout(`${url}/v2/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -64,7 +64,7 @@ export async function checkSession(): Promise<SessionCheck> {
     }
 
     // No session yet: make sure the server is there before asking for a password.
-    const res = await fetchWithTimeout(`${url}/health`);
+    const res = await fetchWithTimeout(`${url}/v2/health`);
     return res.ok ? { state: "signed_out", url } : { state: "unreachable", url };
   } catch {
     return { state: "unreachable", url };

@@ -1,8 +1,27 @@
 /**
- * Share service client — thin HTTP wrapper for the hosted service (V2.md §10).
- * The app holds no database credentials; it only talks to the service over HTTPS
- * with a Bearer token stored in local settings.
+ * Share service client — thin HTTP wrapper for the hosted service.
+ * Auth and identity go through the typed v2 client (src/lib/api/);
+ * template, community and saved calls still use the v1 endpoints until
+ * the app switch reaches them in a later Phase 3 slice.
+ * The app holds no database credentials; it only talks to the service
+ * over HTTPS with a Bearer token stored in local settings.
  */
+import { callApi, type ApiDeps } from "@/lib/api/client";
+import type { paths } from "@/lib/api/schema";
+import { ApiError, ServerUnreachableError, SessionExpiredError } from "@/lib/api/errors";
+
+export { ApiError, ServerUnreachableError, SessionExpiredError };
+
+export type AuthResponse =
+	paths["/v2/auth/register"]["post"]["responses"][201]["content"]["application/json"];
+
+function apiDeps(): ApiDeps {
+	return {
+		getBaseUrl: getServiceUrl,
+		getToken: getSessionToken,
+		onUnauthorized: () => endSession("expired"),
+	};
+}
 
 const SETTINGS_KEYS = {
   serviceUrl: "share_service_url",
@@ -71,22 +90,6 @@ async function authHeaders(): Promise<Record<string, string>> {
   return h;
 }
 
-/** The server could not be reached at all (network down, wrong address, timeout). */
-export class ServerUnreachableError extends Error {
-  constructor(public readonly url: string) {
-    super(`Cannot reach the server at ${url}`);
-    this.name = "ServerUnreachableError";
-  }
-}
-
-/** The server answered 401: the stored session is no longer valid. */
-export class SessionExpiredError extends Error {
-  constructor() {
-    super("Your session has ended. Sign in again.");
-    this.name = "SessionExpiredError";
-  }
-}
-
 // --- Session lifecycle -------------------------------------------------------
 // The sign-in gate listens for this so any 401, or a sign-out, returns the
 // person to the sign-in screen without each caller knowing about the gate.
@@ -130,52 +133,36 @@ export async function authedFetch(path: string, init: RequestInit = {}): Promise
 }
 
 async function authRequest(
-  path: "/v1/auth/register" | "/v1/auth/login",
+  path: "/v2/auth/register" | "/v2/auth/login",
   handle: string,
   password: string,
-  failure: string,
-): Promise<{ token: string; user: { id: string; handle: string } }> {
-  const base = await getServiceUrl();
-  if (!base) throw new Error("Share service not configured");
-  let res: Response;
-  try {
-    res = await fetch(`${base}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ handle, password }),
-    });
-  } catch {
-    throw new ServerUnreachableError(base);
-  }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `${failure}: ${res.status}`);
-  }
-  const data = await res.json();
+): Promise<AuthResponse> {
+  const data = await callApi<AuthResponse>(apiDeps(), {
+    method: "POST",
+    path,
+    body: { handle, password },
+  });
   await setSessionToken(data.token);
   return data;
 }
 
-export async function register(handle: string, password: string): Promise<{ token: string; user: { id: string; handle: string } }> {
-  return authRequest("/v1/auth/register", handle, password, "Register failed");
+export async function register(handle: string, password: string): Promise<AuthResponse> {
+  return authRequest("/v2/auth/register", handle, password);
 }
 
-export async function login(handle: string, password: string): Promise<{ token: string; user: { id: string; handle: string } }> {
-  return authRequest("/v1/auth/login", handle, password, "Login failed");
+export async function login(handle: string, password: string): Promise<AuthResponse> {
+  return authRequest("/v2/auth/login", handle, password);
 }
 
 export async function logout(): Promise<void> {
-  const base = await getServiceUrl();
-  const token = await getSessionToken();
-  if (base && token) {
-    try {
-      await fetch(`${base}/v1/auth/logout`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-    } catch {}
+  try {
+    await callApi<unknown>(apiDeps(), { method: "POST", path: "/v2/auth/logout" });
+  } catch {
+    // Best effort: an expired or missing token still signs out below.
+    // A 401 already cleared the token through onUnauthorized.
+  } finally {
+    await endSession("signed_out");
   }
-  await endSession("signed_out");
 }
 
 export interface PublishPayload {
