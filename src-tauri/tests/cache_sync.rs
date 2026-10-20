@@ -409,3 +409,102 @@ fn mine_with_rebase_retries_cleanly() {
     assert_eq!(state, "dirty");
     assert_eq!((server_rev, base_rev), (7, 7));
 }
+
+fn seed_migrated(conn: &Connection, server_id: &str, html: &str, revision: i64) {
+    // A pre-Phase-3 row: linked to the server (server_id) but never
+    // confirmed (base_revision NULL), with local content.
+    conn.execute(
+        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, readme, summary, server_id, server_revision, base_revision, sync_state, kind)
+         VALUES ('M', 210, 297, 'portrait', '', '', ?1, ?2, NULL, 'synced', 'own')",
+        rusqlite::params![server_id, revision],
+    )
+    .unwrap();
+    let id: i64 = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO template_versions (template_id, version_no, html, css, created_by) VALUES (?1, 1, ?2, '', 'manual')",
+        rusqlite::params![id, html],
+    )
+    .unwrap();
+    let vid: i64 = conn.last_insert_rowid();
+    conn.execute(
+        "UPDATE templates SET current_version_id = ?1 WHERE id = ?2",
+        rusqlite::params![vid, id],
+    )
+    .unwrap();
+}
+
+fn apply_one(
+    conn: &Connection,
+    data: serde_json::Value,
+) -> printninja_lib::commands::cache::ApplyReport {
+    use printninja_lib::commands::cache::{apply_changes, SyncChangeIn};
+    let changes: Vec<SyncChangeIn> = serde_json::from_value(serde_json::json!([{
+        "seq": 1, "entity": "template", "op": "upsert", "data": data
+    }]))
+    .unwrap();
+    apply_changes(conn, &changes, "MQ==").unwrap()
+}
+
+fn server_data(id: &str, body: &str, revision: i64) -> serde_json::Value {
+    serde_json::json!({
+        "id": id, "name": "M", "summary": "", "page_w_mm": 210.0, "page_h_mm": 297.0,
+        "body": body, "css": "", "readme": "", "revision": revision,
+        "published_at": null, "updated_at": "2026-10-21T00:00:00Z"
+    })
+}
+
+#[test]
+fn first_pull_adopts_matching_content_without_a_new_version() {
+    use printninja_lib::commands::cache::get_sync_state;
+    let conn = Connection::open_in_memory().unwrap();
+    printninja_lib::db::init(&conn).unwrap();
+    seed_migrated(&conn, "srv-m", "<p>same</p>", 1);
+
+    let report = apply_one(&conn, server_data("srv-m", "<p>same</p>", 2));
+    assert_eq!(report.applied_upserts, 1);
+    assert_eq!(report.skipped_dirty, 0);
+    assert_eq!(sync_state_of(&conn, "srv-m"), "synced");
+    // Revisions adopted, but no new local version appended.
+    let (server_rev, base_rev, versions): (i64, i64, i64) = conn
+        .query_row(
+            "SELECT t.server_revision, t.base_revision, (SELECT COUNT(*) FROM template_versions v WHERE v.template_id = t.id)
+             FROM templates t WHERE t.server_id = 'srv-m'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!((server_rev, base_rev, versions), (2, 2, 1));
+    let _ = get_sync_state(&conn).unwrap();
+}
+
+#[test]
+fn first_pull_conflicts_instead_of_overwriting_differences() {
+    let conn = Connection::open_in_memory().unwrap();
+    printninja_lib::db::init(&conn).unwrap();
+    seed_migrated(&conn, "srv-m", "<p>local</p>", 1);
+
+    let report = apply_one(&conn, server_data("srv-m", "<p>server</p>", 2));
+    assert_eq!(report.applied_upserts, 0);
+    assert_eq!(report.skipped_dirty, 1);
+    assert_eq!(sync_state_of(&conn, "srv-m"), "conflict");
+    // The local content is untouched and no version was appended.
+    let html: String = conn
+        .query_row(
+            "SELECT v.html FROM template_versions v JOIN templates t ON v.id = t.current_version_id WHERE t.server_id = 'srv-m'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(html, "<p>local</p>");
+}
+
+#[test]
+fn confirmed_rows_still_overwrite_normally() {
+    let conn = Connection::open_in_memory().unwrap();
+    printninja_lib::db::init(&conn).unwrap();
+    seed_synced(&conn, "srv-k", 1);
+
+    let report = apply_one(&conn, server_data("srv-k", "<p>new</p>", 2));
+    assert_eq!(report.applied_upserts, 1);
+    assert_eq!(sync_state_of(&conn, "srv-k"), "synced");
+}

@@ -219,6 +219,22 @@ export function createFakeCache() {
 			report.skipped_dirty += 1;
 			return;
 		}
+		if (existing && existing.base_revision == null) {
+			// First sync of a migrated row: matching content adopts the
+			// revision with no new version; differing content conflicts
+			// instead of overwriting.
+			const head = existing.versions[existing.versions.length - 1];
+			if ((head?.html ?? "") === String(data["body"] ?? "") && (head?.css ?? "") === String(data["css"] ?? "")) {
+				existing.server_revision = Number(data["revision"] ?? existing.server_revision);
+				existing.base_revision = existing.server_revision;
+				existing.synced_at = nowIso();
+				report.applied_upserts += 1;
+				return;
+			}
+			existing.sync_state = "conflict";
+			report.skipped_dirty += 1;
+			return;
+		}
 		const pageW = Math.round(Number(data["page_w_mm"] ?? 0));
 		const pageH = Math.round(Number(data["page_h_mm"] ?? 0));
 		const orientation = pageW > pageH ? "landscape" : "portrait";

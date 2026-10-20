@@ -158,7 +158,7 @@ describe("cache ops parity", () => {
 		const cache = createFakeCache();
 		const seed = (
 			server_id: string,
-			over: Partial<{ sync_state: "synced" | "dirty" | "deleted_pending" | "conflict"; server_revision: number; html: string; published_at: string | null }> = {},
+			over: Partial<{ sync_state: "synced" | "dirty" | "deleted_pending" | "conflict"; server_revision: number; base_revision: number | null; html: string; published_at: string | null }> = {},
 		) => {
 			const id = cache._store.nextId();
 			cache._store.templates.set(id, {
@@ -173,7 +173,7 @@ describe("cache ops parity", () => {
 				published_at: over.published_at ?? null,
 				updated_at: new Date().toISOString(),
 				server_revision: over.server_revision ?? 1,
-				base_revision: over.server_revision ?? 1,
+				base_revision: over.base_revision === undefined ? (over.server_revision ?? 1) : over.base_revision,
 				sync_state: over.sync_state ?? "synced",
 				kind: "own",
 				owner_handle: null,
@@ -304,5 +304,97 @@ describe("cache ops parity", () => {
 			expect(report, `state ${state}`).toEqual({ applied_upserts: 0, applied_deletes: 0, skipped_dirty: 1 });
 			expect(cache._store.templates.get(1)?.sync_state).toBe(state);
 		}
+	});
+});
+
+describe("first-sync adoption", () => {
+	function seeded() {
+		const cache = createFakeCache();
+		return { cache };
+	}
+
+	function upsertBody(id: string, body: string, revision = 2) {
+		return {
+			id,
+			name: "T",
+			summary: "",
+			page_w_mm: 210,
+			page_h_mm: 297,
+			body,
+			css: "",
+			readme: "",
+			revision,
+			published_at: null,
+			updated_at: "2026-10-21T00:00:00Z",
+		};
+	}
+
+	it("adopts matching content with no new version", () => {
+		const { cache } = seeded();
+		const id = cache._store.nextId();
+		cache._store.templates.set(id, {
+			id,
+			server_id: "srv-m",
+			name: "T",
+			summary: "",
+			page_w: 210,
+			page_h: 297,
+			orientation: "portrait",
+			readme: "",
+			published_at: null,
+			updated_at: new Date().toISOString(),
+			server_revision: 1,
+			base_revision: null,
+			sync_state: "synced",
+			kind: "own",
+			owner_handle: null,
+			synced_at: null,
+			versions: [{ version_no: 1, html: "<p>same</p>", css: "", created_by: "manual" as const }],
+		});
+
+		const report = cache.applyChanges(
+			[{ seq: 1, entity: "template", op: "upsert", data: upsertBody("srv-m", "<p>same</p>") }],
+			"MQ==",
+		);
+		expect(report).toEqual({ applied_upserts: 1, applied_deletes: 0, skipped_dirty: 0 });
+		expect(cache._store.templates.get(id)).toMatchObject({
+			sync_state: "synced",
+			server_revision: 2,
+			base_revision: 2,
+		});
+		expect(cache._store.templates.get(id)?.versions).toHaveLength(1);
+	});
+
+	it("conflicts instead of overwriting differences", () => {
+		const { cache } = seeded();
+		const id = cache._store.nextId();
+		cache._store.templates.set(id, {
+			id,
+			server_id: "srv-m",
+			name: "T",
+			summary: "",
+			page_w: 210,
+			page_h: 297,
+			orientation: "portrait",
+			readme: "",
+			published_at: null,
+			updated_at: new Date().toISOString(),
+			server_revision: 1,
+			base_revision: null,
+			sync_state: "synced",
+			kind: "own",
+			owner_handle: null,
+			synced_at: null,
+			versions: [{ version_no: 1, html: "<p>local</p>", css: "", created_by: "manual" as const }],
+		});
+
+		const report = cache.applyChanges(
+			[{ seq: 1, entity: "template", op: "upsert", data: upsertBody("srv-m", "<p>server</p>") }],
+			"MQ==",
+		);
+		expect(report).toEqual({ applied_upserts: 0, applied_deletes: 0, skipped_dirty: 1 });
+		const row = cache._store.templates.get(id)!;
+		expect(row.sync_state).toBe("conflict");
+		expect(row.versions[row.versions.length - 1]?.html).toBe("<p>local</p>");
 	});
 });

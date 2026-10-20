@@ -701,3 +701,45 @@ fn delete_tombstones_and_hides_the_row_while_keeping_history() {
         .unwrap();
     assert_eq!(versions_after, 1);
 }
+
+#[test]
+fn sync_schema_marks_migrated_installs() {
+    let (_state, conn) = test_db();
+    // Fresh install: no legacy links, no marker.
+    let marker: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'install_migrated'",
+            [],
+            |r| r.get(0),
+        )
+        .ok();
+    assert_eq!(marker, None);
+
+    // A pre-Phase-3 row with a legacy remote_id marks the install migrated.
+    conn.execute(
+        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, origin, remote_id)
+         VALUES ('Old', 210, 297, 'portrait', 'own', 'remote-9')",
+        [],
+    )
+    .unwrap();
+    printninja_lib::db::ensure_sync_schema(&conn).unwrap();
+    let marker: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'install_migrated'",
+            [],
+            |r| r.get(0),
+        )
+        .ok();
+    assert_eq!(marker.as_deref(), Some("1"));
+
+    // Re-running keeps the marker (and the backfilled server id).
+    printninja_lib::db::ensure_sync_schema(&conn).unwrap();
+    let marker: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'install_migrated'",
+            [],
+            |r| r.get(0),
+        )
+        .ok();
+    assert_eq!(marker.as_deref(), Some("1"));
+}

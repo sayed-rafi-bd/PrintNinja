@@ -120,76 +120,134 @@ fn apply_upsert(
     data: &TemplateDataIn,
     report: &mut ApplyReport,
 ) -> AppResult<()> {
-    let existing: Option<(i64, String)> = tx
+    let existing: Option<(i64, String, Option<i64>)> = tx
         .query_row(
-            "SELECT id, sync_state FROM templates WHERE server_id = ?1",
+            "SELECT id, sync_state, base_revision FROM templates WHERE server_id = ?1",
             [&data.id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .ok();
     // Only synced rows take server state: dirty rows keep local edits,
     // conflicted rows wait for the user's decision, and tombstones wait
     // for the server's confirmation. All three count as skipped.
     match existing {
-        Some((_, state)) if state != "synced" => {
+        Some((_, state, _)) if state != "synced" => {
             report.skipped_dirty += 1;
             Ok(())
         }
-        Some((id, _)) => {
-            let page_w = data.page_w_mm.round() as i64;
-            let page_h = data.page_h_mm.round() as i64;
-            let orientation = if page_w > page_h {
-                "landscape"
-            } else {
-                "portrait"
-            };
-            tx.execute(
-                "UPDATE templates SET name = ?1, summary = ?2, page_w_mm = ?3, page_h_mm = ?4,
+        // First sync of a migrated row (never confirmed, base_revision is
+        // NULL): a matching copy just adopts the revision, but differing
+        // content becomes a conflict instead of an overwrite.
+        Some((id, _, None)) => adopt_or_conflict(tx, id, data, report),
+        Some((id, _, _)) => {
+            apply_upsert_synced(tx, id, data, report)?;
+            Ok(())
+        }
+        None => {
+            apply_upsert_new(tx, data, report)?;
+            Ok(())
+        }
+    }
+}
+
+/// First-sync adoption for one migrated row. Content matches the server:
+/// adopt the revision with no new version. Content differs: keep the
+/// local content untouched and mark the row conflicted for the dialog.
+fn adopt_or_conflict(
+    tx: &rusqlite::Transaction,
+    id: i64,
+    data: &TemplateDataIn,
+    report: &mut ApplyReport,
+) -> AppResult<()> {
+    let local: Option<(String, String)> = tx
+        .query_row(
+            "SELECT html, css FROM template_versions WHERE id = (SELECT current_version_id FROM templates WHERE id = ?1)",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok();
+    let (html, css) = local.unwrap_or_default();
+    if html == data.body && css == data.css {
+        tx.execute(
+            "UPDATE templates SET server_revision = ?1, base_revision = ?1, synced_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![data.revision, id],
+        )?;
+        report.applied_upserts += 1;
+        return Ok(());
+    }
+    tx.execute(
+        "UPDATE templates SET sync_state = 'conflict' WHERE id = ?1",
+        [id],
+    )?;
+    report.skipped_dirty += 1;
+    Ok(())
+}
+
+fn apply_upsert_synced(
+    tx: &rusqlite::Transaction,
+    id: i64,
+    data: &TemplateDataIn,
+    report: &mut ApplyReport,
+) -> AppResult<()> {
+    let page_w = data.page_w_mm.round() as i64;
+    let page_h = data.page_h_mm.round() as i64;
+    let orientation = if page_w > page_h {
+        "landscape"
+    } else {
+        "portrait"
+    };
+    tx.execute(
+        "UPDATE templates SET name = ?1, summary = ?2, page_w_mm = ?3, page_h_mm = ?4,
                         orientation = ?5, readme = ?6, published_at = ?7,
                         server_revision = ?8, base_revision = ?8, synced_at = datetime('now'),
                         sync_state = 'synced', updated_at = ?9
                  WHERE id = ?10",
-                rusqlite::params![
-                    data.name,
-                    data.summary,
-                    page_w,
-                    page_h,
-                    orientation,
-                    data.readme,
-                    data.published_at,
-                    data.revision,
-                    data.updated_at,
-                    id
-                ],
-            )?;
-            let version_no: i64 = tx.query_row(
-                "SELECT COALESCE(MAX(version_no), 0) + 1 FROM template_versions WHERE template_id = ?1",
-                [id],
-                |r| r.get(0),
-            )?;
-            let version_id: i64 = tx.query_row(
-                "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
+        rusqlite::params![
+            data.name,
+            data.summary,
+            page_w,
+            page_h,
+            orientation,
+            data.readme,
+            data.published_at,
+            data.revision,
+            data.updated_at,
+            id
+        ],
+    )?;
+    let version_no: i64 = tx.query_row(
+        "SELECT COALESCE(MAX(version_no), 0) + 1 FROM template_versions WHERE template_id = ?1",
+        [id],
+        |r| r.get(0),
+    )?;
+    let version_id: i64 = tx.query_row(
+        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
                  VALUES (?1, ?2, ?3, ?4, 'sync') RETURNING id",
-                rusqlite::params![id, version_no, data.body, data.css],
-                |r| r.get(0),
-            )?;
-            tx.execute(
-                "UPDATE templates SET current_version_id = ?1 WHERE id = ?2",
-                rusqlite::params![version_id, id],
-            )?;
-            prune_versions(tx, id)?;
-            report.applied_upserts += 1;
-            Ok(())
-        }
-        None => {
-            let page_w = data.page_w_mm.round() as i64;
-            let page_h = data.page_h_mm.round() as i64;
-            let orientation = if page_w > page_h {
-                "landscape"
-            } else {
-                "portrait"
-            };
-            tx.execute(
+        rusqlite::params![id, version_no, data.body, data.css],
+        |r| r.get(0),
+    )?;
+    tx.execute(
+        "UPDATE templates SET current_version_id = ?1 WHERE id = ?2",
+        rusqlite::params![version_id, id],
+    )?;
+    prune_versions(tx, id)?;
+    report.applied_upserts += 1;
+    Ok(())
+}
+
+fn apply_upsert_new(
+    tx: &rusqlite::Transaction,
+    data: &TemplateDataIn,
+    report: &mut ApplyReport,
+) -> AppResult<()> {
+    let page_w = data.page_w_mm.round() as i64;
+    let page_h = data.page_h_mm.round() as i64;
+    let orientation = if page_w > page_h {
+        "landscape"
+    } else {
+        "portrait"
+    };
+    tx.execute(
                 "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, readme, summary,
                         published_at, updated_at, server_id, server_revision, base_revision,
                         sync_state, kind, owner_handle, synced_at)
@@ -207,21 +265,19 @@ fn apply_upsert(
                     data.revision,
                 ],
             )?;
-            let template_id = tx.last_insert_rowid();
-            let version_id: i64 = tx.query_row(
-                "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
+    let template_id = tx.last_insert_rowid();
+    let version_id: i64 = tx.query_row(
+        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
                  VALUES (?1, 1, ?2, ?3, 'sync') RETURNING id",
-                rusqlite::params![template_id, data.body, data.css],
-                |r| r.get(0),
-            )?;
-            tx.execute(
-                "UPDATE templates SET current_version_id = ?1 WHERE id = ?2",
-                rusqlite::params![version_id, template_id],
-            )?;
-            report.applied_upserts += 1;
-            Ok(())
-        }
-    }
+        rusqlite::params![template_id, data.body, data.css],
+        |r| r.get(0),
+    )?;
+    tx.execute(
+        "UPDATE templates SET current_version_id = ?1 WHERE id = ?2",
+        rusqlite::params![version_id, template_id],
+    )?;
+    report.applied_upserts += 1;
+    Ok(())
 }
 
 fn apply_delete(

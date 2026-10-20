@@ -351,6 +351,20 @@ pub fn ensure_sync_schema(conn: &Connection) -> rusqlite::Result<()> {
          WHERE kind = 'saved' AND owner_handle IS NULL AND origin_owner IS NOT NULL",
         [],
     )?;
+    // Whether this database predates the sync cache: any template with a
+    // legacy remote_id means a migrated install, which gets the first-sync
+    // adoption dialog instead of silently pushing local-only rows.
+    let migrated: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM templates WHERE remote_id IS NOT NULL",
+        [],
+        |r| r.get(0),
+    )?;
+    if (migrated > 0) {
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('install_migrated', '1') ON CONFLICT(key) DO NOTHING",
+            [],
+        )?;
+    }
     // Queued use-counts for the sync engine: the print worker increments
     // the row, the engine sends POST /use and decrements on success.
     conn.execute(
