@@ -61,8 +61,16 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     () =>
       onSessionEnded((reason) => {
         // Prefill the address that was in use, so only the password is needed.
+        // A shown expired notice is never downgraded: stale in-flight
+        // requests 401 after the first one and re-broadcast session-ended
+        // while the gate is already at sign-in. Only a successful sign-in
+        // or an explicit sign-out clears it.
         void getServiceUrl().then((url) =>
-          setGate((g) => ({ kind: "signin", url, expired: reason === "expired" && g.kind === "ready" })),
+          setGate((g) => ({
+            kind: "signin",
+            url,
+            expired: g.kind === "signin" ? g.expired : reason === "expired" && g.kind === "ready",
+          })),
         );
       }),
     [],

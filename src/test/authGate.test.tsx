@@ -418,3 +418,37 @@ describe("accessibility", () => {
     expect(results.violations.map((v) => v.id)).toEqual([]);
   });
 });
+
+describe("session-ended notice", () => {
+  async function openApp() {
+    localStorage.setItem(URL_KEY, SERVER);
+    localStorage.setItem(TOKEN_KEY, "tok");
+    handler = (url) => (url.endsWith("/v2/auth/me") ? json({ id: "u1", handle: "sam" }) : json({}, 404));
+    renderGate();
+    await screen.findByText("The app");
+  }
+
+  it("survives duplicate session-ended broadcasts from stale in-flight requests", async () => {
+    await openApp();
+    await act(async () => {
+      await endSession("expired");
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(/session ended/i);
+    // A stale request 401s a moment later and broadcasts again; the
+    // notice must not be downgraded.
+    await act(async () => {
+      await endSession("expired");
+    });
+    expect(screen.getByRole("status")).toHaveTextContent(/session ended/i);
+    expect(screen.getByLabelText("Password")).toBeInTheDocument();
+  });
+
+  it("an explicit sign-out shows a clean form", async () => {
+    await openApp();
+    await act(async () => {
+      await endSession("signed_out");
+    });
+    expect(await screen.findByLabelText("Password")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+});

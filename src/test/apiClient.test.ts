@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { callApi, type ApiDeps } from "@/lib/api/client";
 import { ApiError, ServerUnreachableError, SessionExpiredError } from "@/lib/api/errors";
 
