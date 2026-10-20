@@ -102,6 +102,13 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The generated client is gitignored, so a fresh clone builds it
+      # first. Generate connects to nothing; the dummy URL only satisfies
+      # config loading (same trick as the Dockerfile).
+      - name: Generate the Prisma client
+        run: |
+          DATABASE_URL=postgresql://localhost:5432/printninja_ci_dummy \
+          pnpm --filter server db:generate
       - run: pnpm --filter server typecheck
       - run: pnpm --filter server arch
       - run: pnpm --filter server test
@@ -164,8 +171,11 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Build the service for the harness
-        run: pnpm --filter server build
+      - name: Generate the Prisma client and build the service
+        run: |
+          DATABASE_URL=postgresql://localhost:5432/printninja_ci_dummy \
+          pnpm --filter server db:generate
+          pnpm --filter server build
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
