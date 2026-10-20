@@ -186,8 +186,7 @@ PrintNinja/                       the existing repository
   docker-compose.yml              new: server + PostgreSQL (the old Rust compose file moves to server-legacy/)
   env.example                     updated for the new variables (section 12)
   src/  src-tauri/                the app, layout unchanged
-  server-legacy/                  the current Rust share server; deleted at cutover (Phase 3)
-  server/                         the new TypeScript service, three layers
+  server/                         the hosted share service (cut over in Phase 3), three layers
     package.json  tsconfig.json
     prisma.config.ts              Prisma 7 CLI config: schema path, migrations path, DATABASE_URL
     prisma/

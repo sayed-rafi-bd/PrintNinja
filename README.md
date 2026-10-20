@@ -12,7 +12,7 @@ Silent print for Windows and Android — design HTML templates, fetch JSON data,
 - **Printers** — grouped Network, USB, Bluetooth and System; test print per row; setup in a side panel (IPP / raw TCP 9100, language, paper, DPI). Status shows only when known.
 - **History** — sticky filter bar (status, source, printer, search, dates), saved filter sets, bulk reprint and retry (each confirmed), CSV export, retention.
 - **Automation** — local REST API (`axum`, `127.0.0.1:17717`, Bearer + idempotency, CORS scoped, LAN off by default) and `printninja://` deep links with trust list and confirmation sheet
-- **Share** — hosted `server-legacy/` (`axum` + `rusqlite`/SQLite, `scrypt` + sha256 sessions, throttle 5/min) at `share_service_url` + `share_session_token` (Settings → Share: Register/Login/Logout, handle `alphanumeric+_-` 1–32, password ≥8), `PUT/DELETE /v1/templates/{id}` (client UUID, owner 403, 404, size caps 512K/64K, remote-ref `data: URIs`), `GET /v1/templates` public, `POST /v1/templates/{id}/use`, `PUT/DELETE/GET /v1/saved`
+- **Share** — hosted `server/` (TypeScript Fastify + PostgreSQL via Prisma, `argon2id` with scrypt fallback) at `share_service_url` + `share_session_token` (Settings → Share: Register/Login/Logout, handle `alphanumeric+_-` 1–32, password ≥8), `/v2` API: auth, templates (client UUID, revisions with `428`/`409`, publish/unpublish), Community, Saved, delta sync, sample datasets, printer profiles, fonts and account preferences; every failure uses the `{ error: { code, message, details?, request_id } }` envelope (`server/openapi/openapi.json` is the contract)
 - **Corporate UI** — one light theme in a restrained slate teal; IBM Plex bundled for identical rendering on every workstation, offline. One status vocabulary (colour + icon + word) on every screen. `Ctrl/Cmd+K` palette, `G` then `P/H/D/T/R/S` navigation, full keyboard path, WCAG 2.1 AA as the internal bar. **Comfortable/Compact density** and optional **name and logo** in Settings → General; **Settings → Setup** checklist for admins. See [`docs/UI_GUIDE.md`](docs/UI_GUIDE.md).
 - **Queue** — per-printer `Semaphore` (no byte interleaving), bounded admission, `POST /v1/print` runs the same pipeline as the UI
 
@@ -27,9 +27,8 @@ Silent print for Windows and Android — design HTML templates, fetch JSON data,
 | Barcodes | `bwip-js` `toSVG()` (inline SVG, no canvas data-URI) |
 | Markdown | `react-markdown` + `remark-gfm` (no `rehype-raw` → XSS as text, links `http/https/mailto` only) |
 | Sanitize | `sanitize.ts` + `handlebars.rs` strip `<script>`/`on*`, `find_remote_refs` → `data: URIs`, CSP `default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:`, `sandbox=""` iframes |
-| API | `axum` + `tower-http` (local `127.0.0.1:17717` — API-key scopes and, when set, an IP allowlist are enforced — plus share `server-legacy/` at `share_service_url`) |
-| Share service | `server-legacy/` (`axum`, `rusqlite`/SQLite, `scrypt` + sha256 sessions, throttle) — the app's counterpart until the cutover |
-| Share service (v2, in progress) | `server/` (TypeScript, Fastify 5 + Zod 4, PostgreSQL 16 via Prisma 7, `argon2id` + scrypt fallback) — auth endpoints `POST /v2/auth/{register,login,logout}`, `GET /v2/auth/me`, `GET /v2/health`; every failure uses the `{ error: { code, message, details?, request_id } }` envelope (`server/openapi/openapi.json` is the contract) |
+| API | `axum` + `tower-http` (local `127.0.0.1:17717` — API-key scopes and, when set, an IP allowlist are enforced) |
+| Share service | `server/` (TypeScript, Fastify 5 + Zod 4, PostgreSQL 16 via Prisma 7, `argon2id` + scrypt fallback) — auth, templates, Community, Saved, delta sync, datasets, profiles, fonts, preferences over `/v2`; every failure uses the `{ error: { code, message, details?, request_id } }` envelope (`server/openapi/openapi.json` is the contract) |
 | Secrets | No keyring: the share-session token is plain text in the local `settings` table (moving it to an OS key store is a follow-up). `rendered_html` is secret-redacted before it is stored in `print_jobs` |
 | Android | Kotlin plugins: WebView → PDF, `UsbManager`, RFCOMM |
 
@@ -50,7 +49,7 @@ Batch ─────┘
 
 App SQLite (`src-tauri/src/db/schema.sql` + `db::ensure_v2_schema`): `printers` · `templates` (`readme`, `summary`, `remote_id` UUID, `published_at`, `origin` `own`/`saved`, `origin_owner`, `withdrawn`, `idx_templates_remote`) + `template_versions` · `fonts` · `printer_profiles` · `batches` · `print_jobs` · `api_clients` · `settings` (`share_service_url`, `share_session_token`, `onboarding_done` etc.). Two tables the code never used — `sample_datasets` and `presets` — are gone; an upgrade drops them (they were always empty). The `retention_days` preference is stored but not implemented: history is never pruned.
 
-Server SQLite file (`server-legacy/src/db.rs`, path from `DATABASE_URL`): `users` (`handle` `UNIQUE COLLATE NOCASE`, `password_hash` scrypt) · `sessions` (`token_hash` sha256, `expires_at`) · `templates` (`id` UUID PK, `owner_id`, `name`, `summary`, `page_w_mm`, `page_h_mm`, `language`, `body` 512K, `readme` 64K, `use_count`, `published_at`, `updated_at`, `idx_tpl_owner/updated`) · `saved_templates` (`user_id`, `template_id` PK).
+Share service PostgreSQL (`server/prisma/schema.prisma`, migrations run on boot): `users` (handle, case-insensitive unique handle key, `argon2id` hash with scrypt fallback) · `sessions` (token-hash PK, expiry) · `templates` (client UUID PK, revisions, change sequence, publish times) · `template_versions` · `saved_templates` · `sample_datasets` · `printer_profiles` (one per template + lowercase printer name) · `user_settings` (allow-listed keys only) · `fonts` + `font_files` (magic-checked bytes, SHA-256) · `tombstones` + per-user change sequence (delta sync).
 
 ## Project Structure
 
@@ -62,9 +61,7 @@ src/                         # React
 src-tauri/src/
   commands/{print,printer,template{readme, publish info, origin},version,history,batch,font,profile,settings,api}
   api/{routes,auth,openapi}  queue.rs  transport/{...}  data/fetcher.rs  deeplink.rs  render/handlebars.rs (sanitize)  db (ensure_v2_schema)  readme.rs
-server-legacy/               # share service, Rust, deleted at cutover (REFACTORING.md Phase 3)
-  src/{main.rs (v1 auth/templates/saved), db.rs, auth.rs (throttle, sessions), error.rs}
-server/                      # share service v2, TypeScript (REFACTORING.md Phase 1)
+server/                      # share service, TypeScript (REFACTORING.md Phase 3: cut over)
   src/{server.ts, app.ts, config.ts, http/{plugins,routes,schemas}, domain/{auth,errors,ports}, infra/{prisma,security}}
   prisma/{schema.prisma, migrations}  test/{unit, integration, e2e}  openapi/openapi.json
 e2e/                         # Playwright suite (app in Chromium + harness service)
@@ -99,9 +96,9 @@ Prerequisites: Node 22, Rust stable, pnpm 10; for Android: Java 17, Android SDK/
 | `docker compose up -d` / `down -v` | v2 service + PostgreSQL (migrates itself on boot, healthy at `:3001/v2/health`) |
 | `cargo test` (in `src-tauri`) | Rust (lib + integration) — `CARGO_INCREMENTAL=0 cargo test` on low-disk hosts |
 
-### Share service (v2)
+### Share service
 
-The replacement for `server-legacy/` (which the app still uses until the Phase 3 cutover). Auth only in Phase 1: register `201`, login `200`, logout `204`, me `200`; duplicate handle `409 handle_taken`; unknown handle and wrong password both `401 invalid_credentials`; brute force limited to 10 attempts per 5 minutes per IP and handle (`429` + `Retry-After`); passwords 8–128 chars, handles 1–32 of `A–Z a–z 0–9 _ -`, matched case-insensitively.
+The hosted counterpart to the app's local cache. Auth: register `201`, login `200`, logout `204`, me `200`; duplicate handle `409 handle_taken`; unknown handle and wrong password both `401 invalid_credentials`; brute force limited to 10 attempts per 5 minutes per IP and handle (`429` + `Retry-After`); passwords 8–128 chars, handles 1–32 of `A–Z a–z 0–9 _ -`, matched case-insensitively. Legacy `scrypt` passwords verify and are rehashed to `argon2id` on first login.
 
 ```bash
 cp env.example .env   # edit POSTGRES_PASSWORD and CORS_ORIGINS at minimum
@@ -109,7 +106,7 @@ docker compose up -d  # postgres:16 + service, migrates on boot
 curl localhost:3001/v2/health
 ```
 
-Configuration is environment-only (nothing auto-loads; development passes `--env-file`). All variables are listed in `env.example`: `DATABASE_URL` (PostgreSQL here — the legacy service reuses the name for its SQLite path), `CORS_ORIGINS`, `HOST` (`127.0.0.1` local, `0.0.0.0` in containers), `PORT`, `SESSION_TTL_DAYS`, `SESSION_CLEANUP_MINUTES`, `RATE_LIMIT_MAX`, `RATE_LIMIT_AUTH_MAX`, `RATE_LIMIT_AUTH_WINDOW_SECONDS`, `ARGON2_MEMORY_KIB`, `ARGON2_TIME_COST`, `ARGON2_PARALLELISM`, `DOCS_ENABLED`, `LOG_LEVEL`. The service fails fast naming the offending variable; the Dockerfile and CI generate the Prisma client with a dummy `DATABASE_URL` because generation never connects.
+Configuration is environment-only (nothing auto-loads; development passes `--env-file`). All variables are listed in `env.example`: `DATABASE_URL` (PostgreSQL), `CORS_ORIGINS`, `HOST` (`127.0.0.1` local, `0.0.0.0` in containers), `PORT`, `SESSION_TTL_DAYS`, `SESSION_CLEANUP_MINUTES`, `RATE_LIMIT_MAX`, `RATE_LIMIT_AUTH_MAX`, `RATE_LIMIT_AUTH_WINDOW_SECONDS`, `ARGON2_MEMORY_KIB`, `ARGON2_TIME_COST`, `ARGON2_PARALLELISM`, `DOCS_ENABLED`, `LOG_LEVEL`. The service fails fast naming the offending variable; the Dockerfile and CI generate the Prisma client with a dummy `DATABASE_URL` because generation never connects.
 
 ## Building
 
