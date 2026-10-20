@@ -180,26 +180,15 @@ export interface PublishPayload {
   publish?: boolean;
 }
 
-/** A template as the server stores it: name, HTML, CSS, page size and README. */
-export interface RemoteTemplate {
-  id: string;
-  owner_id: string;
-  owner_handle: string;
-  name: string;
-  summary: string;
-  page_w_mm: number;
-  page_h_mm: number;
-  language: string;
-  body: string;
-  css: string;
-  readme: string;
-  use_count: number;
-  published_at: string;
-  updated_at: string;
-}
+/** A template as the v2 service stores it. `published_at` is null when
+ * private (v1 used an empty string); every existing falsy check keeps
+ * working unchanged. */
+export type RemoteTemplate =
+  paths["/v2/templates/{id}"]["get"]["responses"][200]["content"]["application/json"];
 
-/** A template as the server lists it: the same fields without body, css and readme. */
-export type RemoteTemplateSummary = Omit<RemoteTemplate, "body" | "css" | "readme">;
+/** A template as the v2 service lists it. */
+export type RemoteTemplateSummary =
+  paths["/v2/templates/mine"]["get"]["responses"][200]["content"]["application/json"]["items"][number];
 
 export async function publishTemplate(payload: PublishPayload): Promise<RemoteTemplate> {
   const res = await authedFetch(`/v1/templates/${payload.id}`, {
@@ -214,10 +203,17 @@ export async function publishTemplate(payload: PublishPayload): Promise<RemoteTe
 }
 
 export async function unpublishTemplate(id: string): Promise<void> {
-  const res = await authedFetch(`/v1/templates/${id}`, { method: "DELETE" });
-  if (!res.ok && res.status !== 404) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `Unpublish failed: ${res.status}`);
+  // v1 DELETE removed the server copy; the v2 equivalent that keeps the
+  // detach-and-clear-local-state behavior is DELETE, not POST /unpublish
+  // (which would keep a private copy on the server). Missing is fine —
+  // the end state is the same.
+  try {
+    await callApi<unknown>(apiDeps(), { method: "DELETE", path: `/v2/templates/${id}` });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      return;
+    }
+    throw err;
   }
 }
 
@@ -231,45 +227,59 @@ export class RemoteTemplateNotFoundError extends Error {
 
 /** The full stored copy of one template, CSS included. */
 export async function fetchRemoteTemplate(id: string): Promise<RemoteTemplate> {
-  const res = await authedFetch(`/v1/templates/${id}`);
-  if (res.status === 404) throw new RemoteTemplateNotFoundError(id);
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `Could not get the template from the server: ${res.status}`);
+  try {
+    return await callApi<RemoteTemplate>(apiDeps(), { method: "GET", path: `/v2/templates/${id}` });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      throw new RemoteTemplateNotFoundError(id);
+    }
+    throw err;
   }
-  return res.json();
 }
 
-/** The signed-in user's own templates, private and published. */
+/** The signed-in user's own templates, private and published. Pages through the v2 list. */
 export async function fetchMyRemoteTemplates(): Promise<RemoteTemplateSummary[]> {
-  const res = await authedFetch("/v1/templates/mine");
-  if (!res.ok) throw new Error(`Could not list your templates: ${res.status}`);
-  return res.json();
+  return fetchAllPages((page, pageSize) =>
+    callApi<{ items: RemoteTemplateSummary[]; has_more: boolean }>(apiDeps(), {
+      method: "GET",
+      path: `/v2/templates/mine?page=${page}&page_size=${pageSize}`,
+    }),
+  );
 }
 
 /** The community templates the signed-in user has saved. */
 export async function fetchSavedRemoteTemplates(): Promise<RemoteTemplateSummary[]> {
-  const res = await authedFetch("/v1/saved");
-  if (!res.ok) throw new Error(`Could not list saved templates: ${res.status}`);
-  return res.json();
+  return fetchAllPages((page, pageSize) =>
+    callApi<{ items: RemoteTemplateSummary[]; has_more: boolean }>(apiDeps(), {
+      method: "GET",
+      path: `/v2/saved?page=${page}&page_size=${pageSize}`,
+    }),
+  );
+}
+
+async function fetchAllPages(
+  fetchPage: (page: number, pageSize: number) => Promise<{ items: RemoteTemplateSummary[]; has_more: boolean }>,
+): Promise<RemoteTemplateSummary[]> {
+  const out: RemoteTemplateSummary[] = [];
+  let page = 1;
+  for (;;) {
+    const { items, has_more } = await fetchPage(page, 100);
+    out.push(...items);
+    if (!has_more) {
+      return out;
+    }
+    page += 1;
+  }
 }
 
 /** Keeps a community template in the user's Saved list. Idempotent. */
 export async function saveRemoteTemplate(id: string): Promise<void> {
-  const res = await authedFetch(`/v1/saved/${id}`, { method: "PUT" });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `Could not save the template: ${res.status}`);
-  }
+  await callApi<unknown>(apiDeps(), { method: "PUT", path: `/v2/saved/${id}` });
 }
 
-/** Takes a community template out of the user's Saved list. */
+/** Takes a community template out of the user's Saved list. Always 204. */
 export async function unsaveRemoteTemplate(id: string): Promise<void> {
-  const res = await authedFetch(`/v1/saved/${id}`, { method: "DELETE" });
-  if (!res.ok && res.status !== 404) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `Could not remove the template: ${res.status}`);
-  }
+  await callApi<unknown>(apiDeps(), { method: "DELETE", path: `/v2/saved/${id}` });
 }
 
 // For the Designer state chip / strip. A template is public only when it has a
