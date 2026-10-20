@@ -83,7 +83,10 @@ export function resetAdoptionForTests(): void {
 	adoption.checked = false;
 	adoption.hold = false;
 	adoption.rows = [];
+	checkPromise = null;
 }
+
+let checkPromise: Promise<void> | null = null;
 
 export function getAdoptionState(): { hold: boolean; rows: HeldRow[] } {
 	return {
@@ -92,27 +95,31 @@ export function getAdoptionState(): { hold: boolean; rows: HeldRow[] } {
 	};
 }
 
-/** Run once at startup: decide whether the adoption dialog must appear. */
+/** Run once at startup: decide whether the adoption dialog must appear.
+ * Late subscribers (StrictMode remounts) await the same in-flight check
+ * instead of reading state before it lands. */
 export async function ensureAdoptionChecked(): Promise<void> {
-	if (adoption.checked) {
-		return;
+	if (!checkPromise) {
+		checkPromise = (async () => {
+			adoption.checked = true;
+			try {
+				const [adopted, migrated, dirty] = await Promise.all([
+					invoke<string | null>("get_setting", { key: "sync_adopted" }),
+					invoke<string | null>("get_setting", { key: "install_migrated" }),
+					invoke<DirtyRow[]>("cache_list_dirty"),
+				]);
+				const unpushed = dirty.filter((r) => r.base_revision == null);
+				if (adopted == null && migrated != null && unpushed.length > 0) {
+					adoption.hold = true;
+					adoption.rows = unpushed;
+				}
+			} catch {
+				adoption.hold = false;
+				adoption.rows = [];
+			}
+		})();
 	}
-	adoption.checked = true;
-	try {
-		const [adopted, migrated, dirty] = await Promise.all([
-			invoke<string | null>("get_setting", { key: "sync_adopted" }),
-			invoke<string | null>("get_setting", { key: "install_migrated" }),
-			invoke<DirtyRow[]>("cache_list_dirty"),
-		]);
-		const unpushed = dirty.filter((r) => r.base_revision == null);
-		if (adopted == null && migrated != null && unpushed.length > 0) {
-			adoption.hold = true;
-			adoption.rows = unpushed;
-		}
-	} catch {
-		adoption.hold = false;
-		adoption.rows = [];
-	}
+	return checkPromise;
 }
 
 /** Push the held rows private and remember the answer. A failure keeps

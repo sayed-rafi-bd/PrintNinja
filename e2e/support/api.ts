@@ -81,6 +81,7 @@ export function apiLogout(token: string): Promise<void> {
 export interface ApiTemplateSummary {
 	id: string;
 	name: string;
+	published_at: string | null;
 }
 
 export function apiMine(token: string): Promise<{ items: ApiTemplateSummary[] }> {

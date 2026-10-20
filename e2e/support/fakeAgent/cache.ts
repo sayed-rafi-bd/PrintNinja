@@ -85,6 +85,10 @@ export interface SeedTemplate {
 	readme?: string;
 	page_w?: number;
 	page_h?: number;
+	/** Defaults to 1 with a server_id, null without. Null with a
+	 * server_id simulates a migrated row never confirmed by sync. */
+	base_revision?: number | null;
+	server_revision?: number | null;
 }
 
 import { seedTemplates } from "./store.js";
@@ -145,7 +149,9 @@ export function createFakeCache() {
 			const css = seed.css ?? "";
 			templates.set(id, {
 				id,
-				server_id: seed.server_id ?? null,
+				// Like the Rust backfill: local-only rows get fresh sync
+				// identities so pushes and markPushed address the same id.
+				server_id: seed.server_id ?? crypto.randomUUID(),
 				name: seed.name ?? "Seeded",
 				summary: seed.summary ?? "",
 				page_w: seed.page_w ?? 210,
@@ -154,8 +160,11 @@ export function createFakeCache() {
 				readme: seed.readme ?? "",
 				published_at: seed.published_at ?? null,
 				updated_at: new Date().toISOString(),
-				server_revision: seed.server_id ? 1 : null,
-				base_revision: seed.server_id ? 1 : null,
+				server_revision: seed.server_revision ?? (seed.server_id ? 1 : null),
+				// An explicit null stays null: it marks a migrated row the
+				// sync engine has never confirmed (?? would erase it).
+				base_revision:
+					seed.base_revision !== undefined ? seed.base_revision : seed.server_id ? 1 : null,
 				sync_state: seed.sync_state ?? (seed.server_id ? "synced" : "dirty"),
 				kind: "own",
 				owner_handle: null,
