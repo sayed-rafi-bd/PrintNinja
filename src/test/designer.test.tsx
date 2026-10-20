@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeAll } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@/lib/i18n";
 import { DesignerToolbar } from "@/components/designer/DesignerToolbar";
-import { DesignerSidebar } from "@/components/designer/DesignerSidebar";
+import { ControlsAccordion } from "@/components/designer/ControlsAccordion";
+import { CanvasPane } from "@/components/designer/CanvasPane";
+import { EditorPane } from "@/components/designer/EditorPane";
 import { TemplateSyncBar } from "@/components/designer/TemplateSyncBar";
 
 beforeAll(() => {
@@ -95,7 +97,7 @@ describe("TemplateSyncBar", () => {
   });
 });
 
-describe("DesignerSidebar", () => {
+describe("ControlsAccordion", () => {
   const versions = [
     { id: 2, version_no: 2, label: "second", note: "", created_at: "2026-02-01T10:00:00Z" },
     { id: 1, version_no: 1, label: "first", note: "", created_at: "2026-01-01T10:00:00Z" },
@@ -112,7 +114,7 @@ describe("DesignerSidebar", () => {
 
   it("marks the open template and loads another on click", () => {
     const p = props();
-    render(<DesignerSidebar {...p} />);
+    render(<ControlsAccordion {...p} />);
     expect(screen.getByRole("button", { name: /Label/ })).toHaveAttribute("aria-current", "true");
     fireEvent.click(screen.getByRole("button", { name: /Receipt/ }));
     expect(p.loadTemplate).toHaveBeenCalledWith(p.templates[0]);
@@ -120,7 +122,7 @@ describe("DesignerSidebar", () => {
 
   it("applies a page preset and labels its fields", () => {
     const p = props();
-    render(<DesignerSidebar {...p} />);
+    render(<ControlsAccordion {...p} />);
     fireEvent.click(screen.getByRole("button", { name: "A4" }));
     expect(p.setPageWidth).toHaveBeenCalledWith(210);
     expect(p.setPageHeight).toHaveBeenCalledWith(297);
@@ -129,7 +131,7 @@ describe("DesignerSidebar", () => {
 
   it("restores and diffs versions, but not the current one", () => {
     const p = props();
-    render(<DesignerSidebar {...p} />);
+    render(<ControlsAccordion {...p} />);
     expect(screen.getByRole("button", { name: "Restore version 2" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Restore version 1" }));
     expect(p.handleRestoreVersion).toHaveBeenCalledWith(versions[1]);
@@ -174,5 +176,32 @@ describe("ClassWarnings", () => {
     expect(screen.getByRole("alert")).toBeInTheDocument();
     rerender(<ClassWarnings html={`<b class="{{#if c}}bg-red-600{{else}}bg-green-600{{/if}}">x</b>`} />);
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("CanvasPane", () => {
+  const base = { html: "<p>Hi {{store.name}}</p>", css: "", compiledCss: "", width: 302, height: 756 };
+
+  it("renders the template with the sample data into a sandboxed frame", () => {
+    render(<CanvasPane {...base} data={{ store: { name: "Ninja Mart" } }} />);
+    const frame = screen.getByTitle("Canvas preview") as HTMLIFrameElement;
+    expect(frame.getAttribute("sandbox")).toBe("");
+    expect(frame.getAttribute("srcdoc")).toContain("Hi Ninja Mart");
+  });
+
+  it("re-renders when the sample data changes and sizes the page from width and height", () => {
+    const { rerender } = render(<CanvasPane {...base} data={{ store: { name: "One" } }} />);
+    rerender(<CanvasPane {...base} data={{ store: { name: "Two" } }} width={100} height={200} />);
+    const frame = screen.getByTitle("Canvas preview");
+    expect(frame.getAttribute("srcdoc")).toContain("Hi Two");
+    expect(frame.parentElement).toHaveStyle({ width: "100px", height: "200px" });
+  });
+});
+
+describe("EditorPane", () => {
+  it("labels the HTML editor with the template name, and has a CSS editor", () => {
+    render(<EditorPane templateName="Label" htmlCode="<b>x</b>" cssCode="b{}" onHtmlChange={vi.fn()} onCssChange={vi.fn()} />);
+    expect(screen.getByText("HTML — Label")).toBeInTheDocument();
+    expect(screen.getByText("CSS")).toBeInTheDocument();
   });
 });

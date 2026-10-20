@@ -16,9 +16,11 @@ All notable changes to PrintNinja are documented here. The format is based on Ke
 - Sign-in gate (migration phase 2): the app opens on a sign-in and register screen until the server accepts a session. The screen includes the server address, so a new PC can be set up without visiting Settings first.
 
 ### Removed
+- **Designer: Visual tab, Preview tab and Properties card.** The Visual tab (GrapesJS) rewrote templates through the browser's HTML parser, which moves Handlebars loops out of tables, and it loaded its code from `unpkg.com` at run time. The Preview tab duplicated Canvas but ignored the chosen sample data and zoom. Properties repeated Page Setup and the zoom buttons. Saved templates are unaffected.
 - The shared, safelisted print bundle: `tailwind.templates.config.ts`, `scripts/build-template-css.mjs`, `src/styles/templates.src.css`, `src/lib/templates/templates.generated.ts`, `src-tauri/assets/template-print.css`, and the `build:templates:css` / `prebuild` scripts. Only the small base layer (reset, page-break helpers, barcode) remains.
 
 ### Changed
+- Designer: the sync bar (Draft/Published, Save, Refresh, Publish) now sits under the page title instead of above the canvas, and **Save & Preview** returns to the Canvas tab. The page is split into `ControlsAccordion`, `EditorPane` and `CanvasPane` under `src/components/designer/` (`DesignerSidebar` is now `ControlsAccordion`). First step of `docs/DESIGNER_LAYOUT_PLAN.md`.
 - Template CSS is stored on the server and returned with the HTML. Until now a published template lost its CSS on the way to another PC.
 - The Designer's publish strip is now a sync bar: Draft or Published, then **Save to server**, **Refresh from server** and **Publish to Community** / **Unpublish**. Each button says while it is working.
 - **Saved (community) copies are read-only.** They show Print, Refresh and Remove; there is no Edit, Save or Publish, and the Designer explains that they cannot be changed. Saving a copy now brings its CSS and README across too.

@@ -109,7 +109,6 @@ const resources = {
         canvas: "Canvas",
         code: "Code",
         variables: "Variables",
-        preview: "Preview",
         versions: "Versions",
         preview_only: "Preview only",
         template_name: "Template name",

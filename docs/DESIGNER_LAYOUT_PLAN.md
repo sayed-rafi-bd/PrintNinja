@@ -1,6 +1,6 @@
 # PrintNinja: Designer Layout Plan
 
-Branch: `develop` · Status: Final, ready to implement (not started) · Date: 2026-10-20
+Branch: `develop` · Status: Final · Phase 1 done, phases 2–4 not started · Date: 2026-10-20
 
 Goal: make the Designer a code-first workspace where you can type and watch the page change at the same time. Controls move into a left accordion, the editor and the canvas sit side by side, and the unused Visual tab is removed. Mobile keeps today's single-column layout.
 
@@ -95,13 +95,21 @@ Effort figures are rough estimates.
 
 Commit the existing uncommitted work (single starter template; mobile fixes) so this refactor is a clean diff. Committing needs a git author identity.
 
-### Phase 1: Prep and removal (about ½ day)
+### Phase 1: Prep and removal (about ½ day) — done
 
 - Delete `VisualDesigner.tsx`, the Visual tab and its import.
 - Delete the Preview tab and the Properties card.
 - Split `Designer.tsx` into `ControlsAccordion`, `EditorPane` and `CanvasPane` (under `src/components/designer/`). Move the Draft/Save/Publish bar (`TemplateSyncBar`) into the page header.
 - Update the README (lines mentioning the visual canvas and the five tabs) and `docs/UI_GUIDE.md` (the `/` and `/template/:id` row).
 - Done when: the Designer looks almost the same as now minus the removed items, and `tsc`, Biome and all tests pass.
+
+What Phase 1 did differently from the list above:
+
+- `ControlsAccordion` is `DesignerSidebar` renamed. It is still plain cards; the Radix accordion arrives in Phase 2.
+- `EditorPane` covers the Code tab (HTML and CSS) only. README stays a separate tab until Phase 2 folds it into the editor pane.
+- `TemplateSyncBar` moved out of the canvas column to a full-width row directly under the title. Its notices ("not on the server yet", "private copy") need the width, so putting it inline next to the title is left to the Phase 2 shell.
+- Quick Helpers and the Variables tab are untouched; they move in Phase 2.
+- Not in the original list: the **Save & Preview** button switched to the Preview tab, so it now switches to Canvas. The `designer.preview` i18n key and the unused `canvasRef` were removed with the tab.
 
 ### Phase 2: New desktop shell (about 1 day)
 

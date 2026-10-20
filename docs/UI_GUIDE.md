@@ -125,7 +125,7 @@ the code editor. "Reprint last job" asks for confirmation before it prints.
 
 | Route | Page | Main building blocks |
 |---|---|---|
-| `/` and `/template/:id` | Designer | `PageHeader` with `DesignerToolbar` (New, Import, Export); `DesignerSidebar` (template list, page setup, versions); `VisualDesigner`; `TemplateSyncBar` (Save, Refresh, Publish, Unpublish); `ReadmeEditor` |
+| `/` and `/template/:id` | Designer | `PageHeader` with `DesignerToolbar` (New, Import, Export); `TemplateSyncBar` (Save, Refresh, Publish, Unpublish) under the title row; `ControlsAccordion` (template list, page setup, versions); tabs **Canvas** (`CanvasPane`), **Code** (`EditorPane`), **README** (`ReadmeEditor`) and **Variables** |
 | `/templates` | Templates | Tabs **Mine**, **Saved**, **Community**. Mine and Saved are `DataTable`s; Community is a card gallery with sort and a preview dialog |
 | `/print` | Print | "Print job" card (printer, template, copies, options such as grayscale and test data), a live preview, and a banner that says "Print sent" or "Print failed" |
 | `/printers` | Printers | `DataTable` of printers with their status; "Add printer" opens a side sheet |

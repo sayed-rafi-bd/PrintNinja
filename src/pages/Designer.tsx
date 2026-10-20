@@ -1,10 +1,12 @@
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/PageHeader";
-import { DesignerSidebar } from "@/components/designer/DesignerSidebar";
+import { ControlsAccordion } from "@/components/designer/ControlsAccordion";
+import { CanvasPane } from "@/components/designer/CanvasPane";
+import { EditorPane } from "@/components/designer/EditorPane";
 import { DesignerToolbar } from "@/components/designer/DesignerToolbar";
 import { TemplateSyncBar } from "@/components/designer/TemplateSyncBar";
 import { ClassWarnings } from "@/components/designer/ClassWarnings";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@/lib/invoke";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -40,11 +42,8 @@ import { useTemplateStore, type Template, type TemplateVersion } from "@/lib/sto
 import { toast } from "sonner";
 import CodeMirror from "@uiw/react-codemirror";
 import { html } from "@codemirror/lang-html";
-import { css } from "@codemirror/lang-css";
 import { BARCODE_TYPES, validateBarcode, buildBarcodeHtml } from "@/lib/utils/barcode";
 import { DEFAULT_TEMPLATE_HTML, DEFAULT_TEMPLATE_CSS, DEFAULT_MOCK_DATA, STARTER_TEMPLATES } from "@/lib/templates/defaultTemplate";
-import { VisualDesigner } from "@/components/VisualDesigner";
-import { renderTemplate } from "@/lib/render/renderTemplate";
 import { compiledFields } from "@/lib/templates/compileTemplateCss";
 import { useCompiledCss } from "@/lib/templates/useCompiledCss";
 import { formatCss, formatHtml } from "@/lib/utils/format";
@@ -386,7 +385,6 @@ export function DesignerPage() {
   } | null>(null);
   const [showDiff, setShowDiff] = useState(false);
 
-  const canvasRef = useRef<HTMLDivElement>(null);
   const fontInputRef = useRef<HTMLInputElement>(null);
 
   // Load template list from SQLite on mount; fall back to starters in web
@@ -634,6 +632,15 @@ export function DesignerPage() {
     }
   };
 
+  const sampleData = useMemo<Record<string, unknown>>(() => {
+    try {
+      const ds = datasets.find((d) => d.name === selectedDatasetName) ?? datasets[0];
+      return JSON.parse(ds.json);
+    } catch {
+      return DEFAULT_MOCK_DATA as Record<string, unknown>;
+    }
+  }, [datasets, selectedDatasetName]);
+
   const canvasWidth = pageWidth * MM_TO_PX * zoom;
   const canvasHeight = pageHeight * MM_TO_PX * zoom;
 
@@ -643,9 +650,22 @@ export function DesignerPage() {
         <DesignerToolbar onNew={() => setShowNewTemplateDialog(true)} onImportFile={handleImportFile} onExport={handleExport} />
       </PageHeader>
 
+      <TemplateSyncBar
+        templateName={templateName}
+        remoteId={remoteId}
+        publishedAt={publishedAt}
+        templateUpdatedAt={templateUpdatedAt}
+        readOnly={isReadOnly({ origin })}
+        pending={pending}
+        onSave={() => void handleSave()}
+        onRefresh={() => void handleRefresh()}
+        onPublish={() => void handlePublish()}
+        onUnpublish={handleUnpublish}
+      />
+
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* Left Panel - Template List & Page Setup */}
-        <DesignerSidebar
+        <ControlsAccordion
           templates={templates}
           currentTemplateId={currentTemplateId}
           loadTemplate={loadTemplate}
@@ -670,10 +690,8 @@ export function DesignerPage() {
             <div className="min-w-0 overflow-x-auto">
               <TabsList aria-label="Designer views" className="h-8 w-max gap-0.5 p-0.5">
                 <TabsTrigger value="canvas" className="h-7 px-3 text-xs">{t("designer.canvas")}</TabsTrigger>
-                <TabsTrigger value="visual" className="h-7 px-3 text-xs">Visual</TabsTrigger>
                 <TabsTrigger value="code" className="h-7 px-3 text-xs">{t("designer.code")}</TabsTrigger>
                 <TabsTrigger value="readme" className="h-7 px-3 text-xs">README</TabsTrigger>
-                <TabsTrigger value="preview" className="h-7 px-3 text-xs">{t("designer.preview")}</TabsTrigger>
                 <TabsTrigger value="variables" className="h-7 px-3 text-xs">{t("designer.variables")}</TabsTrigger>
               </TabsList>
             </div>
@@ -688,99 +706,27 @@ export function DesignerPage() {
             </div>
           </div>
 
-          <TemplateSyncBar
-            templateName={templateName}
-            remoteId={remoteId}
-            publishedAt={publishedAt}
-            templateUpdatedAt={templateUpdatedAt}
-            readOnly={isReadOnly({ origin })}
-            pending={pending}
-            onSave={() => void handleSave()}
-            onRefresh={() => void handleRefresh()}
-            onPublish={() => void handlePublish()}
-            onUnpublish={handleUnpublish}
-          />
-
           <TabsContent value={activeTab} className="mt-0 space-y-4">
           {activeTab !== "readme" && <ClassWarnings html={debouncedHtml} />}
           {activeTab === "canvas" && (
-            <Card>
-              <CardContent className="p-0">
-                <div className="flex items-center justify-center min-h-[500px] bg-muted rounded-b-lg overflow-auto">
-                  <div
-                    ref={canvasRef}
-                    className="bg-white shadow-md border relative"
-                    style={{ width: canvasWidth, height: canvasHeight, transformOrigin: "top left" }}
-                  >
-                    <iframe
-                      srcDoc={renderTemplate(
-                        debouncedHtml,
-                        debouncedCss,
-                        (() => {
-                          try {
-                            const ds = datasets.find((d) => d.name === selectedDatasetName) ?? datasets[0];
-                            return JSON.parse(ds.json);
-                          } catch {
-                            return DEFAULT_MOCK_DATA;
-                          }
-                        })(),
-                        compiledCss,
-                      )}
-                      sandbox=""
-                      className="pointer-events-none"
-                      title="Canvas preview"
-                      style={{ width: "100%", height: "100%", border: 0 }}
-                    />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {activeTab === "visual" && (
-            <VisualDesigner
-              initialHtml={htmlCode}
-              initialCss={cssCode}
-              onHtmlChange={setHtmlCode}
-              onCssChange={setCssCode}
+            <CanvasPane
+              html={debouncedHtml}
+              css={debouncedCss}
+              compiledCss={compiledCss}
+              data={sampleData}
+              width={canvasWidth}
+              height={canvasHeight}
             />
           )}
 
           {activeTab === "code" && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">HTML — {templateName}</CardTitle>
-                </CardHeader>
-                <CardContent className="p-0 border rounded-md overflow-hidden">
-                  <CodeMirror
-                    value={htmlCode}
-                    height="520px"
-                    extensions={[html()]}
-                    onChange={setHtmlCode}
-                    theme="dark"
-                    style={{ fontSize: "13px" }}
-                    basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: true }}
-                  />
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">CSS</CardTitle>
-                </CardHeader>
-                <CardContent className="p-0 border rounded-md overflow-hidden">
-                  <CodeMirror
-                    value={cssCode}
-                    height="520px"
-                    extensions={[css()]}
-                    onChange={setCssCode}
-                    theme="dark"
-                    style={{ fontSize: "13px" }}
-                    basicSetup={{ lineNumbers: true, foldGutter: true, highlightActiveLine: true }}
-                  />
-                </CardContent>
-              </Card>
-            </div>
+            <EditorPane
+              templateName={templateName}
+              htmlCode={htmlCode}
+              cssCode={cssCode}
+              onHtmlChange={setHtmlCode}
+              onCssChange={setCssCode}
+            />
           )}
 
           {activeTab === "readme" && (
@@ -818,24 +764,6 @@ export function DesignerPage() {
               </CardHeader>
               <CardContent>
                 <ReadmeEditor value={readme} onChange={setReadme} templateName={templateName} />
-              </CardContent>
-            </Card>
-          )}
-
-          {activeTab === "preview" && (
-            <Card>
-              <CardContent className="p-0">
-                <div className="flex items-center justify-center min-h-[500px] bg-muted rounded-b-lg">
-                  <div className="bg-white shadow-lg border overflow-auto" style={{ width: pageWidth * MM_TO_PX, minHeight: pageHeight * MM_TO_PX }}>
-                    <iframe
-                      srcDoc={renderTemplate(htmlCode, cssCode, DEFAULT_MOCK_DATA as any, compiledCss)}
-                      sandbox=""
-                      className="w-full border-0"
-                      style={{ height: pageHeight * MM_TO_PX, width: "100%" }}
-                      title="Preview"
-                    />
-                  </div>
-                </div>
               </CardContent>
             </Card>
           )}
@@ -1005,8 +933,8 @@ export function DesignerPage() {
                 Save Version
               </Button>
               <Button size="sm" onClick={() => {
-                setActiveTab("preview");
-                toast.success("Preview updated — see Preview tab");
+                setActiveTab("canvas");
+                toast.success("Showing the canvas");
               }}>
                 <Check className="h-4 w-4" />
                 Save & Preview
@@ -1017,26 +945,6 @@ export function DesignerPage() {
 
         {/* Right Panel - Properties */}
         <div className="space-y-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Properties</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-1">
-                <Label className="text-xs">Page</Label>
-                <div className="text-sm">{pageWidth} x {pageHeight} mm</div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Orientation</Label>
-                <div className="text-sm">{orientation}</div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Zoom</Label>
-                <div className="text-sm">{Math.round(zoom * 100)}%</div>
-              </div>
-            </CardContent>
-          </Card>
-
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm">Quick Helpers</CardTitle>

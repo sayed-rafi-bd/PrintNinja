@@ -29,8 +29,12 @@ interface Props<T extends { id: number; name: string }> {
   handleRestoreVersion: (v: TemplateVersion) => void;
 }
 
-/** Left column: template list, page setup, and version history. */
-export function DesignerSidebar<T extends { id: number; name: string }>({
+/**
+ * Left column: template list, page setup, and version history.
+ * Plain cards for now; Phase 2 of docs/DESIGNER_LAYOUT_PLAN.md turns them into
+ * accordion sections.
+ */
+export function ControlsAccordion<T extends { id: number; name: string }>({
   templates, currentTemplateId, loadTemplate, templateName, setTemplateName,
   pageWidth, setPageWidth, pageHeight, setPageHeight, presets: PAGE_PRESETS,
   orientation, setOrientation, versions, onNewVersion, openDiff, handleRestoreVersion,
