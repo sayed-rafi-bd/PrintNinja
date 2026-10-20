@@ -77,3 +77,12 @@ export function apiMe(token: string): Promise<ApiUser> {
 export function apiLogout(token: string): Promise<void> {
 	return request<void>("POST", "/v2/auth/logout", { token });
 }
+
+export interface ApiTemplateSummary {
+	id: string;
+	name: string;
+}
+
+export function apiMine(token: string): Promise<{ items: ApiTemplateSummary[] }> {
+	return request<{ items: ApiTemplateSummary[] }>("GET", "/v2/templates/mine?page=1&page_size=100", { token });
+}

@@ -40,6 +40,7 @@ export async function pc(browser: Browser, seed: AgentSeed = {}): Promise<Pc> {
 			share_session_token: null,
 			...(seed.settings ?? {}),
 		},
+		...(seed.templates !== undefined ? { templates: seed.templates } : {}),
 	});
 	return { context };
 }

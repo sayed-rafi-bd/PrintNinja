@@ -57,6 +57,20 @@ export interface ApplyReport {
 	skipped_dirty: number;
 }
 
+/** The Rust DirtyTemplate shape the engine pushes from. */
+export interface DirtyRow {
+	id: number;
+	server_id: string | null;
+	name: string;
+	summary: string;
+	page_w_mm: number;
+	page_h_mm: number;
+	readme: string;
+	html: string;
+	css: string;
+	base_revision: number | null;
+}
+
 /** One template to pre-seed the fake cache (AgentSeed.templates). */
 export interface SeedTemplate {
 	name?: string;
@@ -71,15 +85,13 @@ export interface SeedTemplate {
 	page_h?: number;
 }
 
-const SEED_KEY = "fake-agent:seed";
+import { seedTemplates } from "./store.js";
+
 const PERSIST_KEY = "fake-agent:templates";
 
 function readSeedTemplates(): SeedTemplate[] {
 	try {
-		const raw = localStorage.getItem(SEED_KEY);
-		if (!raw) return [];
-		const seed = JSON.parse(raw) as { templates?: SeedTemplate[] };
-		return Array.isArray(seed.templates) ? seed.templates : [];
+		return seedTemplates() as SeedTemplate[];
 	} catch {
 		return [];
 	}
@@ -161,6 +173,14 @@ export function createFakeCache() {
 			}
 		}
 		return undefined;
+	};
+
+	const findRow = (id: number): FakeTemplateRow => {
+		const row = templates.get(id);
+		if (!row || row.sync_state === "deleted_pending") {
+			throw new Error(`Template ${id} not found`);
+		}
+		return row;
 	};
 
 	const nowIso = () => new Date().toISOString();
@@ -282,8 +302,23 @@ export function createFakeCache() {
 			return { ...sync };
 		},
 
-		listDirty(): FakeTemplateRow[] {
-			return [...templates.values()].filter((t) => t.sync_state === "dirty");
+		listDirty(): DirtyRow[] {
+			// The Rust DirtyTemplate shape the engine PUTs from — not the
+			// internal row (page_w/html would arrive as undefined, 400).
+			return [...templates.values()]
+				.filter((t) => t.sync_state === "dirty")
+				.map((t) => ({
+					id: t.id,
+					server_id: t.server_id,
+					name: t.name,
+					summary: t.summary,
+					page_w_mm: t.page_w,
+					page_h_mm: t.page_h,
+					readme: t.readme,
+					html: t.versions[t.versions.length - 1]?.html ?? "",
+					css: t.versions[t.versions.length - 1]?.css ?? "",
+					base_revision: t.base_revision,
+				}));
 		},
 
 		markPushed(serverId: string, revision: number): void {
@@ -395,12 +430,26 @@ export function createFakeCache() {
 				}));
 		},
 
-		getTemplate(id: number): FakeTemplateRow {
-			const row = templates.get(id);
-			if (!row || row.sync_state === "deleted_pending") {
-				throw new Error(`Template ${id} not found`);
-			}
-			return row;
+		getTemplate(id: number): Record<string, unknown> {
+			const row = findRow(id);
+			// The Rust Template shape (page_w_mm, remote_id, origin…).
+			return {
+				id: row.id,
+				name: row.name,
+				current_version_id: row.versions[row.versions.length - 1]?.version_no ?? null,
+				page_w_mm: row.page_w,
+				page_h_mm: row.page_h,
+				orientation: row.orientation,
+				readme: row.readme,
+				summary: row.summary,
+				remote_id: row.server_id,
+				published_at: row.published_at,
+				origin: row.kind === "saved" ? "saved" : "own",
+				origin_owner: row.owner_handle,
+				withdrawn: false,
+				created_at: row.updated_at,
+				updated_at: row.updated_at,
+			};
 		},
 
 		createTemplate(req: Record<string, unknown>): FakeTemplateRow {

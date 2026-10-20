@@ -5,6 +5,8 @@
 
 export type AgentSeed = {
 	settings?: Record<string, string | null>;
+	/** Templates to pre-seed the fake sync cache (see cache.ts SeedTemplate). */
+	templates?: Array<Record<string, unknown>>;
 };
 
 export type AgentState = {
@@ -12,7 +14,6 @@ export type AgentState = {
 };
 
 const STATE_KEY = "fake-agent:state";
-const SEED_KEY = "fake-agent:seed";
 
 function defaultSettings(): Record<string, string | null> {
 	return {
@@ -22,19 +23,35 @@ function defaultSettings(): Record<string, string | null> {
 	};
 }
 
+export const SEED_KEY = "fake-agent:seed";
+
 function loadSeed(): AgentSeed {
+	// One-shot: the bundle entry removes the key after every module has
+	// evaluated, so settings and templates hydrate from the same seed
+	// regardless of module evaluation order.
 	try {
 		const raw = localStorage.getItem(SEED_KEY);
 		if (!raw) return {};
-		localStorage.removeItem(SEED_KEY);
 		return JSON.parse(raw) as AgentSeed;
 	} catch {
 		return {};
 	}
 }
 
+/** Templates pre-seeded for this context (F-series specs). Read live so
+ * unit tests can seed after import; the bundle consumes the key once. */
+export function seedTemplates(): Array<Record<string, unknown>> {
+	try {
+		const raw = localStorage.getItem(SEED_KEY);
+		if (!raw) return [];
+		const seed = JSON.parse(raw) as AgentSeed;
+		return Array.isArray(seed.templates) ? seed.templates : [];
+	} catch {
+		return [];
+	}
+}
+
 function loadState(): AgentState {
-	const seed = loadSeed();
 	try {
 		const raw = localStorage.getItem(STATE_KEY);
 		if (raw) {
@@ -46,7 +63,7 @@ function loadState(): AgentState {
 	} catch {
 		// Corrupt state falls through to the seed.
 	}
-	return { settings: { ...defaultSettings(), ...(seed.settings ?? {}) } };
+	return { settings: { ...defaultSettings(), ...(loadSeed().settings ?? {}) } };
 }
 
 const state: AgentState = loadState();
