@@ -104,7 +104,7 @@ describe("Designer page layout on a phone", () => {
   it("keeps the sync bar in the page header area, outside the tabs", async () => {
     renderDesigner();
     const tablist = await screen.findByRole("tablist", { name: "Designer views" });
-    const save = screen.getByRole("button", { name: "Save to server" });
+    const save = screen.getByTestId("designer-save");
     expect(screen.getByText("Draft")).toBeInTheDocument();
     // TabsList carries data-orientation too, so start from its parent to reach the Tabs root.
     const tabsRoot = tablist.parentElement?.closest("[data-orientation]");
@@ -238,7 +238,8 @@ describe("Designer page layout on desktop", () => {
   it("keeps the sync bar and toolbar in the header area", async () => {
     renderDesigner();
     await screen.findByTitle("Canvas preview");
-    expect(screen.getByRole("button", { name: "Save to server" })).toBeInTheDocument();
+    expect(screen.getByTestId("designer-save")).toBeInTheDocument();
+    expect(screen.getByTestId("template-sync-now")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /New/ })).toBeInTheDocument();
   });
 });

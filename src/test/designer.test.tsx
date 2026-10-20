@@ -28,12 +28,14 @@ beforeAll(() => {
 beforeEach(() => window.localStorage.clear());
 
 describe("DesignerToolbar", () => {
-  it("fires New and Export, and passes a chosen file to Import", async () => {
-    const onNew = vi.fn(); const onExport = vi.fn(); const onImportFile = vi.fn();
-    render(<DesignerToolbar onNew={onNew} onImportFile={onImportFile} onExport={onExport} />);
+  it("fires New, Save and Export, and passes a chosen file to Import", async () => {
+    const onNew = vi.fn(); const onSave = vi.fn(); const onExport = vi.fn(); const onImportFile = vi.fn();
+    render(<DesignerToolbar onNew={onNew} onSave={onSave} onImportFile={onImportFile} onExport={onExport} />);
     fireEvent.click(screen.getByRole("button", { name: /New/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     fireEvent.click(screen.getByRole("button", { name: "Export" }));
     expect(onNew).toHaveBeenCalled();
+    expect(onSave).toHaveBeenCalled();
     expect(onExport).toHaveBeenCalled();
     const file = new File(["{}"], "t.json", { type: "application/json" });
     fireEvent.change(screen.getByTestId("template-import"), { target: { files: [file] } });
@@ -45,27 +47,27 @@ describe("TemplateSyncBar", () => {
   const base = {
     templateName: "Label",
     pending: null,
-    onSave: vi.fn(),
-    onRefresh: vi.fn(),
     onPublish: vi.fn(),
     onUnpublish: vi.fn(),
+    onSyncNow: vi.fn(),
   };
 
-  it("saves a template that is only on this computer, and offers Publish", () => {
+  it("marks a template that is only on this computer, and offers Publish and Sync now", () => {
     render(<TemplateSyncBar {...base} remoteId={null} publishedAt={null} templateUpdatedAt={null} />);
     expect(screen.getByText("Draft")).toBeInTheDocument();
     expect(screen.getByText("Only on this computer")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Refresh/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Save to server" }));
-    expect(base.onSave).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Save to server/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Publish to Community" }));
     expect(base.onPublish).toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("template-sync-now"));
+    expect(base.onSyncNow).toHaveBeenCalled();
   });
 
-  it("offers Refresh and Unpublish once a template is published", () => {
+  it("offers Unpublish and Sync now once a template is published", () => {
     render(<TemplateSyncBar {...base} remoteId="r1" publishedAt="2026-02-01T00:00:00Z" templateUpdatedAt="2026-01-01T00:00:00Z" />);
     expect(screen.getByText("Published")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Refresh from server/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Sync now/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Unpublish" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Publish/ })).not.toBeInTheDocument();
   });
@@ -79,16 +81,6 @@ describe("TemplateSyncBar", () => {
   it("warns once when local changes are not on the server yet", () => {
     render(<TemplateSyncBar {...base} remoteId="r1" publishedAt="2026-01-01T00:00:00Z" templateUpdatedAt="2026-02-01T00:00:00Z" />);
     expect(screen.getAllByText(/not on the server yet/)).toHaveLength(1);
-  });
-
-  it("asks before refreshing, naming the template", async () => {
-    render(<TemplateSyncBar {...base} remoteId="r1" publishedAt="2026-02-01T00:00:00Z" templateUpdatedAt="2026-02-01T00:00:00Z" />);
-    fireEvent.click(screen.getByRole("button", { name: /Refresh from server/ }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText("Refresh “Label” from the server?")).toBeInTheDocument();
-    expect(base.onRefresh).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Refresh template" }));
-    await waitFor(() => expect(base.onRefresh).toHaveBeenCalled());
   });
 
   it("asks before unpublishing, naming the template", async () => {

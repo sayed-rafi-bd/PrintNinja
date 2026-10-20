@@ -49,13 +49,13 @@ import { useCompiledCss } from "@/lib/templates/useCompiledCss";
 import { formatCss, formatHtml } from "@/lib/utils/format";
 import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
 import * as share from "@/lib/share/client";
-import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
+import { notifyLocalEdit, syncNow } from "@/lib/sync/useSyncStatus";
 import {
   getLocalTemplate,
   isReadOnly,
-  refreshFromServer,
   saveToServer,
   type SaveOptions,
+  type SyncTemplate,
 } from "@/lib/share/sync";
 
 const PAGE_PRESETS = [
@@ -68,7 +68,7 @@ const PAGE_PRESETS = [
 ];
 
 /** Which sync action is running, so only its button says so. */
-type SyncAction = "save" | "refresh" | "publish" | "unpublish";
+type SyncAction = "save" | "publish" | "unpublish" | "sync";
 
 export function DesignerPage() {
   const { t } = useTranslation();
@@ -203,21 +203,25 @@ export function DesignerPage() {
     toast.success(`Loaded "${tpl.name}"`);
   };
 
-  const runSync = async (action: SyncAction, options: SaveOptions, done: string) => {
+  /**
+   * Write the editor into the local cache (a new version plus the
+   * metadata) and tell the engine to push. Saving is local-first: the
+   * server copy arrives through the next sync, not through a direct PUT.
+   */
+  const saveLocal = async (): Promise<SyncTemplate | null> => {
     if (!currentTemplateDbId) {
       toast.error("No template selected");
-      return;
+      return null;
     }
-    setPending(action);
+    setPending("save");
     try {
       const row = await getLocalTemplate(currentTemplateDbId);
       if (isReadOnly(row)) {
         toast.error("A saved copy from Community can’t be changed");
-        return;
+        return null;
       }
       // The editor holds the copy this PC would print. Put its content and its
-      // metadata into the local row first, so Save sends what the editor shows and
-      // Refresh, Print and this PC all read the same copy.
+      // metadata into the local row first, so Print and this PC read the same copy.
       await invoke("create_version", {
         req: {
           template_id: currentTemplateDbId,
@@ -229,7 +233,7 @@ export function DesignerPage() {
           created_by: "manual",
         },
       });
-      await invoke("update_template_meta", {
+      const updated = await invoke("update_template_meta", {
         req: {
           id: currentTemplateDbId,
           name: templateName,
@@ -238,14 +242,33 @@ export function DesignerPage() {
           summary: row.summary ?? "",
         },
       });
-      const result = await saveToServer(
-        { ...row, name: templateName, page_w_mm: pageWidth, page_h_mm: pageHeight },
-        options,
-      );
+      setRemoteId((updated as { server_id?: string | null }).server_id ?? row.server_id ?? null);
+      notifyLocalEdit();
+      return { ...row, name: templateName, page_w_mm: pageWidth, page_h_mm: pageHeight };
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const handleSave = async () => {
+    const saved = await saveLocal();
+    if (saved) toast.success("Saved on this PC");
+  };
+
+  const runPublish = async (options: SaveOptions, done: string) => {
+    if (!currentTemplateDbId) {
+      toast.error("No template selected");
+      return;
+    }
+    setPending("publish");
+    try {
+      const saved = await saveLocal();
+      if (!saved) return;
+      setPending("publish");
+      const result = await saveToServer(saved, options);
       setRemoteId(result.remoteId);
       setPublishedAt(result.published ? result.updatedAt : null);
       setTemplateUpdatedAt(result.updatedAt);
-      notifyLocalEdit();
       toast.success(done);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -254,33 +277,17 @@ export function DesignerPage() {
     }
   };
 
-  const handleSave = () => runSync("save", {}, "Saved to the server");
+  const handlePublish = () => runPublish({ publish: true }, "Published to Community");
 
-  const handlePublish = () => runSync("publish", { publish: true }, "Published to Community");
-
-  const handleRefresh = async () => {
-    if (!currentTemplateDbId) return;
-    setPending("refresh");
+  const handleSyncNow = async () => {
+    setPending("sync");
     try {
-      const row = await getLocalTemplate(currentTemplateDbId);
-      const result = await refreshFromServer(row);
-      // Show what came back, so the editor matches this PC's new copy.
-      setHtmlCode(formatHtml(result.template.body ?? ""));
-      setCssCode(formatCss(result.template.css ?? ""));
-      setTemplateName(result.name);
-      setPageWidth(result.page_w_mm);
-      setPageHeight(result.page_h_mm);
-      setReadme(result.template.readme ?? "");
-      setRemoteId(result.template.id);
-      setPublishedAt(result.template.published_at || null);
-      setTemplateUpdatedAt(result.template.updated_at);
-      toast.success(`Refreshed “${result.name}” from the server`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      await syncNow();
     } finally {
       setPending(null);
     }
   };
+
 
   const handleUnpublish = async () => {
     if (!currentTemplateDbId || !remoteId) return;
@@ -784,7 +791,7 @@ export function DesignerPage() {
     <div className="space-y-4 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-4 lg:space-y-0">
       <PageHeader title={t("designer.title")} description={t("pages.designer")}>
         {isDesktop && <LayoutToggle value={layout} onChange={setLayout} />}
-        <DesignerToolbar onNew={() => setShowNewTemplateDialog(true)} onImportFile={handleImportFile} onExport={handleExport} />
+        <DesignerToolbar onNew={() => setShowNewTemplateDialog(true)} onSave={() => void handleSave()} onImportFile={handleImportFile} onExport={handleExport} />
       </PageHeader>
 
       <TemplateSyncBar
@@ -794,10 +801,9 @@ export function DesignerPage() {
         templateUpdatedAt={templateUpdatedAt}
         readOnly={isReadOnly({ origin })}
         pending={pending}
-        onSave={() => void handleSave()}
-        onRefresh={() => void handleRefresh()}
         onPublish={() => void handlePublish()}
         onUnpublish={handleUnpublish}
+        onSyncNow={() => void handleSyncNow()}
       />
 
       {isDesktop ? (

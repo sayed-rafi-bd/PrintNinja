@@ -15,6 +15,7 @@ pub struct Template {
     pub readme: String,
     pub summary: String,
     pub remote_id: Option<String>,
+    pub server_id: Option<String>,
     pub published_at: Option<String>,
     pub origin: String,
     pub origin_owner: Option<String>,
@@ -34,7 +35,7 @@ pub fn list_templates(db: State<DbState>) -> AppResult<Vec<Template>> {
 
     let mut stmt = conn.prepare(
         "SELECT id, name, current_version_id, page_w_mm, page_h_mm,
-                orientation, readme, summary, remote_id, published_at,
+                orientation, readme, summary, remote_id, server_id, published_at,
                 origin, origin_owner, withdrawn, created_at, updated_at
          FROM templates WHERE sync_state <> 'deleted_pending'
          ORDER BY name COLLATE NOCASE",
@@ -52,12 +53,13 @@ pub fn list_templates(db: State<DbState>) -> AppResult<Vec<Template>> {
                 readme: row.get(6)?,
                 summary: row.get(7)?,
                 remote_id: row.get(8)?,
-                published_at: row.get(9)?,
-                origin: row.get(10)?,
-                origin_owner: row.get(11)?,
-                withdrawn: row.get::<_, i64>(12)? != 0,
-                created_at: row.get(13)?,
-                updated_at: row.get(14)?,
+                server_id: row.get(9)?,
+                published_at: row.get(10)?,
+                origin: row.get(11)?,
+                origin_owner: row.get(12)?,
+                withdrawn: row.get::<_, i64>(13)? != 0,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -229,7 +231,7 @@ pub fn write_template(conn: &Connection, req: &CreateTemplateRequest) -> AppResu
 fn tx_guard_to_template(conn: &rusqlite::Connection, id: i64) -> rusqlite::Result<Template> {
     conn.query_row(
         "SELECT id, name, current_version_id, page_w_mm, page_h_mm,
-                orientation, readme, summary, remote_id, published_at,
+                orientation, readme, summary, remote_id, server_id, published_at,
                 origin, origin_owner, withdrawn, created_at, updated_at
          FROM templates WHERE id = ?1 AND sync_state <> 'deleted_pending'",
         [id],
@@ -244,12 +246,13 @@ fn tx_guard_to_template(conn: &rusqlite::Connection, id: i64) -> rusqlite::Resul
                 readme: row.get(6)?,
                 summary: row.get(7)?,
                 remote_id: row.get(8)?,
-                published_at: row.get(9)?,
-                origin: row.get(10)?,
-                origin_owner: row.get(11)?,
-                withdrawn: row.get::<_, i64>(12)? != 0,
-                created_at: row.get(13)?,
-                updated_at: row.get(14)?,
+                server_id: row.get(9)?,
+                published_at: row.get(10)?,
+                origin: row.get(11)?,
+                origin_owner: row.get(12)?,
+                withdrawn: row.get::<_, i64>(13)? != 0,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
             })
         },
     )

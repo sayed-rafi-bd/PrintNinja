@@ -52,6 +52,7 @@ const local = (over: Partial<SyncTemplate> = {}): SyncTemplate => ({
   page_h_mm: 297,
   readme: "# Invoice",
   remote_id: null,
+  server_id: "11111111-1111-4111-8111-111111111111",
   published_at: null,
   origin: "own",
   origin_owner: null,
@@ -89,6 +90,7 @@ describe("saveToServer", () => {
     const result = await saveToServer(local());
 
     const payload = client.putRemoteTemplate.mock.calls[0][0];
+    expect(payload.id).toBe("11111111-1111-4111-8111-111111111111"); // the row's own server id, never a fresh UUID
     expect(payload.body).toBe("<p>local</p>");
     expect(payload.css).toBe(".local {}"); // CSS must not be left behind
     expect(payload.readme).toBe("# Invoice");
@@ -97,6 +99,10 @@ describe("saveToServer", () => {
     expect(client.unpublishRemoteTemplate).not.toHaveBeenCalled();
     expect(result.remoteId).toBe(REMOTE.id);
     expect(result.published).toBe(false);
+    expect(invoke).toHaveBeenCalledWith("cache_mark_pushed", {
+      server_id: REMOTE.id,
+      revision: REMOTE.revision,
+    });
     expect(invoke).toHaveBeenCalledWith("set_publish_info", {
       req: { id: 7, remote_id: REMOTE.id, published_at: null },
     });
@@ -110,6 +116,7 @@ describe("saveToServer", () => {
     expect(client.putRemoteTemplate.mock.calls[0][0]).toMatchObject({ if_revision: 4 });
     expect(client.publishRemoteTemplate).not.toHaveBeenCalled();
     expect(client.unpublishRemoteTemplate).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith("cache_mark_pushed", { server_id: REMOTE.id, revision: 5 });
     expect(result.published).toBe(false);
     expect(result.remoteId).toBe(REMOTE.id);
   });
@@ -145,6 +152,7 @@ describe("saveToServer", () => {
     );
     await expect(saveToServer(local({ remote_id: REMOTE.id }))).rejects.toThrow(/another PC/i);
     expect(calls("set_publish_info")).toHaveLength(0);
+    expect(calls("cache_mark_pushed")).toHaveLength(0);
   });
 });
 

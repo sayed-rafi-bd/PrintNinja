@@ -5,11 +5,16 @@ import type { EngineApi, EngineCache } from "@/lib/sync/engine";
 
 const INITIAL: SyncStatus = { state: "syncing", pending: 0, conflicts: 0, lastPullAt: null, lastError: null };
 
-let current: { schedulePushSoon: () => void } | null = null;
+let current: { schedulePushSoon: () => void; syncNow: () => Promise<void> } | null = null;
 
 /** Tell the running scheduler a local edit needs pushing (3 s debounce). No-op before start. */
 export function notifyLocalEdit(): void {
 	current?.schedulePushSoon();
+}
+
+/** A full sync now (pull + push + uses). No-op before start. */
+export function syncNow(): Promise<void> {
+	return current?.syncNow() ?? Promise.resolve();
 }
 
 export function useSyncStatus(deps?: { cache?: EngineCache; api?: EngineApi }): SyncStatus {

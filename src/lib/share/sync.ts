@@ -28,6 +28,8 @@ export interface SyncTemplate {
   page_h_mm: number;
   readme: string;
   remote_id: string | null;
+  /** The sync identity minted at creation; the only id pushes may use. */
+  server_id: string | null;
   published_at: string | null;
   origin: string;
   origin_owner: string | null;
@@ -74,10 +76,13 @@ export interface SaveOptions {
 /**
  * Push the current local version to the server. A template that was never
  * saved is created private; an existing one keeps the visibility it has
- * unless asked otherwise. The server revision is read first, since the
- * local row does not track it yet (the sync engine will); a concurrent
- * edit elsewhere fails here with a revision conflict instead of silently
- * overwriting it.
+ * unless asked otherwise. The push always uses the row's own server id
+ * (never a fresh UUID), so the engine and this path share one identity
+ * and never create duplicates. The server revision is read first, since
+ * the local row does not track it yet (the sync engine will); a
+ * concurrent edit elsewhere fails here with a revision conflict instead
+ * of silently overwriting it. The push is recorded locally so the next
+ * engine push bases on the new revision instead of 409ing.
  */
 export async function saveToServer(
   template: SyncTemplate,
@@ -96,7 +101,7 @@ export async function saveToServer(
   };
   let remote: RemoteTemplate;
   if (!template.remote_id) {
-    const remoteId = crypto.randomUUID();
+    const remoteId = template.server_id ?? crypto.randomUUID();
     remote = await putRemoteTemplate({ id: remoteId, ...body });
     if (options.publish === true) {
       remote = await publishRemoteTemplate(remote.id);
@@ -123,6 +128,9 @@ export async function saveToServer(
   const updatedAt = remote.updated_at;
   const isPublished = remote.published_at != null;
   const storedId = remote.id;
+  // The push is recorded so the next engine push bases on the new
+  // revision instead of 409ing on the stale one.
+  await invoke("cache_mark_pushed", { server_id: storedId, revision: remote.revision });
   // The local copy and the server copy now agree. A published template records the
   // moment the server copy was published; a private one has no publish time at all.
   await invoke("set_publish_info", {

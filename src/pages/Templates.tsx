@@ -38,6 +38,7 @@ interface LocalTemplate {
   readme: string;
   summary: string;
   remote_id: string | null;
+  server_id: string | null;
   published_at: string | null;
   origin: string;
   origin_owner: string | null;

@@ -36,6 +36,16 @@ export const testids = {
 	templateImport: "template-import",
 	/** Tailwind warnings panel in the designer. */
 	classWarnings: "class-warnings",
+	/** Designer toolbar: save the working copy locally. */
+	designerSave: "designer-save",
+	/** Designer sync bar: state badge wrapper (data-state). */
+	templateState: "template-state",
+	/** Designer sync bar: publish button. */
+	templatePublish: "template-publish",
+	/** Designer sync bar: unpublish button. */
+	templateUnpublish: "template-unpublish",
+	/** Designer sync bar: manual sync button. */
+	templateSyncNow: "template-sync-now",
 } as const;
 
 export type TestId = (typeof testids)[keyof typeof testids];
