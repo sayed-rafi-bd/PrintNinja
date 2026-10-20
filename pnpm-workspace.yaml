@@ -1,3 +1,11 @@
+packages:
+  - server
+  - e2e
+
+# Install scripts pnpm must run. Confirmed by the Phase 1 spike (item 2):
+# esbuild postinstall, argon2's node-gyp-build and Prisma's engines are the
+# only packages in this workspace with install scripts; @playwright/test has
+# none (browsers come from `playwright install`).
 allowBuilds:
   esbuild: true
   argon2: true
