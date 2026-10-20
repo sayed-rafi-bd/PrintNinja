@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@/lib/i18n";
+import { EditorView } from "@uiw/react-codemirror";
 import { DesignerPage } from "@/pages/Designer";
 
 // The page reads templates and versions over IPC on mount; answer as a fresh
@@ -22,15 +23,17 @@ vi.mock("@tauri-apps/api/core", async (importOriginal) => {
   return { ...actual, invoke: (...a: unknown[]) => invoke(a[0] as string) };
 });
 
+// Which layout the page renders: `lg` and up is the desktop workspace, below it the tabs.
+let desktop = false;
+const setViewport = (kind: "phone" | "desktop") => { desktop = kind === "desktop"; };
+
 beforeAll(() => {
-  window.matchMedia =
-    window.matchMedia ||
-    ((q: string) =>
-      ({
-        matches: false, media: q, onchange: null,
-        addListener: vi.fn(), removeListener: vi.fn(),
-        addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
-      }) as unknown as typeof window.matchMedia);
+  window.matchMedia = ((q: string) =>
+    ({
+      matches: q.includes("min-width: 1024px") ? desktop : false, media: q, onchange: null,
+      addListener: vi.fn(), removeListener: vi.fn(),
+      addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
+    }) as unknown as MediaQueryList) as typeof window.matchMedia;
   (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver || class { observe() {} unobserve() {} disconnect() {} };
   Element.prototype.scrollIntoView = Element.prototype.scrollIntoView || (() => {});
   Element.prototype.hasPointerCapture = Element.prototype.hasPointerCapture || (() => false);
@@ -60,21 +63,37 @@ const openTab = (name: string) => {
   fireEvent.click(tab);
 };
 
-describe("Designer page layout", () => {
-  it("offers Canvas, Code, README and Variables, and no Visual or Preview tab", async () => {
+describe("Designer page layout on a phone", () => {
+  beforeEach(() => setViewport("phone"));
+
+  it("offers Canvas, Code, README and Sample data, and no Visual or Preview tab", async () => {
     renderDesigner();
     const tablist = await screen.findByRole("tablist", { name: "Designer views" });
     const names = Array.from(tablist.querySelectorAll('[role="tab"]')).map((t) => t.textContent);
-    expect(names).toEqual(["Canvas", "Code", "README", "Variables"]);
+    expect(names).toEqual(["Canvas", "Code", "README", "Sample data"]);
     expect(screen.queryByRole("tab", { name: "Visual" })).not.toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Preview" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Variables" })).not.toBeInTheDocument();
   });
 
-  it("no longer shows the Properties card, but keeps Quick Helpers", async () => {
+  it("keeps Templates, Page Setup and Versions collapsed above the tabs", async () => {
+    renderDesigner();
+    await screen.findByRole("tablist", { name: "Designer views" });
+    for (const name of ["Templates", "Page Setup", "Versions"]) {
+      expect(screen.getByRole("button", { name })).toHaveAttribute("aria-expanded", "false");
+    }
+    expect(screen.queryByLabelText("Width (mm)")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Page Setup" }));
+    expect(screen.getByLabelText("Width (mm)")).toBeInTheDocument();
+  });
+
+  it("no longer shows the Properties card, and keeps the helpers in the Sample data tab", async () => {
     renderDesigner();
     await screen.findByRole("tablist", { name: "Designer views" });
     expect(screen.queryByText("Properties")).not.toBeInTheDocument();
-    expect(screen.getByText("Quick Helpers")).toBeInTheDocument();
+    openTab("Sample data");
+    expect(await screen.findByText("Available helpers:")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Use dataset Sample Order" })).toBeChecked();
   });
 
   it("keeps the sync bar in the page header area, outside the tabs", async () => {
@@ -89,9 +108,10 @@ describe("Designer page layout", () => {
     expect(tabsRoot?.contains(save)).toBe(false);
   });
 
-  it("starts on the canvas and shows the code editors on the Code tab", async () => {
+  it("starts on the canvas, with its zoom controls, and shows the code editors on the Code tab", async () => {
     renderDesigner();
     await screen.findByTitle("Canvas preview");
+    expect(screen.getByRole("combobox", { name: "Zoom level" })).toHaveTextContent("Fit");
     expect(screen.queryByText("CSS")).not.toBeInTheDocument();
     openTab("Code");
     await waitFor(() => expect(screen.getByText(/^HTML — /)).toBeInTheDocument());
@@ -107,5 +127,113 @@ describe("Designer page layout", () => {
     fireEvent.click(screen.getByRole("button", { name: /Save & Preview/ }));
     expect(await screen.findByTitle("Canvas preview")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Canvas" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("saves the README from its tab", async () => {
+    renderDesigner();
+    await screen.findByTitle("Canvas preview");
+    openTab("README");
+    fireEvent.click(await screen.findByRole("button", { name: "Save README" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("update_readme"));
+  });
+});
+
+describe("Designer page layout on desktop", () => {
+  beforeEach(() => setViewport("desktop"));
+  afterEach(() => setViewport("phone"));
+
+  it("shows the editor and the canvas together, with no view tabs", async () => {
+    renderDesigner();
+    expect(await screen.findByTitle("Canvas preview")).toBeInTheDocument();
+    expect(screen.queryByRole("tablist", { name: "Designer views" })).not.toBeInTheDocument();
+    const files = screen.getByRole("tablist", { name: "Editor files" });
+    expect(Array.from(files.querySelectorAll('[role="tab"]')).map((t) => t.textContent)).toEqual(["HTML", "CSS", "README"]);
+    // Both are on screen at once: no switching tabs to see an edit.
+    expect(screen.getByLabelText("HTML editor")).toBeInTheDocument();
+    expect(screen.getByTitle("Canvas preview")).toBeInTheDocument();
+  });
+
+  it("has no Visual, Preview, Canvas or Code tab and no Properties card", async () => {
+    renderDesigner();
+    await screen.findByTitle("Canvas preview");
+    for (const name of ["Visual", "Preview", "Canvas", "Code", "Variables", "Sample data"]) {
+      expect(screen.queryByRole("tab", { name })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByText("Properties")).not.toBeInTheDocument();
+  });
+
+  it("puts the controls in an accordion with only Page Setup open", async () => {
+    renderDesigner();
+    await screen.findByTitle("Canvas preview");
+    const controls = within(screen.getByRole("complementary", { name: "Designer controls" }));
+    const states = ["Templates", "Page Setup", "Sample data", "Versions", "Helpers"].map(
+      (name) => [name, controls.getByRole("button", { name }).getAttribute("aria-expanded")],
+    );
+    expect(states).toEqual([
+      ["Templates", "false"], ["Page Setup", "true"], ["Sample data", "false"], ["Versions", "false"], ["Helpers", "false"],
+    ]);
+    expect(controls.getByLabelText("Width (mm)")).toBeInTheDocument();
+  });
+
+  it("moves the sample datasets into the accordion, where they drive the canvas", async () => {
+    renderDesigner();
+    await screen.findByTitle("Canvas preview");
+    fireEvent.click(screen.getByRole("button", { name: "Sample data" }));
+    expect(await screen.findByRole("radio", { name: "Use dataset Sample Order" })).toBeChecked();
+  });
+
+  it("changing the page size in the accordion resizes the canvas without leaving the editor", async () => {
+    renderDesigner();
+    const frame = await screen.findByTitle("Canvas preview");
+    const width = screen.getByLabelText("Width (mm)");
+    fireEvent.change(width, { target: { value: "100" } });
+    await waitFor(() => expect(frame.parentElement).toHaveStyle({ width: `${Math.round(100 * 3.7795 * 10000) / 10000}px` }));
+    expect(screen.getByLabelText("HTML editor")).toBeInTheDocument();
+  });
+
+  it("typing in the HTML or CSS editor updates the canvas without changing tabs", async () => {
+    renderDesigner();
+    const frame = await screen.findByTitle("Canvas preview");
+    const editorOf = (label: string) => {
+      const view = EditorView.findFromDOM(screen.getByLabelText(label).querySelector(".cm-editor") as HTMLElement);
+      if (!view) throw new Error(`no editor for ${label}`);
+      return view;
+    };
+
+    const htmlView = editorOf("HTML editor");
+    act(() => htmlView.dispatch({ changes: { from: 0, to: htmlView.state.doc.length, insert: "<p>live-edit-marker</p>" } }));
+    // The canvas re-renders 300 ms after typing stops.
+    await waitFor(() => expect(frame.getAttribute("srcdoc")).toContain("live-edit-marker"));
+    expect(screen.getByRole("tab", { name: "HTML" })).toHaveAttribute("aria-selected", "true");
+
+    // The CSS editor is mounted behind its tab, so it keeps working and feeds the canvas too.
+    const cssView = editorOf("CSS editor");
+    act(() => cssView.dispatch({ changes: { from: 0, to: cssView.state.doc.length, insert: "p{color:#123456}" } }));
+    await waitFor(() => expect(frame.getAttribute("srcdoc")).toContain("color:#123456"));
+    expect(screen.getByRole("tab", { name: "HTML" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("opens the README as a tab of the editor pane", async () => {
+    renderDesigner();
+    await screen.findByTitle("Canvas preview");
+    openTab("README");
+    expect(await screen.findByRole("button", { name: "Save README" })).toBeInTheDocument();
+    expect(screen.getByTitle("Canvas preview")).toBeInTheDocument();
+  });
+
+  it("keeps the Barcode, Font and Save Version actions, without a Save & Preview button", async () => {
+    renderDesigner();
+    await screen.findByTitle("Canvas preview");
+    for (const name of ["Barcode", "Font", "Save Version"]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("button", { name: /Save & Preview/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps the sync bar and toolbar in the header area", async () => {
+    renderDesigner();
+    await screen.findByTitle("Canvas preview");
+    expect(screen.getByRole("button", { name: "Save to server" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /New/ })).toBeInTheDocument();
   });
 });

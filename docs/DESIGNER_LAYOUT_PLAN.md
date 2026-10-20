@@ -1,6 +1,6 @@
 # PrintNinja: Designer Layout Plan
 
-Branch: `develop` · Status: Final · Phase 1 done, phases 2–4 not started · Date: 2026-10-20
+Branch: `develop` · Status: Final · Phases 1 and 2 done, phases 3–4 not started · Date: 2026-10-20
 
 Goal: make the Designer a code-first workspace where you can type and watch the page change at the same time. Controls move into a left accordion, the editor and the canvas sit side by side, and the unused Visual tab is removed. Mobile keeps today's single-column layout.
 
@@ -111,13 +111,27 @@ What Phase 1 did differently from the list above:
 - Quick Helpers and the Variables tab are untouched; they move in Phase 2.
 - Not in the original list: the **Save & Preview** button switched to the Preview tab, so it now switches to Canvas. The `designer.preview` i18n key and the unused `canvasRef` were removed with the tab.
 
-### Phase 2: New desktop shell (about 1 day)
+### Phase 2: New desktop shell (about 1 day) — done
 
 - Add `@radix-ui/react-accordion` and a `src/components/ui/accordion.tsx` wrapper, plus a `resizable.tsx` wrapper around `react-resizable-panels`.
 - Build the three-region workspace at `lg` and up: controls accordion, editor pane (HTML | CSS | README), canvas pane.
 - Add Fit-to-width zoom and move the zoom controls into the canvas toolbar.
 - Below `lg`, fall back to the existing tabs, with the accordion collapsed by default.
 - Done when: typing in the HTML or CSS editor visibly updates the canvas without changing tabs, on desktop and on a phone-sized viewport.
+
+What Phase 2 did differently from the list above:
+
+- **Zoom now scales the page.** The old canvas resized the iframe, so a smaller zoom made the template reflow into a narrower page instead of shrinking. That would have made Fit show a layout the printer never produces. The page is now laid out at its true size (mm × 3.7795) and scaled with a CSS transform. Fit is capped at 100%: a narrow roll is not enlarged. The zoom picker offers Fit, 50% and 100%; − and + step through 25–300%.
+- **Zoom state lives in `CanvasWorkspace`** (new: toolbar plus `CanvasPane`), not in `Designer.tsx`. On a phone it resets to Fit when you leave the Canvas tab.
+- **Sample data and Helpers** moved into the accordion on desktop. On a phone Sample data stays a tab (renamed from Variables, i18n key `designer.sampleData`) and the helpers sit inside it, so the collapsed accordion holds only Templates, Page Setup and Versions as section 3 says.
+- **`EditorPane` is now the desktop pane** (HTML | CSS | README tabs, both editors stay mounted so cursor and undo history survive a tab switch). The stacked HTML/CSS cards the phone's Code tab uses are `CodeEditors` in the same file. New small components: `ReadmePanel`, `SampleDataPanel`, `HelpersPanel`, `DesignerActions`.
+- **`Layout.tsx` knows the Designer routes** (`/` and `/template/:id`): at `lg` and up it stops scrolling `main` and lets the page fill the height. Other pages are unchanged.
+- **The sync bar stays a full-width row under the title.** Its notices need the width, so inline placement next to the title is still open.
+- **Barcode, Font and Save Version** sit under the editor on desktop. **Save & Preview** is gone there, since the canvas is always visible; it stays on a phone.
+- Class-name warnings show under the editor tabs on desktop, and only above the Canvas and Code tabs on a phone (they used to show above Sample data too).
+- Not done, because they are Phase 3: remembering pane sizes and open sections, the layout toggle, the icon rail, click-to-insert, the error banner.
+- Accordion headers render as `<h2>`, not Radix's default `<h3>`, to keep heading order under the page `<h1>` (the existing axe test caught this).
+- Checked so far by unit tests only (jsdom): typing in the HTML or CSS editor updates the canvas without a tab change, on desktop. Real-browser checks of fill-height, pane sizing and Fit are still to do in Phase 4.
 
 ### Phase 3: Polish (about ½ day)
 

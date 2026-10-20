@@ -101,6 +101,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // The Designer's desktop workspace fills the viewport and scrolls inside its own
+  // panes, so the page itself must not scroll there. (Below `lg` it scrolls as usual.)
+  const fillsViewport = location.pathname === "/" || location.pathname.startsWith("/template/");
+
   const modKey = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 
   return (
@@ -190,8 +194,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </aside>
 
-        <main id="main" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto focus:outline-none">
-          <div className="mx-auto w-full max-w-[1600px] space-y-4 px-4 py-4 md:px-6 md:py-5">{children}</div>
+        <main id="main" tabIndex={-1} className={cn("min-w-0 flex-1 overflow-y-auto focus:outline-none", fillsViewport && "lg:overflow-hidden")}>
+          <div className={cn("mx-auto w-full max-w-[1600px] space-y-4 px-4 py-4 md:px-6 md:py-5", fillsViewport && "lg:flex lg:h-full lg:flex-col")}>{children}</div>
         </main>
       </div>
 

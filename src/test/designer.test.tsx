@@ -4,7 +4,9 @@ import "@/lib/i18n";
 import { DesignerToolbar } from "@/components/designer/DesignerToolbar";
 import { ControlsAccordion } from "@/components/designer/ControlsAccordion";
 import { CanvasPane } from "@/components/designer/CanvasPane";
-import { EditorPane } from "@/components/designer/EditorPane";
+import { CodeEditors, EditorPane } from "@/components/designer/EditorPane";
+import { CanvasWorkspace, MM_TO_PX, fitZoom, stepZoom } from "@/components/designer/CanvasWorkspace";
+import { SampleDataPanel } from "@/components/designer/SampleDataPanel";
 import { TemplateSyncBar } from "@/components/designer/TemplateSyncBar";
 
 beforeAll(() => {
@@ -112,9 +114,44 @@ describe("ControlsAccordion", () => {
     versions, onNewVersion: vi.fn(), openDiff: vi.fn(), handleRestoreVersion: vi.fn(),
   });
 
+  const ALL_OPEN = ["templates", "page", "sample-data", "versions", "helpers"];
+
+  it("opens only Page Setup at first, and opens and closes sections on click", () => {
+    render(<ControlsAccordion {...props()} />);
+    const trigger = (name: string) => screen.getByRole("button", { name });
+    expect(trigger("Page Setup")).toHaveAttribute("aria-expanded", "true");
+    for (const name of ["Templates", "Versions", "Helpers"]) {
+      expect(trigger(name)).toHaveAttribute("aria-expanded", "false");
+    }
+    expect(screen.getByLabelText("Width (mm)")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Receipt/ })).not.toBeInTheDocument();
+    // Several sections can be open at once.
+    fireEvent.click(trigger("Templates"));
+    expect(screen.getByRole("button", { name: /Receipt/ })).toBeInTheDocument();
+    expect(screen.getByLabelText("Width (mm)")).toBeInTheDocument();
+    fireEvent.click(trigger("Page Setup"));
+    expect(screen.queryByLabelText("Width (mm)")).not.toBeInTheDocument();
+  });
+
+  it("starts fully collapsed when asked to, as on a phone", () => {
+    render(<ControlsAccordion {...props()} defaultOpen={[]} showHelpers={false} />);
+    for (const name of ["Templates", "Page Setup", "Versions"]) {
+      expect(screen.getByRole("button", { name })).toHaveAttribute("aria-expanded", "false");
+    }
+    expect(screen.queryByRole("button", { name: "Helpers" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sample data" })).not.toBeInTheDocument();
+  });
+
+  it("shows the sample data and helpers sections when given them", () => {
+    render(<ControlsAccordion {...props()} defaultOpen={ALL_OPEN} sampleData={<p>datasets here</p>} />);
+    expect(screen.getByRole("button", { name: "Sample data" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("datasets here")).toBeInTheDocument();
+    expect(screen.getByText("Available helpers:")).toBeInTheDocument();
+  });
+
   it("marks the open template and loads another on click", () => {
     const p = props();
-    render(<ControlsAccordion {...p} />);
+    render(<ControlsAccordion {...p} defaultOpen={ALL_OPEN} />);
     expect(screen.getByRole("button", { name: /Label/ })).toHaveAttribute("aria-current", "true");
     fireEvent.click(screen.getByRole("button", { name: /Receipt/ }));
     expect(p.loadTemplate).toHaveBeenCalledWith(p.templates[0]);
@@ -122,7 +159,7 @@ describe("ControlsAccordion", () => {
 
   it("applies a page preset and labels its fields", () => {
     const p = props();
-    render(<ControlsAccordion {...p} />);
+    render(<ControlsAccordion {...p} defaultOpen={ALL_OPEN} />);
     fireEvent.click(screen.getByRole("button", { name: "A4" }));
     expect(p.setPageWidth).toHaveBeenCalledWith(210);
     expect(p.setPageHeight).toHaveBeenCalledWith(297);
@@ -131,7 +168,7 @@ describe("ControlsAccordion", () => {
 
   it("restores and diffs versions, but not the current one", () => {
     const p = props();
-    render(<ControlsAccordion {...p} />);
+    render(<ControlsAccordion {...p} defaultOpen={ALL_OPEN} />);
     expect(screen.getByRole("button", { name: "Restore version 2" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Restore version 1" }));
     expect(p.handleRestoreVersion).toHaveBeenCalledWith(versions[1]);
@@ -196,12 +233,163 @@ describe("CanvasPane", () => {
     expect(frame.getAttribute("srcdoc")).toContain("Hi Two");
     expect(frame.parentElement).toHaveStyle({ width: "100px", height: "200px" });
   });
+
+  it("scales the page instead of resizing it, so zooming never reflows the template", () => {
+    render(<CanvasPane {...base} data={{}} width={400} height={800} zoom={0.5} />);
+    const frame = screen.getByTitle("Canvas preview");
+    // The page keeps its true size and is scaled; the box around it takes the scaled size.
+    expect(frame.parentElement).toHaveStyle({ width: "400px", height: "800px", transform: "scale(0.5)" });
+    expect(frame.parentElement?.parentElement).toHaveStyle({ width: "200px", height: "400px" });
+  });
+});
+
+describe("zoom maths", () => {
+  it("fits the page to the width it has, never above 100%", () => {
+    // 600 px of space, 32 px of it padding, against a 568 px page: exactly 100%.
+    expect(fitZoom(600, 568)).toBe(1);
+    expect(fitZoom(2000, 302)).toBe(1);
+    // An A4 page (794 px) in 500 px of space.
+    expect(fitZoom(500, 794)).toBeCloseTo((500 - 32) / 794, 5);
+  });
+
+  it("shows the page at full size before it has been measured, and never goes below 25%", () => {
+    expect(fitZoom(0, 794)).toBe(1);
+    expect(fitZoom(100, 794)).toBe(0.25);
+  });
+
+  it("steps to the next zoom level up or down, and stops at the ends", () => {
+    expect(stepZoom(1, 1)).toBe(1.25);
+    expect(stepZoom(1, -1)).toBe(0.75);
+    expect(stepZoom(0.63, 1)).toBe(0.75);
+    expect(stepZoom(0.63, -1)).toBe(0.5);
+    expect(stepZoom(3, 1)).toBe(3);
+    expect(stepZoom(0.25, -1)).toBe(0.25);
+  });
+});
+
+describe("CanvasWorkspace", () => {
+  const props = { html: "<p>Hi</p>", css: "", compiledCss: "", data: {}, pageWidthMm: 80, pageHeightMm: 200 };
+  const pageBox = () => screen.getByTitle("Canvas preview").parentElement as HTMLElement;
+  // The picker repeats the percentage once it is off Fit, so read the live readout next to the buttons.
+  const readout = () => document.querySelector("[aria-live=polite]") as HTMLElement;
+
+  it("starts on Fit, with zoom controls in its own toolbar", () => {
+    render(<CanvasWorkspace {...props} />);
+    expect(screen.getByRole("combobox", { name: "Zoom level" })).toHaveTextContent("Fit");
+    expect(screen.getByRole("button", { name: "Zoom in" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Zoom out" })).toBeInTheDocument();
+    expect(readout()).toHaveTextContent("100%");
+  });
+
+  it("zooms out and in by steps, leaving Fit", () => {
+    render(<CanvasWorkspace {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Zoom out" }));
+    expect(readout()).toHaveTextContent("75%");
+    expect(screen.getByRole("combobox", { name: "Zoom level" })).toHaveTextContent("75%");
+    // The page is laid out at its true size (80 mm) and scaled.
+    expect(pageBox()).toHaveStyle({ width: `${80 * MM_TO_PX}px`, transform: "scale(0.75)" });
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(readout()).toHaveTextContent("125%");
+  });
+
+  it("offers Fit, 50% and 100% in the zoom picker", async () => {
+    render(<CanvasWorkspace {...props} />);
+    fireEvent.click(screen.getByRole("combobox", { name: "Zoom level" }));
+    const options = (await screen.findAllByRole("option")).map((o) => o.textContent);
+    expect(options).toEqual(["Fit", "50%", "100%"]);
+    fireEvent.click(screen.getByRole("option", { name: "50%" }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Zoom level" })).toHaveTextContent("50%"));
+    expect(pageBox()).toHaveStyle({ transform: "scale(0.5)" });
+  });
+
+  it("fills its parent when asked, so the page does not scroll", () => {
+    const { container } = render(<CanvasWorkspace {...props} fill />);
+    expect(container.firstElementChild).toHaveClass("h-full");
+  });
+});
+
+describe("CodeEditors", () => {
+  it("labels the HTML editor with the template name, and has a CSS editor", () => {
+    render(<CodeEditors templateName="Label" htmlCode="<b>x</b>" cssCode="b{}" onHtmlChange={vi.fn()} onCssChange={vi.fn()} />);
+    expect(screen.getByText("HTML — Label")).toBeInTheDocument();
+    expect(screen.getByText("CSS")).toBeInTheDocument();
+  });
 });
 
 describe("EditorPane", () => {
-  it("labels the HTML editor with the template name, and has a CSS editor", () => {
-    render(<EditorPane templateName="Label" htmlCode="<b>x</b>" cssCode="b{}" onHtmlChange={vi.fn()} onCssChange={vi.fn()} />);
-    expect(screen.getByText("HTML — Label")).toBeInTheDocument();
-    expect(screen.getByText("CSS")).toBeInTheDocument();
+  const props = () => ({
+    templateName: "Label", htmlCode: "<b>x</b>", cssCode: "b{}",
+    onHtmlChange: vi.fn(), onCssChange: vi.fn(),
+    readme: "# Label docs", onReadmeChange: vi.fn(), readmeSaving: false, onSaveReadme: vi.fn(),
+  });
+  // Radix Tabs switch on mousedown, not click.
+  const openTab = (name: string) => {
+    const tab = screen.getByRole("tab", { name });
+    fireEvent.mouseDown(tab, { button: 0 });
+    fireEvent.click(tab);
+  };
+
+  it("has HTML, CSS and README tabs, starting on HTML", () => {
+    render(<EditorPane {...props()} />);
+    const names = screen.getAllByRole("tab").map((t) => t.textContent);
+    expect(names).toEqual(["HTML", "CSS", "README"]);
+    expect(screen.getByRole("tab", { name: "HTML" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("keeps both code editors mounted, so a tab switch does not lose the cursor or undo history", () => {
+    const { container } = render(<EditorPane {...props()} />);
+    expect(container.querySelectorAll(".cm-editor")).toHaveLength(2);
+    openTab("CSS");
+    expect(screen.getByRole("tab", { name: "CSS" })).toHaveAttribute("aria-selected", "true");
+    expect(container.querySelectorAll(".cm-editor")).toHaveLength(2);
+  });
+
+  it("shows the README editor and its Save button on the README tab", () => {
+    const p = props();
+    render(<EditorPane {...p} />);
+    expect(screen.queryByText(/README — Label/)).not.toBeInTheDocument();
+    openTab("README");
+    expect(screen.getByText("README — Label")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save README" }));
+    expect(p.onSaveReadme).toHaveBeenCalled();
+  });
+
+  it("shows notices under the HTML and CSS tabs, but not the README", () => {
+    render(<EditorPane {...props()} notices={<p>watch out</p>} />);
+    expect(screen.getByText("watch out")).toBeInTheDocument();
+    openTab("CSS");
+    expect(screen.getByText("watch out")).toBeInTheDocument();
+    openTab("README");
+    expect(screen.queryByText("watch out")).not.toBeInTheDocument();
+  });
+});
+
+describe("SampleDataPanel", () => {
+  const datasets = [
+    { name: "Sample Order", json: '{"store":{"name":"A"},"items":[]}', isDefault: true },
+    { name: "Empty", json: "{}", isDefault: false },
+  ];
+  const props = () => ({ datasets, selectedName: "Sample Order", onSelect: vi.fn(), onAdd: vi.fn(), onEdit: vi.fn(), onDelete: vi.fn() });
+
+  it("picks the dataset the canvas uses, and lists its fields", () => {
+    const p = props();
+    render(<SampleDataPanel {...p} />);
+    expect(screen.getByRole("radio", { name: "Use dataset Sample Order" })).toBeChecked();
+    fireEvent.click(screen.getByRole("radio", { name: "Use dataset Empty" }));
+    expect(p.onSelect).toHaveBeenCalledWith("Empty");
+    expect(screen.getAllByText("{{store}}").length).toBeGreaterThan(0);
+  });
+
+  it("adds, edits and deletes datasets, but never deletes the default one", () => {
+    const p = props();
+    render(<SampleDataPanel {...p} />);
+    fireEvent.click(screen.getByRole("button", { name: /Add Dataset/ }));
+    expect(p.onAdd).toHaveBeenCalled();
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[1]);
+    expect(p.onEdit).toHaveBeenCalledWith(datasets[1]);
+    expect(screen.getByRole("button", { name: "Delete dataset Sample Order" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Delete dataset Empty" }));
+    expect(p.onDelete).toHaveBeenCalledWith(datasets[1]);
   });
 });

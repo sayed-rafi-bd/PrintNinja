@@ -1,14 +1,20 @@
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/PageHeader";
 import { ControlsAccordion } from "@/components/designer/ControlsAccordion";
-import { CanvasPane } from "@/components/designer/CanvasPane";
-import { EditorPane } from "@/components/designer/EditorPane";
+import { CanvasWorkspace } from "@/components/designer/CanvasWorkspace";
+import { CodeEditors, EditorPane } from "@/components/designer/EditorPane";
+import { DesignerActions } from "@/components/designer/DesignerActions";
 import { DesignerToolbar } from "@/components/designer/DesignerToolbar";
+import { HelpersPanel } from "@/components/designer/HelpersPanel";
+import { ReadmePanel } from "@/components/designer/ReadmePanel";
+import { SampleDataPanel, type Dataset } from "@/components/designer/SampleDataPanel";
 import { TemplateSyncBar } from "@/components/designer/TemplateSyncBar";
 import { ClassWarnings } from "@/components/designer/ClassWarnings";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { DESKTOP_QUERY, useMediaQuery } from "@/lib/hooks/useMediaQuery";
+import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@/lib/invoke";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,16 +34,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Plus,
-  Trash2,
-  ZoomIn,
-  ZoomOut,
-  Save,
-  Type,
-  QrCode,
-  Check,
-} from "lucide-react";
+import { QrCode } from "lucide-react";
 import { useTemplateStore, type Template, type TemplateVersion } from "@/lib/store/templateStore";
 import { toast } from "sonner";
 import CodeMirror from "@uiw/react-codemirror";
@@ -48,7 +45,6 @@ import { compiledFields } from "@/lib/templates/compileTemplateCss";
 import { useCompiledCss } from "@/lib/templates/useCompiledCss";
 import { formatCss, formatHtml } from "@/lib/utils/format";
 import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
-import { ReadmeEditor } from "@/components/ReadmeEditor";
 import * as share from "@/lib/share/client";
 import {
   getLocalTemplate,
@@ -66,8 +62,6 @@ const PAGE_PRESETS = [
   { label: "58mm Roll", width: 58, height: 200 },
   { label: "4x6 Label", width: 102, height:152 },
 ];
-
-const MM_TO_PX = 3.7795;
 
 /** Which sync action is running, so only its button says so. */
 type SyncAction = "save" | "refresh" | "publish" | "unpublish";
@@ -91,7 +85,8 @@ export function DesignerPage() {
   const [pageWidth, setPageWidth] = useState(STARTER_TEMPLATES[0]?.page_w_mm ?? 80);
   const [pageHeight, setPageHeight] = useState(STARTER_TEMPLATES[0]?.page_h_mm ?? 200);
   const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait");
-  const [zoom, setZoom] = useState(1);
+  // Which tab is open on a phone. On desktop the canvas and editor are always both on screen.
+  const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const [activeTab, setActiveTab] = useState("canvas");
   const [readme, setReadme] = useState("");
   const [readmeSaving, setReadmeSaving] = useState(false);
@@ -121,7 +116,7 @@ export function DesignerPage() {
   void _templatesLoading;
 
   // Sample datasets (variables)
-  const [datasets, setDatasets] = useState<Array<{ name: string; json: string; isDefault: boolean }>>([
+  const [datasets, setDatasets] = useState<Dataset[]>([
     {
       name: "Sample Order",
       json: JSON.stringify(DEFAULT_MOCK_DATA, null, 2),
@@ -385,8 +380,6 @@ export function DesignerPage() {
   } | null>(null);
   const [showDiff, setShowDiff] = useState(false);
 
-  const fontInputRef = useRef<HTMLInputElement>(null);
-
   // Load template list from SQLite on mount; fall back to starters in web
   // mode or on first launch when the table is empty.
   useEffect(() => {
@@ -641,11 +634,91 @@ export function DesignerPage() {
     }
   }, [datasets, selectedDatasetName]);
 
-  const canvasWidth = pageWidth * MM_TO_PX * zoom;
-  const canvasHeight = pageHeight * MM_TO_PX * zoom;
+  const handleSaveReadme = async () => {
+    if (!currentTemplateDbId) {
+      toast.error("No template selected");
+      return;
+    }
+    const bytes = new TextEncoder().encode(readme).length;
+    if (bytes > 64 * 1024) {
+      toast.error("README exceeds 64 KiB");
+      return;
+    }
+    setReadmeSaving(true);
+    try {
+      await invoke("update_readme", { req: { id: currentTemplateDbId, readme } });
+      toast.success("README saved");
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setReadmeSaving(false);
+    }
+  };
+
+  const handleShowCanvas = () => {
+    setActiveTab("canvas");
+    toast.success("Showing the canvas");
+  };
+
+  const sampleDataPanel = (
+    <SampleDataPanel
+      datasets={datasets}
+      selectedName={selectedDatasetName}
+      onSelect={setSelectedDatasetName}
+      onAdd={() => {
+        setDatasetName("");
+        setDatasetJson("{\n  \n}");
+        setShowDatasetDialog(true);
+      }}
+      onEdit={(ds) => {
+        setEditingDataset(ds.name);
+        setEditJson(ds.json);
+        setShowEditDataset(true);
+      }}
+      onDelete={(ds) => {
+        setDatasets((prev) => prev.filter((d) => d.name !== ds.name));
+        if (selectedDatasetName === ds.name) {
+          setSelectedDatasetName(datasets[0]?.name ?? "");
+        }
+        toast.success("Dataset deleted");
+      }}
+    />
+  );
+
+  const controls = {
+    templates,
+    currentTemplateId,
+    loadTemplate,
+    templateName,
+    setTemplateName,
+    pageWidth,
+    setPageWidth,
+    pageHeight,
+    setPageHeight,
+    presets: PAGE_PRESETS,
+    orientation,
+    setOrientation,
+    versions,
+    onNewVersion: () => setShowVersionDialog(true),
+    openDiff,
+    handleRestoreVersion,
+  };
+
+  const canvas = (fill: boolean) => (
+    <CanvasWorkspace
+      fill={fill}
+      html={debouncedHtml}
+      css={debouncedCss}
+      compiledCss={compiledCss}
+      data={sampleData}
+      pageWidthMm={pageWidth}
+      pageHeightMm={pageHeight}
+    />
+  );
 
   return (
-    <div className="space-y-4">
+    // On desktop the page fills the viewport (see Layout) and each pane scrolls on its own.
+    <div className="space-y-4 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-4 lg:space-y-0">
       <PageHeader title={t("designer.title")} description={t("pages.designer")}>
         <DesignerToolbar onNew={() => setShowNewTemplateDialog(true)} onImportFile={handleImportFile} onExport={handleExport} />
       </PageHeader>
@@ -663,318 +736,97 @@ export function DesignerPage() {
         onUnpublish={handleUnpublish}
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-        {/* Left Panel - Template List & Page Setup */}
-        <ControlsAccordion
-          templates={templates}
-          currentTemplateId={currentTemplateId}
-          loadTemplate={loadTemplate}
-          templateName={templateName}
-          setTemplateName={setTemplateName}
-          pageWidth={pageWidth}
-          setPageWidth={setPageWidth}
-          pageHeight={pageHeight}
-          setPageHeight={setPageHeight}
-          presets={PAGE_PRESETS}
-          orientation={orientation}
-          setOrientation={setOrientation}
-          versions={versions}
-          onNewVersion={() => setShowVersionDialog(true)}
-          openDiff={openDiff}
-          handleRestoreVersion={handleRestoreVersion}
-        />
+      {isDesktop ? (
+        <div className="flex min-h-0 flex-1 gap-4">
+          <aside aria-label="Designer controls" className="w-[280px] shrink-0 overflow-y-auto">
+            <ControlsAccordion {...controls} sampleData={sampleDataPanel} />
+          </aside>
+          <ResizablePanelGroup direction="horizontal" className="min-w-0 flex-1">
+            <ResizablePanel defaultSize={50} minSize={25}>
+              <div className="flex h-full min-h-0 flex-col gap-2 pr-2">
+                <EditorPane
+                  className="flex-1"
+                  templateName={templateName}
+                  htmlCode={htmlCode}
+                  cssCode={cssCode}
+                  onHtmlChange={setHtmlCode}
+                  onCssChange={setCssCode}
+                  readme={readme}
+                  onReadmeChange={setReadme}
+                  readmeSaving={readmeSaving}
+                  onSaveReadme={() => void handleSaveReadme()}
+                  notices={<ClassWarnings html={debouncedHtml} />}
+                />
+                <DesignerActions onBarcode={() => setShowBarcodeDialog(true)} onSaveVersion={() => setShowVersionDialog(true)} />
+              </div>
+            </ResizablePanel>
+            <ResizableHandle withHandle />
+            <ResizablePanel defaultSize={50} minSize={25}>
+              <div className="h-full pl-2">{canvas(true)}</div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Collapsed, so the canvas is not a long scroll away */}
+          <ControlsAccordion {...controls} showHelpers={false} defaultOpen={[]} />
 
-        {/* Main Canvas + Code */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="lg:col-span-2 space-y-4">
-          <div className="flex items-center justify-between">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
             <div className="min-w-0 overflow-x-auto">
               <TabsList aria-label="Designer views" className="h-8 w-max gap-0.5 p-0.5">
                 <TabsTrigger value="canvas" className="h-7 px-3 text-xs">{t("designer.canvas")}</TabsTrigger>
                 <TabsTrigger value="code" className="h-7 px-3 text-xs">{t("designer.code")}</TabsTrigger>
                 <TabsTrigger value="readme" className="h-7 px-3 text-xs">README</TabsTrigger>
-                <TabsTrigger value="variables" className="h-7 px-3 text-xs">{t("designer.variables")}</TabsTrigger>
+                <TabsTrigger value="sample-data" className="h-7 px-3 text-xs">{t("designer.sampleData")}</TabsTrigger>
               </TabsList>
             </div>
-            <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Zoom out" title="Zoom out" onClick={() => setZoom((z) => Math.max(0.25, z - 0.25))}>
-                <ZoomOut className="h-4 w-4" />
-              </Button>
-              <span className="text-xs w-12 text-center">{Math.round(zoom * 100)}%</span>
-              <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Zoom in" title="Zoom in" onClick={() => setZoom((z) => Math.min(3, z + 0.25))}>
-                <ZoomIn className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
 
-          <TabsContent value={activeTab} className="mt-0 space-y-4">
-          {activeTab !== "readme" && <ClassWarnings html={debouncedHtml} />}
-          {activeTab === "canvas" && (
-            <CanvasPane
-              html={debouncedHtml}
-              css={debouncedCss}
-              compiledCss={compiledCss}
-              data={sampleData}
-              width={canvasWidth}
-              height={canvasHeight}
+            <TabsContent value={activeTab} className="mt-0 space-y-4">
+              {(activeTab === "canvas" || activeTab === "code") && <ClassWarnings html={debouncedHtml} />}
+              {activeTab === "canvas" && canvas(false)}
+              {activeTab === "code" && (
+                <CodeEditors
+                  templateName={templateName}
+                  htmlCode={htmlCode}
+                  cssCode={cssCode}
+                  onHtmlChange={setHtmlCode}
+                  onCssChange={setCssCode}
+                />
+              )}
+              {activeTab === "readme" && (
+                <Card>
+                  <CardContent className="pt-5">
+                    <ReadmePanel
+                      readme={readme}
+                      onChange={setReadme}
+                      templateName={templateName}
+                      saving={readmeSaving}
+                      onSave={() => void handleSaveReadme()}
+                    />
+                  </CardContent>
+                </Card>
+              )}
+              {activeTab === "sample-data" && (
+                <Card>
+                  <CardContent className="space-y-4 pt-5">
+                    {sampleDataPanel}
+                    <div className="space-y-2 border-t pt-3">
+                      <h3 className="text-xs font-semibold">Helpers</h3>
+                      <HelpersPanel />
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
+
+            <DesignerActions
+              onBarcode={() => setShowBarcodeDialog(true)}
+              onSaveVersion={() => setShowVersionDialog(true)}
+              onShowCanvas={handleShowCanvas}
             />
-          )}
-
-          {activeTab === "code" && (
-            <EditorPane
-              templateName={templateName}
-              htmlCode={htmlCode}
-              cssCode={cssCode}
-              onHtmlChange={setHtmlCode}
-              onCssChange={setCssCode}
-            />
-          )}
-
-          {activeTab === "readme" && (
-            <Card>
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm">README — {templateName}</CardTitle>
-                  <Button
-                    size="sm"
-                    onClick={async () => {
-                      if (!currentTemplateDbId) {
-                        toast.error("No template selected");
-                        return;
-                      }
-                      const bytes = new TextEncoder().encode(readme).length;
-                      if (bytes > 64 * 1024) {
-                        toast.error("README exceeds 64 KiB");
-                        return;
-                      }
-                      setReadmeSaving(true);
-                      try {
-                        await invoke("update_readme", { req: { id: currentTemplateDbId, readme } });
-                        toast.success("README saved");
-                      } catch (e) {
-                        toast.error(String(e));
-                      } finally {
-                        setReadmeSaving(false);
-                      }
-                    }}
-                    disabled={readmeSaving}
-                  >
-                    {readmeSaving ? "Saving…" : "Save README"}
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <ReadmeEditor value={readme} onChange={setReadme} templateName={templateName} />
-              </CardContent>
-            </Card>
-          )}
-
-          {activeTab === "variables" && (
-            <div className="space-y-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-sm">{t("designer.variables")}</CardTitle>
-                    <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => {
-                      setDatasetName("");
-                      setDatasetJson("{\n  \n}");
-                      setShowDatasetDialog(true);
-                    }}>
-                      <Plus className="h-3 w-3" />
-                      Add Dataset
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {datasets.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No datasets yet. Add one to preview and validate templates.</p>
-                  ) : (
-                    datasets.map((ds) => {
-                      let parsed: any;
-                      try { parsed = JSON.parse(ds.json); } catch { parsed = null; }
-                      const fields = parsed ? Object.keys(parsed) : [];
-                      return (
-                        <div key={ds.name} className="border rounded-md p-3 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="radio"
-                                name="dataset"
-                                checked={selectedDatasetName === ds.name}
-                                onChange={() => setSelectedDatasetName(ds.name)}
-                              />
-                              <span className="text-sm font-medium">{ds.name}</span>
-                              {ds.isDefault && <Badge variant="secondary" className="text-xs">Default</Badge>}
-                            </div>
-                            <div className="flex gap-1">
-                              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => {
-                                setEditingDataset(ds.name);
-                                setEditJson(ds.json);
-                                setShowEditDataset(true);
-                              }}>
-                                Edit
-                              </Button>
-                              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => {
-                                setDatasets((prev) => prev.filter((d) => d.name !== ds.name));
-                                if (selectedDatasetName === ds.name) {
-                                  setSelectedDatasetName(datasets[0]?.name ?? "");
-                                }
-                                toast.success("Dataset deleted");
-                              }} disabled={ds.isDefault}>
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          </div>
-                          <div className="text-xs text-muted-foreground space-y-1">
-                            <p>Fields:</p>
-                            <div className="flex flex-wrap gap-1">
-                              {fields.map((f) => (
-                                <button
-                                  key={f}
-                                  type="button"
-                                  className="rounded-full border px-2 py-0.5 font-mono text-xs hover:bg-muted cursor-pointer"
-                                  onClick={async () => {
-                                    const token = `{{${f}}}`;
-                                    try { await navigator.clipboard.writeText(token); toast.success(`Copied ${token}`); }
-                                    catch { const ta=document.createElement("textarea");ta.value=token;document.body.appendChild(ta);ta.select();document.execCommand("copy");document.body.removeChild(ta);toast.success(`Copied ${token}`); }
-                                  }}
-                                  title="Copy to clipboard"
-                                >
-                                  {"{{"}{f}{"}}"}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                          <details className="text-xs">
-                            <summary className="cursor-pointer text-muted-foreground">View JSON</summary>
-                            <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted p-2 font-mono text-xs">{ds.json}</pre>
-                          </details>
-                        </div>
-                      );
-                    })
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">Quick Insert</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-xs text-muted-foreground mb-2">
-                    Click a variable chip below to copy it, then paste into the HTML/CSS.
-                  </p>
-                  <div className="flex flex-wrap gap-1">
-                    {["store.name", "store.address", "order.id", "order.date", "order.customer", "order.items", "order.total", "order.subtotal", "order.tax", "barcode", "qr"].map((v) => (
-                      <button
-                        key={v}
-                        type="button"
-                        className="rounded-full border px-2 py-0.5 font-mono text-xs hover:bg-primary hover:text-primary-foreground cursor-pointer"
-                        onClick={async () => {
-                          const token = `{{${v}}}`;
-                          try { await navigator.clipboard.writeText(token); toast.success(`Copied ${token}`); }
-                          catch { const ta=document.createElement("textarea");ta.value=token;document.body.appendChild(ta);ta.select();document.execCommand("copy");document.body.removeChild(ta);toast.success(`Copied ${token}`); }
-                        }}
-                      >
-                        {"{{"}{v}{"}}"}
-                      </button>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-
-          </TabsContent>
-          {/* Action Bar: wraps on phones so Save is never pushed off-screen */}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" onClick={() => setShowBarcodeDialog(true)}>
-                <QrCode className="h-4 w-4" />
-                Barcode
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => fontInputRef.current?.click()}
-                title="Upload font for this template"
-              >
-                <Type className="h-4 w-4" />
-                Font
-              </Button>
-              <input
-                ref={fontInputRef}
-                aria-label="Upload font file"
-                tabIndex={-1}
-                type="file"
-                accept=".ttf,.otf,.woff,.woff2"
-                className="hidden"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  try {
-                    const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-                    await invoke("upload_font", {
-                      fileName: file.name,
-                      fileData: bytes,
-                      family: file.name.replace(/\.[^/.]+$/, ""),
-                    });
-                    toast.success(`Font "${file.name}" uploaded`);
-                  } catch (err) {
-                    toast.error(`Font upload failed: ${err}`);
-                  } finally {
-                    if (fontInputRef.current) fontInputRef.current.value = "";
-                  }
-                }}
-              />
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" onClick={() => setShowVersionDialog(true)}>
-                <Save className="h-4 w-4" />
-                Save Version
-              </Button>
-              <Button size="sm" onClick={() => {
-                setActiveTab("canvas");
-                toast.success("Showing the canvas");
-              }}>
-                <Check className="h-4 w-4" />
-                Save & Preview
-              </Button>
-            </div>
-          </div>
-        </Tabs>
-
-        {/* Right Panel - Properties */}
-        <div className="space-y-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Quick Helpers</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="text-xs text-muted-foreground">
-                Available helpers:
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {["currency", "date", "upper", "lower", "padLeft", "number"].map((helper) => (
-                  <Badge key={helper} variant="outline" className="text-xs font-mono">
-                    {`{{${helper}}}`}
-                  </Badge>
-                ))}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                Barcode types:
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {BARCODE_TYPES.slice(0, 5).map((bc) => (
-                  <Badge key={bc.value} variant="outline" className="text-xs">
-                    {bc.label}
-                  </Badge>
-                ))}
-                <Badge variant="outline" className="text-xs">+{BARCODE_TYPES.length - 5} more</Badge>
-              </div>
-            </CardContent>
-          </Card>
+          </Tabs>
         </div>
-      </div>
+      )}
 
       {/* Diff Dialog */}
       <Dialog open={showDiff} onOpenChange={setShowDiff}>

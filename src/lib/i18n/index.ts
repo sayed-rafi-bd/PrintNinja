@@ -108,7 +108,7 @@ const resources = {
         pageSetup: "Page Setup",
         canvas: "Canvas",
         code: "Code",
-        variables: "Variables",
+        sampleData: "Sample data",
         versions: "Versions",
         preview_only: "Preview only",
         template_name: "Template name",
