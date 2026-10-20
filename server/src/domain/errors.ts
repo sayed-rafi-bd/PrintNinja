@@ -103,6 +103,15 @@ export class QuotaExceededError extends DomainError {
 	}
 }
 
+/** A body over its size cap — the same 413 the route body limit uses
+ * (E7), so clients treat every oversize rejection alike. Details name
+ * the field and both sizes. */
+export class PayloadTooLargeError extends DomainError {
+	constructor(details: { path: string; message: string }[]) {
+		super("payload_too_large", 413, "Body over the size cap", details);
+	}
+}
+
 /** A value the transport or the domain rejects: wrong type, range or
  * shape. Details carry one path/message pair per rejected field. */
 export class ValidationError extends DomainError {
@@ -111,5 +120,18 @@ export class ValidationError extends DomainError {
 		details: { path: string; message: string }[] = [],
 	) {
 		super("validation_failed", 400, message, details);
+	}
+}
+
+/** The template body or CSS loads something from the network. Details
+ * name the part and the offending snippet. */
+export class RemoteReferenceError extends DomainError {
+	constructor(details: { path: string; message: string }[]) {
+		super(
+			"remote_reference",
+			400,
+			"Template loads something from the network — use data: URIs",
+			details,
+		);
 	}
 }

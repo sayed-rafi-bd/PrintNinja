@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Config } from "../src/config.js";
-import type { AuthDeps } from "../src/domain/ports.js";
+import type { AppDeps } from "../src/domain/ports.js";
 import {
 	createFakeClock,
 	createFakeHasher,
@@ -8,6 +8,7 @@ import {
 	createFakeTokens,
 	createFakeUsers,
 } from "./fakes/index.js";
+import { createFakeTemplateRepos } from "./fakes/templates.js";
 
 /**
  * Builds a valid Config for tests without touching process.env. Env
@@ -37,12 +38,13 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
 }
 
 /**
- * Full AuthDeps with in-memory fakes, for tests that only exercise the
+ * Full AppDeps with in-memory fakes, for tests that only exercise the
  * HTTP layer (envelope, headers, docs gating). Anything touching real
  * behaviour uses test/integration/ with PostgreSQL instead.
  */
-export function fakeDeps(overrides: Partial<AuthDeps> = {}): AuthDeps {
+export function fakeDeps(overrides: Partial<AppDeps> = {}): AppDeps {
 	const users = createFakeUsers();
+	const library = createFakeTemplateRepos(users);
 	return {
 		users,
 		sessions: createFakeSessions(users),
@@ -51,6 +53,8 @@ export function fakeDeps(overrides: Partial<AuthDeps> = {}): AuthDeps {
 		clock: createFakeClock(new Date("2026-10-20T00:00:00Z")),
 		ids: { newId: () => randomUUID() },
 		sessionTtlDays: 30,
+		templates: library.templates,
+		saved: library.saved,
 		...overrides,
 	};
 }

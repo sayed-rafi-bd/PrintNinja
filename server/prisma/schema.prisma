@@ -80,6 +80,7 @@ model Template {
   revision    Int             @default(1) // +1 on every content change; checked on update
   changeSeq   BigInt          @map("change_seq") // owner's sequence number at the last change
   publishedAt DateTime?       @map("published_at") @db.Timestamptz // null means private
+  firstPublishedAt DateTime?  @map("first_published_at") @db.Timestamptz // set once; unpublish never clears it, so republishing keeps the original time
   createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz
   owner       User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)

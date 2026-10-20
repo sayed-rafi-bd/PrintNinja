@@ -86,6 +86,45 @@ describe("generated OpenAPI document", () => {
     ]);
     expect(document.paths).toHaveProperty("/v2/auth/me");
   });
+
+  it("documents the template endpoints with their v2 statuses", async () => {
+    const document = await generate();
+
+    const put = document.paths["/v2/templates/{id}"] as {
+      put: { responses: Record<string, unknown> };
+      get: { responses: Record<string, unknown> };
+      delete: { responses: Record<string, unknown> };
+    };
+    expect(Object.keys(put.put.responses).sort()).toEqual([
+      "200",
+      "201",
+      "400",
+      "401",
+      "403",
+      "409",
+      "413",
+      "428",
+    ]);
+    expect(Object.keys(put.get.responses).sort()).toEqual([
+      "200",
+      "304",
+      "401",
+      "404",
+    ]);
+    expect(Object.keys(put.delete.responses).sort()).toEqual([
+      "204",
+      "401",
+      "403",
+      "404",
+    ]);
+    expect(document.paths).toHaveProperty("/v2/community/templates");
+    expect(document.paths).toHaveProperty("/v2/templates/mine");
+    expect(document.paths).toHaveProperty("/v2/templates/{id}/publish");
+    expect(document.paths).toHaveProperty("/v2/templates/{id}/unpublish");
+    expect(document.paths).toHaveProperty("/v2/templates/{id}/use");
+    expect(document.paths).toHaveProperty("/v2/saved");
+    expect(document.paths).toHaveProperty("/v2/saved/{id}");
+  });
 });
 
 describe("health route", () => {

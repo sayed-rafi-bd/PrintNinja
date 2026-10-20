@@ -29,3 +29,19 @@ export function bearerToken(request: FastifyRequest): string {
 	const header = request.headers.authorization ?? "";
 	return header.startsWith("Bearer ") ? header.slice(7) : "";
 }
+
+/**
+ * Route guard for reads that tolerate anonymity. No bearer header passes
+ * through anonymous; a present-but-invalid token is a 401, as v1 does.
+ * The domain treats a missing user as "published only".
+ */
+export function optionalAuth(deps: AuthDeps) {
+	return async (request: FastifyRequest, _reply: FastifyReply) => {
+		const header = request.headers.authorization ?? "";
+		if (!header.startsWith("Bearer ")) {
+			return;
+		}
+		const { user } = await validateSession(deps, header.slice(7));
+		request.authUser = user;
+	};
+}

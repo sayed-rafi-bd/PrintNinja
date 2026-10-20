@@ -2,6 +2,11 @@
 // Infrastructure implements them; unit tests fake them. The domain never
 // imports Fastify or Prisma — the layer check enforces it.
 
+import type {
+	SavedRepository,
+	TemplateRepository,
+} from "./templatePorts.js";
+
 export interface UserRecord {
 	id: string;
 	handle: string;
@@ -83,4 +88,11 @@ export interface AuthDeps {
 	ids: IdGenerator;
 	/** Days until a new session expires. */
 	sessionTtlDays: number;
+}
+
+/** Everything the app wires. buildApp takes this whole; tests pass
+ * fakes for the parts under test. */
+export interface AppDeps extends AuthDeps {
+	templates: TemplateRepository;
+	saved: SavedRepository;
 }

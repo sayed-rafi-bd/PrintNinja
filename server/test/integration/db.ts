@@ -2,9 +2,11 @@ import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
-import type { AuthDeps } from "../../src/domain/ports.js";
+import type { AppDeps } from "../../src/domain/ports.js";
 import { createDbClient, type DbClient } from "../../src/infra/prisma/client.js";
+import { createSavedRepository } from "../../src/infra/prisma/saved.js";
 import { createSessionRepository } from "../../src/infra/prisma/sessions.js";
+import { createTemplateRepository } from "../../src/infra/prisma/templates.js";
 import { createUserRepository } from "../../src/infra/prisma/users.js";
 import { createPasswordHasher } from "../../src/infra/security/passwordHasher.js";
 import { createTokenService } from "../../src/infra/security/tokens.js";
@@ -50,7 +52,7 @@ export async function truncateAll(db: DbClient): Promise<void> {
 /** Production-shaped deps over the test database. Argon2 uses the
  * configured (production) parameters — register and login stay fast
  * enough to run unlowered, which is itself the point. */
-export function realDeps(db: DbClient): AuthDeps {
+export function realDeps(db: DbClient): AppDeps {
 	const config = testConfig();
 	return {
 		users: createUserRepository(db),
@@ -64,5 +66,7 @@ export function realDeps(db: DbClient): AuthDeps {
 		clock: { now: () => new Date() },
 		ids: { newId: () => crypto.randomUUID() },
 		sessionTtlDays: config.sessionTtlDays,
+		templates: createTemplateRepository(db),
+		saved: createSavedRepository(db),
 	};
 }

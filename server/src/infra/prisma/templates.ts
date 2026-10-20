@@ -1,0 +1,328 @@
+import {
+	NotFoundError,
+	RevisionConflictError,
+	RevisionRequiredError,
+} from "../../domain/errors.js";
+import type {
+	PageQuery,
+	PublishedQuery,
+	TemplateRepository,
+	TemplateSummaryView,
+	TemplateView,
+	TemplateWrite,
+	VersionWrite,
+} from "../../domain/templatePorts.js";
+import { toPage } from "../../domain/pagination.js";
+import type { DbClient } from "./client.js";
+import type { Prisma } from "./generated/index.js";
+
+type PrismaTemplate = {
+	id: string;
+	ownerId: string;
+	name: string;
+	summary: string;
+	pageWMm: number;
+	pageHMm: number;
+	language: string;
+	body: string;
+	css: string;
+	readme: string;
+	useCount: number;
+	revision: number;
+	changeSeq: bigint;
+	publishedAt: Date | null;
+	firstPublishedAt: Date | null;
+	createdAt: Date;
+	updatedAt: Date;
+	owner: { handle: string };
+	_count: { versions: number };
+};
+
+/**
+ * One repository per aggregate (REFACTORING.md section 5). Mutations run
+ * inside a transaction that first takes the user's sequence number —
+ * the row lock on user_sync serializes one user's writes, so revision
+ * checks after the bump see committed state and concurrent updates
+ * cannot lose each other. The domain decides (reads, replay, version
+ * or not); this module makes the write atomic.
+ */
+export function createTemplateRepository(db: DbClient): TemplateRepository {
+	return {
+		async findById(id: string): Promise<TemplateView | null> {
+			const template = await db.template.findUnique({
+				where: { id },
+				include: { owner: { select: { handle: true } }, _count: { select: { versions: true } } },
+			});
+			return template && toView(template);
+		},
+
+		async create(input: TemplateWrite, version: VersionWrite): Promise<TemplateView> {
+			try {
+				const template = await db.$transaction(async (tx) => {
+					const seq = await bumpSeq(tx, input.ownerId);
+					const created = await tx.template.create({
+						data: {
+							id: input.id,
+							ownerId: input.ownerId,
+							name: input.name,
+							summary: input.summary,
+							pageWMm: input.pageWMm,
+							pageHMm: input.pageHMm,
+							language: input.language,
+							body: input.body,
+							css: input.css,
+							readme: input.readme,
+							changeSeq: seq,
+						},
+						include: { owner: { select: { handle: true } }, _count: { select: { versions: true } } },
+					});
+					await tx.templateVersion.create({
+						data: {
+							templateId: created.id,
+							versionNo: 1,
+							body: input.body,
+							css: input.css,
+							createdBy: version.createdBy,
+							...(version.label !== undefined ? { label: version.label } : {}),
+							...(version.note !== undefined ? { note: version.note } : {}),
+						},
+					});
+					return { ...created, _count: { versions: 1 } };
+				});
+				return toView(template);
+			} catch (error: unknown) {
+				if (isUniqueViolation(error)) {
+					// A retried create racing the first: the row now
+					// exists, so the caller retries as an update.
+					throw new RevisionRequiredError();
+				}
+				throw error;
+			}
+		},
+
+		async update(
+			input: TemplateWrite,
+			expectedRevision: number,
+			version: VersionWrite | null,
+		): Promise<TemplateView> {
+			const template = await db.$transaction(async (tx) => {
+				// Bump first: the user_sync row lock serializes this user's
+				// writers, so the revision read below is never stale.
+				const seq = await bumpSeq(tx, input.ownerId);
+				const current = await tx.template.findUnique({ where: { id: input.id } });
+				if (!current) {
+					throw new NotFoundError();
+				}
+				if (current.revision !== expectedRevision) {
+					throw new RevisionConflictError(current.revision);
+				}
+				const updated = await tx.template.update({
+					where: { id: input.id },
+					data: {
+						name: input.name,
+						summary: input.summary,
+						pageWMm: input.pageWMm,
+						pageHMm: input.pageHMm,
+						language: input.language,
+						body: input.body,
+						css: input.css,
+						readme: input.readme,
+						revision: version ? current.revision + 1 : current.revision,
+						changeSeq: seq,
+					},
+					include: { owner: { select: { handle: true } }, _count: { select: { versions: true } } },
+				});
+				if (version) {
+					const max = await tx.templateVersion.aggregate({
+						where: { templateId: input.id },
+						_max: { versionNo: true },
+					});
+					await tx.templateVersion.create({
+						data: {
+							templateId: input.id,
+							versionNo: (max._max.versionNo ?? 0) + 1,
+							body: input.body,
+							css: input.css,
+							createdBy: version.createdBy,
+							...(version.label !== undefined ? { label: version.label } : {}),
+							...(version.note !== undefined ? { note: version.note } : {}),
+						},
+					});
+					return { ...updated, _count: { versions: updated._count.versions + 1 } };
+				}
+				return updated;
+			});
+			return toView(template);
+		},
+
+		async setPublished(id: string, publishedAt: Date | null): Promise<TemplateView | null> {
+			const template = await db.$transaction(async (tx) => {
+				const current = await tx.template.findUnique({ where: { id } });
+				if (!current) {
+					return null;
+				}
+				const seq = await bumpSeq(tx, current.ownerId);
+				// The first publish time is kept across unpublish cycles:
+				// republishing restores it instead of minting a new one.
+				// Unpublishing clears publishedAt but never the memory.
+				const data =
+					publishedAt === null
+						? { publishedAt: null as Date | null, changeSeq: seq }
+						: {
+								publishedAt: current.firstPublishedAt ?? publishedAt,
+								firstPublishedAt: current.firstPublishedAt ?? publishedAt,
+								changeSeq: seq,
+							};
+				return tx.template.update({
+					where: { id },
+					data,
+					include: { owner: { select: { handle: true } }, _count: { select: { versions: true } } },
+				});
+			});
+			return template && toView(template);
+		},
+
+		async deleteWithTombstone(id: string): Promise<{ ownerId: string } | null> {
+			return db.$transaction(async (tx) => {
+				const current = await tx.template.findUnique({ where: { id } });
+				if (!current) {
+					return null;
+				}
+				const seq = await bumpSeq(tx, current.ownerId);
+				await tx.tombstone.create({
+					data: { userId: current.ownerId, seq, entity: "template", entityKey: id },
+				});
+				await tx.template.delete({ where: { id } });
+				return { ownerId: current.ownerId };
+			});
+		},
+
+		async listByOwner(ownerId: string, query: PageQuery) {
+			const where = { ownerId };
+			const [total, rows] = await Promise.all([
+				db.template.count({ where }),
+				db.template.findMany({
+					where,
+					include: { owner: { select: { handle: true } }, _count: { select: { versions: true } } },
+					orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+					skip: (query.page - 1) * query.pageSize,
+					take: query.pageSize,
+				}),
+			]);
+			return toPage(rows.map(toSummary), total, query);
+		},
+
+		async listPublished(query: PublishedQuery) {
+			const q = query.q?.trim();
+			const where = {
+				publishedAt: { not: null },
+				...(q
+					? {
+							OR: [
+								{ name: { contains: q, mode: "insensitive" as const } },
+								{ summary: { contains: q, mode: "insensitive" as const } },
+								{ owner: { handle: { contains: q, mode: "insensitive" as const } } },
+							],
+						}
+					: {}),
+			};
+			const orderBy =
+				query.sort === "used"
+					? [{ useCount: "desc" as const }, { updatedAt: "desc" as const }, { id: "asc" as const }]
+					: query.sort === "name"
+						? [{ name: "asc" as const }, { id: "asc" as const }]
+						: [{ updatedAt: "desc" as const }, { id: "asc" as const }];
+			const [total, rows] = await Promise.all([
+				db.template.count({ where }),
+				db.template.findMany({
+					where,
+					include: { owner: { select: { handle: true } }, _count: { select: { versions: true } } },
+					orderBy,
+					skip: (query.page - 1) * query.pageSize,
+					take: query.pageSize,
+				}),
+			]);
+			return toPage(rows.map(toSummary), total, query);
+		},
+
+		async incrementUseCount(id: string, by: number): Promise<boolean> {
+			const result = await db.template.updateMany({
+				where: { id, publishedAt: { not: null } },
+				data: { useCount: { increment: by } },
+			});
+			return result.count > 0;
+		},
+	};
+}
+
+/** Next sequence number for the user, row-locked. The user_sync row is
+ * created at registration; upsert self-heals an import gap instead of
+ * failing every write, handing the same first number (2n) either way. */
+async function bumpSeq(tx: Prisma.TransactionClient, userId: string): Promise<bigint> {
+	const row = await tx.userSync.upsert({
+		where: { userId },
+		update: { nextSeq: { increment: 1n } },
+		create: { userId, nextSeq: 2n },
+	});
+	return row.nextSeq;
+}
+
+/** P2002 is Prisma's stable unique-violation code. Structural check:
+ * the generated client re-exports its error class as a type alias,
+ * which cannot narrow. */
+function isUniqueViolation(error: unknown): boolean {
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		"code" in error &&
+		(error as { code?: unknown }).code === "P2002"
+	);
+}
+
+function toView(template: PrismaTemplate): TemplateView {
+	return {
+		...recordFields(template),
+		ownerHandle: template.owner.handle,
+		versionCount: template._count.versions,
+	};
+}
+
+function toSummary(template: PrismaTemplate): TemplateSummaryView {
+	return {
+		id: template.id,
+		ownerId: template.ownerId,
+		ownerHandle: template.owner.handle,
+		name: template.name,
+		summary: template.summary,
+		pageWMm: template.pageWMm,
+		pageHMm: template.pageHMm,
+		language: template.language,
+		useCount: template.useCount,
+		revision: template.revision,
+		versionCount: template._count.versions,
+		publishedAt: template.publishedAt,
+		updatedAt: template.updatedAt,
+	};
+}
+
+function recordFields(template: PrismaTemplate) {
+	return {
+		id: template.id,
+		ownerId: template.ownerId,
+		name: template.name,
+		summary: template.summary,
+		pageWMm: template.pageWMm,
+		pageHMm: template.pageHMm,
+		language: template.language,
+		body: template.body,
+		css: template.css,
+		readme: template.readme,
+		useCount: template.useCount,
+		revision: template.revision,
+		changeSeq: template.changeSeq,
+		publishedAt: template.publishedAt,
+		firstPublishedAt: template.firstPublishedAt,
+		createdAt: template.createdAt,
+		updatedAt: template.updatedAt,
+	};
+}

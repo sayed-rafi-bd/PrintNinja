@@ -2,9 +2,11 @@ import { randomUUID } from "node:crypto";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { purgeExpiredSessions } from "./domain/auth/index.js";
-import type { AuthDeps } from "./domain/ports.js";
+import type { AppDeps } from "./domain/ports.js";
 import { createDbClient } from "./infra/prisma/client.js";
+import { createSavedRepository } from "./infra/prisma/saved.js";
 import { createSessionRepository } from "./infra/prisma/sessions.js";
+import { createTemplateRepository } from "./infra/prisma/templates.js";
 import { createUserRepository } from "./infra/prisma/users.js";
 import { createPasswordHasher } from "./infra/security/passwordHasher.js";
 import { createTokenService } from "./infra/security/tokens.js";
@@ -16,7 +18,7 @@ import { createTokenService } from "./infra/security/tokens.js";
 const config = loadConfig();
 const db = createDbClient(config.databaseUrl);
 
-const deps: AuthDeps = {
+const deps: AppDeps = {
 	users: createUserRepository(db),
 	sessions: createSessionRepository(db),
 	hasher: createPasswordHasher({
@@ -28,6 +30,8 @@ const deps: AuthDeps = {
 	clock: { now: () => new Date() },
 	ids: { newId: () => randomUUID() },
 	sessionTtlDays: config.sessionTtlDays,
+	templates: createTemplateRepository(db),
+	saved: createSavedRepository(db),
 };
 
 const app = await buildApp({ config, deps });

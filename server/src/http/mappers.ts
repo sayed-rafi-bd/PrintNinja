@@ -1,4 +1,12 @@
 import type { UserRecord } from "../domain/ports.js";
+import type {
+	TemplateSummaryView,
+	TemplateView,
+} from "../domain/templatePorts.js";
+import type {
+	TemplateResponse,
+	TemplateSummaryResponse,
+} from "./schemas/templates.js";
 import type { AuthResponse, UserResponse } from "./schemas/auth.js";
 
 // Domain object to response shape (REFACTORING.md section 5). Dates
@@ -20,5 +28,36 @@ export function toAuthResponse(
 		token,
 		expires_at: expiresAt.toISOString(),
 		user: toUserResponse(user),
+	};
+}
+
+/**
+ * Template views carry the internal changeSeq (bigint, unserializable);
+ * the wire shapes omit it — the cursor is opaque to the client.
+ */
+export function toTemplateSummary(view: TemplateSummaryView): TemplateSummaryResponse {
+	return {
+		id: view.id,
+		owner_id: view.ownerId,
+		owner_handle: view.ownerHandle,
+		name: view.name,
+		summary: view.summary,
+		page_w_mm: view.pageWMm,
+		page_h_mm: view.pageHMm,
+		language: view.language,
+		use_count: view.useCount,
+		revision: view.revision,
+		version_count: view.versionCount,
+		published_at: view.publishedAt?.toISOString() ?? null,
+		updated_at: view.updatedAt.toISOString(),
+	};
+}
+
+export function toTemplate(view: TemplateView): TemplateResponse {
+	return {
+		...toTemplateSummary(view),
+		body: view.body,
+		css: view.css,
+		readme: view.readme,
 	};
 }

@@ -11,10 +11,13 @@ import {
 import Fastify, { type FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.js";
-import type { AuthDeps } from "./domain/ports.js";
+import type { AppDeps } from "./domain/ports.js";
 import { registerErrorHandling } from "./http/plugins/errorHandler.js";
 import { authRoutes } from "./http/routes/auth.js";
+import { communityRoutes } from "./http/routes/community.js";
 import { healthRoutes } from "./http/routes/health.js";
+import { savedRoutes } from "./http/routes/saved.js";
+import { templateRoutes } from "./http/routes/templates.js";
 import { APP_VERSION } from "./version.js";
 
 /**
@@ -30,7 +33,7 @@ export const DEFAULT_BODY_LIMIT = 16 * 1024;
  */
 export async function buildApp(args: {
 	config: Config;
-	deps: AuthDeps;
+	deps: AppDeps;
 }): Promise<FastifyInstance> {
 	const { config, deps } = args;
 	const app = Fastify({
@@ -124,6 +127,9 @@ export async function buildApp(args: {
 		rateLimitMax: config.rateLimitAuthMax,
 		rateLimitWindowMs: config.rateLimitAuthWindowSeconds * 1000,
 	});
+	await app.register(templateRoutes, { deps });
+	await app.register(communityRoutes, { deps });
+	await app.register(savedRoutes, { deps });
 
 	return app;
 }
