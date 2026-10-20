@@ -365,6 +365,155 @@ export async function unsaveRemoteTemplate(id: string): Promise<void> {
   await callApi<unknown>(apiDeps(), { method: "DELETE", path: `/v2/saved/${id}` });
 }
 
+// --- Sample datasets (endpoints 23-24) --------------------------------------
+// Account-level named JSON blobs for the Designer's sample-data panel.
+// There is no list endpoint: the sync stream is the read path.
+
+/** A sample dataset as the v2 service stores it. */
+export type RemoteDataset =
+  paths["/v2/datasets/{id}"]["put"]["responses"][200]["content"]["application/json"];
+
+export interface PutRemoteDatasetInput {
+  id: string;
+  name: string;
+  dataJson?: string;
+  if_revision?: number;
+}
+
+/** Create or update a dataset by client UUID. Updates need if_revision. */
+export async function putRemoteDataset(input: PutRemoteDatasetInput): Promise<RemoteDataset> {
+  return callApi<RemoteDataset>(apiDeps(), { method: "PUT", path: `/v2/datasets/${input.id}`, body: input });
+}
+
+/** Delete a dataset. The engine treats 404 as already gone. */
+export async function deleteRemoteDataset(id: string): Promise<void> {
+  await callApi<unknown>(apiDeps(), { method: "DELETE", path: `/v2/datasets/${id}` });
+}
+
+// --- Printer profiles (endpoints 25-26) --------------------------------------
+// One row per template and lowercased printer name. No list endpoint:
+// the sync stream is the read path.
+
+/** A printer profile as the v2 service stores it. */
+export type RemoteProfile =
+  paths["/v2/profiles/{id}"]["put"]["responses"][200]["content"]["application/json"];
+
+export interface PutRemoteProfileInput {
+  id: string;
+  template_id: string;
+  printer_name: string;
+  settings_json?: string;
+  if_revision?: number;
+}
+
+/** Create or update a profile by client UUID. Updates need if_revision. */
+export async function putRemoteProfile(input: PutRemoteProfileInput): Promise<RemoteProfile> {
+  return callApi<RemoteProfile>(apiDeps(), { method: "PUT", path: `/v2/profiles/${input.id}`, body: input });
+}
+
+/** Delete a profile. The engine treats 404 as already gone. */
+export async function deleteRemoteProfile(id: string): Promise<void> {
+  await callApi<unknown>(apiDeps(), { method: "DELETE", path: `/v2/profiles/${id}` });
+}
+
+// --- Account preferences (endpoints 27-28) ------------------------------------
+// Only allow-listed keys (ui_density, brand_name, brand_logo) live here;
+// everything else stays in the device settings table and never syncs.
+
+/** An account preference as the v2 service stores it. */
+export type RemoteSetting =
+  paths["/v2/settings/{key}"]["put"]["responses"][200]["content"]["application/json"];
+
+/** Set an account preference. Last writer wins; there are no revisions to send. */
+export async function putRemoteSetting(key: string, value: string): Promise<RemoteSetting> {
+  return callApi<RemoteSetting>(apiDeps(), { method: "PUT", path: `/v2/settings/${key}`, body: { value } });
+}
+
+/** Reset an account preference. Always 204, even when nothing was set. */
+export async function deleteRemoteSetting(key: string): Promise<void> {
+  await callApi<unknown>(apiDeps(), { method: "DELETE", path: `/v2/settings/${key}` });
+}
+
+// --- Fonts (endpoints 29-32) ----------------------------------------------------
+// Metadata and bytes are two calls; the bytes ride outside JSON.
+
+/** A font as the v2 service stores it (metadata only, never the bytes). */
+export type RemoteFont =
+  paths["/v2/fonts/{id}"]["put"]["responses"][200]["content"]["application/json"];
+
+export interface PutRemoteFontInput {
+  id: string;
+  name: string;
+  if_revision?: number;
+}
+
+/** Create or update font metadata by client UUID. Updates need if_revision. */
+export async function putRemoteFont(input: PutRemoteFontInput): Promise<RemoteFont> {
+  return callApi<RemoteFont>(apiDeps(), { method: "PUT", path: `/v2/fonts/${input.id}`, body: input });
+}
+
+/** A font that was never given bytes has no format, size or hash yet. */
+export function isFontReady(font: Pick<RemoteFont, "sha256">): boolean {
+  return font.sha256 !== "";
+}
+
+/** Upload font bytes. The server checks magic bytes, size and format. */
+export async function uploadRemoteFontFile(id: string, bytes: Uint8Array): Promise<RemoteFont> {
+  const res = await authedFetch(`/v2/fonts/${id}/file`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: bytes as unknown as BodyInit,
+  });
+  if (!res.ok) {
+    const envelope = (await res.json().catch(() => null)) as {
+      error?: { code?: string; message?: string; request_id?: string };
+    } | null;
+    throw new ApiError({
+      code: envelope?.error?.code ?? "internal_error",
+      message: envelope?.error?.message ?? `Font upload failed with ${res.status}`,
+      requestId: envelope?.error?.request_id ?? "",
+      status: res.status,
+    });
+  }
+  return (await res.json()) as RemoteFont;
+}
+
+export interface DownloadedFontFile {
+  bytes: Uint8Array;
+  /** Hex SHA-256 from the ETag, the integrity check for the download. */
+  sha256: string;
+}
+
+/** Download font bytes; the ETag carries the SHA-256. Verifies the hash. */
+export async function downloadRemoteFontFile(id: string): Promise<DownloadedFontFile> {
+  const res = await authedFetch(`/v2/fonts/${id}/file`, { method: "GET" });
+  if (res.status === 404) {
+    throw new ApiError({ code: "not_found", message: "Font is not on the server", requestId: "", status: 404 });
+  }
+  if (!res.ok) {
+    throw new ApiError({
+      code: "internal_error",
+      message: `Font download failed with ${res.status}`,
+      requestId: "",
+      status: res.status,
+    });
+  }
+  const etag = res.headers.get("ETag") ?? "";
+  const sha256 = etag.startsWith('"') && etag.endsWith('"') ? etag.slice(1, -1) : etag;
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const digest = await crypto.subtle.digest("SHA-256", bytes as unknown as BufferSource);
+  const actual = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  if (sha256 && actual !== sha256) {
+    throw new Error("Font download failed the SHA-256 check");
+  }
+  return { bytes, sha256: actual };
+}
+
+/** Delete a font and its file. The engine treats 404 as already gone. */
+export async function deleteRemoteFont(id: string): Promise<void> {
+  await callApi<unknown>(apiDeps(), { method: "DELETE", path: `/v2/fonts/${id}` });
+}
+
 // For the Designer state chip / strip. A template is public only when it has a
 // publish time: `remote_id` alone means it is saved on the server as a private copy.
 export function hasUnpublishedChanges(template: { remote_id: string | null; published_at: string | null; updated_at: string }): boolean {
