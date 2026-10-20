@@ -1,7 +1,8 @@
 #!/bin/sh
 # Resets the container e2e stack to a clean database, then boots it.
 #
-# Usage: sh server/scripts/e2e-stack.sh [--no-build]
+# Usage: sh server/scripts/e2e-stack.sh [--no-build] (run from anywhere;
+# the stack lives in server/ next to this script).
 #
 # `docker compose down -v` drops the Postgres volume, so the next boot
 # migrates an empty database (see server/docker-entrypoint.sh) — every
@@ -13,11 +14,11 @@
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "$ROOT"
+cd "$ROOT/server"
 
 if [ ! -f .env ]; then
   printf 'POSTGRES_PASSWORD=printninja-dev-password\nCORS_ORIGINS=http://localhost:1420\n' > .env
-  echo "e2e-stack: wrote .env with dev defaults (not committed)"
+  echo "e2e-stack: wrote server/.env with dev defaults (not committed)"
 fi
 
 docker compose down -v

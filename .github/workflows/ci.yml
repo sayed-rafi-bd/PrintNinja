@@ -2,7 +2,12 @@ name: CI
 
 on:
   push:
-    # develop runs the checks only. Release jobs are gated on `v*` tags, and
+    # develop and main run the basic checks only (web-check, rust-check,
+    # server-check). Heavy jobs (images, e2e, OS builds, release) run on
+    # release tags. Nothing runs for the refactoring branch (its PR is
+    # muted via the head_ref guard on each job): it merges into develop,
+    # where the basic checks run.
+    # Release jobs are gated on `v*` tags, and
     # version-check rejects any tag that is not on main.
     branches: [main, develop]
     # `create` events do not support tag filters, so tag builds must use `push`.
@@ -21,6 +26,7 @@ concurrency:
 
 jobs:
   web-check:
+    if: github.head_ref != 'refactoring'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,6 +58,7 @@ jobs:
           git diff --exit-code -- src/lib/api/schema.d.ts
 
   rust-check:
+    if: github.head_ref != 'refactoring'
     runs-on: ubuntu-latest
     needs: [web-check]
     steps:
@@ -84,6 +91,7 @@ jobs:
   # the OpenAPI document and fails on any difference, so the committed
   # file cannot go stale.
   server-check:
+    if: github.head_ref != 'refactoring'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -115,6 +123,7 @@ jobs:
 
   # The Dockerfile must stay green independently of the compose stack.
   server-image:
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -123,8 +132,10 @@ jobs:
         run: docker build -f server/Dockerfile -t printninja-server:ci .
 
   # E1 and E8 over HTTP against the composed stack (built image, real
-  # PostgreSQL, real network port).
+  # PostgreSQL, real network port). Tag-only with the rest of the heavy
+  # jobs: pushes and PRs run the basic checks.
   server-e2e:
+    if: startsWith(github.ref, 'refs/tags/v') && github.head_ref != 'refactoring'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -139,23 +150,24 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Start the stack
         run: |
-          printf 'POSTGRES_PASSWORD=e2e-test-password\nCORS_ORIGINS=http://localhost:1420\n' > .env
+          printf 'POSTGRES_PASSWORD=e2e-test-password\nCORS_ORIGINS=http://localhost:1420\n' > server/.env
           # The container suite shares one client address, so the global
           # limiter runs relaxed here (the auth limiter stays production:
           # E8 asserts the real 429). See RATE_LIMIT_* in env.example.
-          RATE_LIMIT_MAX=10000 docker compose up -d --build --wait --wait-timeout 180
+          RATE_LIMIT_MAX=10000 docker compose -f server/docker-compose.yml up -d --build --wait --wait-timeout 180
       - name: E1 and E8 against the running stack
         run: E2E_BASE_URL=http://localhost:3001 pnpm --filter server test:e2e
       - name: Stack logs on failure
         if: failure()
-        run: docker compose logs
+        run: docker compose -f server/docker-compose.yml logs
       - name: Tear the stack down
         if: always()
-        run: docker compose down -v
+        run: docker compose -f server/docker-compose.yml down -v
 
   # The Playwright smoke spec: the app in Chromium against the harness
   # stack (own PostgreSQL, built service, fake desktop agent).
   app-e2e:
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -192,6 +204,7 @@ jobs:
   # 5. Windows is the shipped desktop target, so run the Rust tests there on
   # every PR/push instead of only discovering breakage during the tag build.
   rust-test-windows:
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     needs: [web-check]
     steps:

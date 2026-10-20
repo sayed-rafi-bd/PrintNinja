@@ -35,7 +35,7 @@ COPY --from=build /deploy ./
 # Ship only what the service needs at runtime: the compiled bundle, the
 # production dependencies, the migrations and the entrypoint. Sources,
 # tests, docs and build configs stay in the build stage.
-RUN rm -rf src test scripts openapi Dockerfile .dockerignore \
+RUN rm -rf src test scripts openapi Dockerfile .dockerignore docker-compose.yml \
     tsconfig.json tsconfig.build.json vitest.config.ts .dependency-cruiser.mjs
 
 # The service writes nothing to disk (logs go to stdout), but it must not

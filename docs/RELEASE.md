@@ -172,10 +172,11 @@ address (Settings → Share, or the sign-in screen's server field). Keep the old
 server stopped but intact until the rollback window passes.
 
 ### Deploy with Docker (recommended)
-From the repository root:
+From `server/` (the stack lives next to the service):
 
 ```bash
-cp env.example .env   # set POSTGRES_PASSWORD (required) and CORS_ORIGINS
+cd server
+cp ../env.example .env   # set POSTGRES_PASSWORD (required) and CORS_ORIGINS
 docker compose up -d --build
 ```
 
@@ -218,6 +219,12 @@ docker compose up -d --build        # rebuilds the image, migrates on boot, repl
 Migrations run forward on boot and are not undone by rolling back the image:
 to roll back, check out the previous commit and rebuild, restoring the database
 backup first if the schema changed between the two.
+
+Do not change `POSTGRES_PASSWORD` on an existing volume: PostgreSQL sets the
+password only at first init, so the server fails to log in (`P1000` in the
+server log) while `db` stays healthy. To rotate the password, dump the
+database, `docker compose down -v`, set the new password, boot, and restore
+the dump.
 
 ### Without Docker: build and run
 Prerequisites: Node 22, pnpm 10, and a reachable PostgreSQL 16.

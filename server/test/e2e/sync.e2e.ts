@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 
 const baseUrl = process.env.E2E_BASE_URL;
 if (!baseUrl) {
-	throw new Error("E2E_BASE_URL is not set — start the stack first (docker compose up -d)");
+	throw new Error("E2E_BASE_URL is not set — start the stack first (cd server && docker compose up -d)");
 }
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -120,7 +120,7 @@ describe("E10 delta sync", () => {
 		expect((empty.json as { has_more: boolean }).has_more).toBe(false);
 
 		// A cursor survives a restart of the service.
-		execSync("docker compose restart server", { cwd: repoRoot, stdio: "pipe" });
+		execSync("docker compose -f server/docker-compose.yml restart server", { cwd: repoRoot, stdio: "pipe" });
 		await waitForHealth(90_000);
 		const afterRestart = await request("GET", `/v2/sync/changes?since=${cursor}`, owner.token);
 		expect(((afterRestart.json as { changes: unknown[] }).changes)).toEqual([]);

@@ -90,10 +90,10 @@ Prerequisites: Node 22, Rust stable, pnpm 10; for Android: Java 17, Android SDK/
 | `pnpm e2e` | Playwright smoke (app in Chromium vs the harness stack) |
 | `pnpm --filter server dev` | v2 service with reload (`tsx`, needs `DATABASE_URL` — see below) |
 | `pnpm --filter server test` / `test:unit` / `test:int` | unit + integration / unit only / integration only (Testcontainers PostgreSQL) |
-| `pnpm --filter server test:e2e` | E1/E8 over HTTP against `E2E_BASE_URL` (default `http://localhost:3001`, needs `docker compose up -d`) |
+| `pnpm --filter server test:e2e` | E1/E8 over HTTP against `E2E_BASE_URL` (default `http://localhost:3001`, needs `docker compose up -d` from `server/`) |
 | `pnpm --filter server db:migrate` / `db:generate` / `db:validate` | apply migrations / build the Prisma client (gitignored, always generate on a fresh clone) / validate the schema |
 | `pnpm --filter server openapi:generate` | regenerate `server/openapi/openapi.json` (CI fails on drift) |
-| `docker compose up -d` / `down -v` | v2 service + PostgreSQL (migrates itself on boot, healthy at `:3001/v2/health`) |
+| `docker compose up -d` / `down -v` (from `server/`) | v2 service + PostgreSQL (migrates itself on boot, healthy at `:3001/v2/health`) |
 | `cargo test` (in `src-tauri`) | Rust (lib + integration) — `CARGO_INCREMENTAL=0 cargo test` on low-disk hosts |
 
 ### Share service
@@ -101,8 +101,9 @@ Prerequisites: Node 22, Rust stable, pnpm 10; for Android: Java 17, Android SDK/
 The hosted counterpart to the app's local cache. Auth: register `201`, login `200`, logout `204`, me `200`; duplicate handle `409 handle_taken`; unknown handle and wrong password both `401 invalid_credentials`; brute force limited to 10 attempts per 5 minutes per IP and handle (`429` + `Retry-After`); passwords 8–128 chars, handles 1–32 of `A–Z a–z 0–9 _ -`, matched case-insensitively. Legacy `scrypt` passwords verify and are rehashed to `argon2id` on first login.
 
 ```bash
-cp env.example .env   # edit POSTGRES_PASSWORD and CORS_ORIGINS at minimum
-docker compose up -d  # postgres:16 + service, migrates on boot
+cd server
+cp ../env.example .env   # edit POSTGRES_PASSWORD and CORS_ORIGINS at minimum
+docker compose up -d     # postgres:16 + service, migrates on boot
 curl localhost:3001/v2/health
 ```
 

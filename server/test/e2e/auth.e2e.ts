@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 
 const baseUrl = process.env.E2E_BASE_URL;
 if (!baseUrl) {
-	throw new Error("E2E_BASE_URL is not set — start the stack first (docker compose up -d)");
+	throw new Error("E2E_BASE_URL is not set — start the stack first (cd server && docker compose up -d)");
 }
 
 const runId = Date.now().toString(36);
