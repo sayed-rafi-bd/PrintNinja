@@ -10,6 +10,8 @@ import type {
 	TemplateSummaryView,
 	TemplateView,
 	TemplateWrite,
+	VersionSummaryView,
+	VersionView,
 	VersionWrite,
 } from "../../domain/templatePorts.js";
 import { toPage } from "../../domain/pagination.js";
@@ -87,6 +89,7 @@ export function createTemplateRepository(db: DbClient): TemplateRepository {
 							...(version.note !== undefined ? { note: version.note } : {}),
 						},
 					});
+					await pruneAutosaves(tx, created.id);
 					return { ...created, _count: { versions: 1 } };
 				});
 				return toView(template);
@@ -148,6 +151,7 @@ export function createTemplateRepository(db: DbClient): TemplateRepository {
 							...(version.note !== undefined ? { note: version.note } : {}),
 						},
 					});
+					await pruneAutosaves(tx, input.id);
 					return { ...updated, _count: { versions: updated._count.versions + 1 } };
 				}
 				return updated;
@@ -252,6 +256,44 @@ export function createTemplateRepository(db: DbClient): TemplateRepository {
 			});
 			return result.count > 0;
 		},
+
+		async listVersions(templateId: string, query: PageQuery) {
+			const where = { templateId };
+			const [total, rows] = await Promise.all([
+				db.templateVersion.count({ where }),
+				db.templateVersion.findMany({
+					where,
+					orderBy: [{ versionNo: "desc" }],
+					skip: (query.page - 1) * query.pageSize,
+					take: query.pageSize,
+				}),
+			]);
+			return toPage(rows.map(toVersionSummary), total, query);
+		},
+
+		async findVersion(templateId: string, versionNo: number) {
+			const row = await db.templateVersion.findUnique({
+				where: { templateId_versionNo: { templateId, versionNo } },
+			});
+			return row && toVersion(row);
+		},
+
+		async deleteVersion(templateId: string, versionNo: number) {
+			const max = await db.templateVersion.aggregate({
+				where: { templateId },
+				_max: { versionNo: true },
+			});
+			if (max._max.versionNo === null) {
+				return "missing";
+			}
+			if (max._max.versionNo === versionNo) {
+				return "newest";
+			}
+			const deleted = await db.templateVersion.deleteMany({
+				where: { templateId, versionNo },
+			});
+			return deleted.count > 0 ? "deleted" : "missing";
+		},
 	};
 }
 
@@ -265,6 +307,25 @@ async function bumpSeq(tx: Prisma.TransactionClient, userId: string): Promise<bi
 		create: { userId, nextSeq: 2n },
 	});
 	return row.nextSeq;
+}
+
+/** Autosaves beyond the newest 50 per template are deleted when a new
+ * version is added; manual and restore versions are never pruned. */
+async function pruneAutosaves(tx: Prisma.TransactionClient, templateId: string): Promise<void> {
+	const count = await tx.templateVersion.count({
+		where: { templateId, createdBy: "autosave" },
+	});
+	if (count > 50) {
+		const oldest = await tx.templateVersion.findMany({
+			where: { templateId, createdBy: "autosave" },
+			orderBy: { versionNo: "asc" },
+			take: count - 50,
+			select: { versionNo: true },
+		});
+		await tx.templateVersion.deleteMany({
+			where: { templateId, versionNo: { in: oldest.map((v) => v.versionNo) } },
+		});
+	}
 }
 
 /** P2002 is Prisma's stable unique-violation code. Structural check:
@@ -284,6 +345,40 @@ function toView(template: PrismaTemplate): TemplateView {
 		...recordFields(template),
 		ownerHandle: template.owner.handle,
 		versionCount: template._count.versions,
+	};
+}
+
+type PrismaVersion = {
+	templateId: string;
+	versionNo: number;
+	body: string;
+	css: string;
+	createdBy: "manual" | "autosave" | "restore";
+	label: string | null;
+	note: string | null;
+	createdAt: Date;
+};
+
+function toVersion(row: PrismaVersion): VersionView {
+	return {
+		templateId: row.templateId,
+		versionNo: row.versionNo,
+		body: row.body,
+		css: row.css,
+		createdBy: row.createdBy,
+		label: row.label,
+		note: row.note,
+		createdAt: row.createdAt,
+	};
+}
+
+function toVersionSummary(row: PrismaVersion): VersionSummaryView {
+	return {
+		versionNo: row.versionNo,
+		createdBy: row.createdBy,
+		label: row.label,
+		note: row.note,
+		createdAt: row.createdAt,
 	};
 }
 

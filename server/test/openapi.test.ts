@@ -124,6 +124,38 @@ describe("generated OpenAPI document", () => {
     expect(document.paths).toHaveProperty("/v2/templates/{id}/use");
     expect(document.paths).toHaveProperty("/v2/saved");
     expect(document.paths).toHaveProperty("/v2/saved/{id}");
+
+    const versions = document.paths["/v2/templates/{id}/versions"] as {
+      get: { responses: Record<string, unknown> };
+    };
+    expect(Object.keys(versions.get.responses).sort()).toEqual([
+      "200",
+      "400",
+      "401",
+      "403",
+      "404",
+    ]);
+    const version = document.paths["/v2/templates/{id}/versions/{n}"] as {
+      get: { responses: Record<string, unknown> };
+      delete: { responses: Record<string, unknown> };
+    };
+    expect(Object.keys(version.get.responses).sort()).toEqual([
+      "200",
+      "400",
+      "401",
+      "403",
+      "404",
+    ]);
+    expect(Object.keys(version.delete.responses).sort()).toEqual([
+      "204",
+      "400",
+      "401",
+      "403",
+      "404",
+    ]);
+    expect(document.paths).toHaveProperty(
+      "/v2/templates/{id}/versions/{n}/restore",
+    );
   });
 });
 

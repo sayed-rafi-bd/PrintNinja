@@ -30,6 +30,27 @@ export interface TemplateView extends TemplateRecord {
 	versionCount: number;
 }
 
+export type VersionCreatedBy = "manual" | "autosave" | "restore";
+
+export interface VersionView {
+	templateId: string;
+	versionNo: number;
+	body: string;
+	css: string;
+	createdBy: VersionCreatedBy;
+	label: string | null;
+	note: string | null;
+	createdAt: Date;
+}
+
+export interface VersionSummaryView {
+	versionNo: number;
+	createdBy: VersionCreatedBy;
+	label: string | null;
+	note: string | null;
+	createdAt: Date;
+}
+
 export interface TemplateSummaryView {
 	id: string;
 	ownerId: string;
@@ -106,6 +127,13 @@ export interface TemplateRepository {
 	/** Adds to use_count for a published template only. False means
 	 * missing or private — the domain answers 404 either way. */
 	incrementUseCount(id: string, by: number): Promise<boolean>;
+	listVersions(templateId: string, query: PageQuery): Promise<Page<VersionSummaryView>>;
+	findVersion(templateId: string, versionNo: number): Promise<VersionView | null>;
+	/** Deletes one version. "missing" when the row is absent, "newest"
+	 * when it is the head (the head is never deleted) — the domain maps
+	 * those to 404 and 400. Deleting history changes no content, so no
+	 * revision, sequence or timestamp moves. */
+	deleteVersion(templateId: string, versionNo: number): Promise<"deleted" | "missing" | "newest">;
 }
 
 export interface SavedRepository {

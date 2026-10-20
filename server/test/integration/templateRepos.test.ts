@@ -311,5 +311,66 @@ for (const name of ["fake", "prisma"] as const) {
 			await be.saved.unsave(other, two);
 			expect(await be.saved.countByUser(other)).toBe(1);
 		});
+
+	describe("versions", () => {
+		it("lists newest first with total and pages, reads one, misses unknown", async () => {
+			const id = randomUUID();
+			await be.templates.create(write(id, owner), version);
+			await be.templates.update({ ...write(id, owner), body: "<div>v2</div>" }, 1, {
+				createdBy: "autosave",
+			});
+			await be.templates.update({ ...write(id, owner), body: "<div>v3</div>" }, 2, {
+				createdBy: "manual",
+				label: "third",
+			});
+
+			const list = await be.templates.listVersions(id, { page: 1, pageSize: 20 });
+			expect(list.total).toBe(3);
+			expect(list.has_more).toBe(false);
+			expect(list.items.map((v) => v.versionNo)).toEqual([3, 2, 1]);
+			expect(list.items[0]).toMatchObject({ createdBy: "manual", label: "third" });
+
+			const page = await be.templates.listVersions(id, { page: 2, pageSize: 2 });
+			expect(page.items.map((v) => v.versionNo)).toEqual([1]);
+
+			const one = await be.templates.findVersion(id, 1);
+			expect(one).toMatchObject({ body: "<div>x</div>", versionNo: 1 });
+			expect(await be.templates.findVersion(id, 99)).toBeNull();
+			expect(await be.templates.findVersion(randomUUID(), 1)).toBeNull();
+		});
+
+		it("refuses the newest, deletes older ones", async () => {
+			const id = randomUUID();
+			await be.templates.create(write(id, owner), version);
+			await be.templates.update({ ...write(id, owner), body: "<div>v2</div>" }, 1, version);
+
+			expect(await be.templates.deleteVersion(id, 2)).toBe("newest");
+			expect(await be.templates.deleteVersion(id, 99)).toBe("missing");
+			expect(await be.templates.deleteVersion(randomUUID(), 1)).toBe("missing");
+			expect(await be.templates.deleteVersion(id, 1)).toBe("deleted");
+			expect(await be.templates.findVersion(id, 1)).toBeNull();
+			const list = await be.templates.listVersions(id, { page: 1, pageSize: 20 });
+			expect(list.items.map((v) => v.versionNo)).toEqual([2]);
+		});
+
+		it("prunes autosaves past 50 but keeps manual and restore rows", async () => {
+			const id = randomUUID();
+			await be.templates.create(write(id, owner), version);
+			for (let i = 0; i < 51; i += 1) {
+				const rev = (await be.templates.findById(id))?.revision ?? 1;
+				await be.templates.update({ ...write(id, owner), body: `<div>a${i}</div>` }, rev, {
+					createdBy: "autosave",
+				});
+			}
+
+			const list = await be.templates.listVersions(id, { page: 1, pageSize: 100 });
+			expect(list.total).toBe(51);
+			expect(list.items.filter((v) => v.createdBy === "manual")).toHaveLength(1);
+			expect(list.items.filter((v) => v.createdBy === "autosave")).toHaveLength(50);
+			// The oldest autosave (version 2) is gone; version 1 (manual) stays.
+			expect(list.items.some((v) => v.versionNo === 2)).toBe(false);
+			expect(list.items.some((v) => v.versionNo === 1)).toBe(true);
+		});
+	});
 	});
 }

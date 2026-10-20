@@ -35,6 +35,16 @@ export const templateIdParams = z.object({
 	id: z.string().uuid(),
 });
 
+export const versionNoParams = z.object({
+	n: z.coerce.number().int().min(1),
+});
+
+export const restoreBody = z
+	.object({
+		if_revision: z.number().int().min(1).optional(),
+	})
+	.optional();
+
 const templateBase = z.object({
 	id: z.string().uuid(),
 	owner_id: z.string().uuid(),
@@ -71,6 +81,21 @@ export function pageSchema<T extends z.ZodType>(item: T) {
 
 export const templatePageSchema = pageSchema(templateSummarySchema);
 
+export const versionSummarySchema = z.object({
+	version_no: z.number().int(),
+	created_by: z.enum(["manual", "autosave", "restore"]),
+	label: z.string().nullable(),
+	note: z.string().nullable(),
+	created_at: z.string().datetime(),
+});
+
+export const versionSchema = versionSummarySchema.extend({
+	body: z.string(),
+	css: z.string(),
+});
+
+export const versionPageSchema = pageSchema(versionSummarySchema);
+
 export const pageQuery = z.object({
 	page: z.coerce.number().int().min(1).default(1),
 	page_size: z.coerce.number().int().min(1).max(100).default(20),
@@ -95,3 +120,5 @@ export const templateErrorResponses = {
 export type PutTemplateRequest = z.infer<typeof putTemplateRequest>;
 export type TemplateResponse = z.infer<typeof templateSchema>;
 export type TemplateSummaryResponse = z.infer<typeof templateSummarySchema>;
+export type VersionResponse = z.infer<typeof versionSchema>;
+export type VersionSummaryResponse = z.infer<typeof versionSummarySchema>;

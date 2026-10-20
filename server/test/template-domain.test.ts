@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
 	deleteTemplate,
+	deleteVersion,
 	getTemplate,
 	listCommunity,
 	listMine,
+	listVersions,
 	publishTemplate,
+	putTemplate,
+	readVersion,
 	recordUse,
+	restoreVersion,
 	unpublishTemplate,
 } from "../src/domain/templates/index.js";
-import { putTemplate } from "../src/domain/templates/index.js";
 import {
 	listSaved,
 	saveTemplate,
@@ -21,6 +25,7 @@ import {
 	PayloadTooLargeError,
 	RevisionConflictError,
 	RevisionRequiredError,
+	ValidationError,
 } from "../src/domain/errors.js";
 import type {
 	SavedRepository,
@@ -195,7 +200,7 @@ describe("visibility and ownership", () => {
 		expect(own.body).toBe("<div>x</div>");
 	});
 
-	it("publishes keeping the first time, and unpublishing hides again", async () => {
+	it("publishes keeping the first time, hides on unpublish, restores on republish", async () => {
 		const r = repos();
 		const deps = { templates: r.templates };
 		await putTemplate(r, write(), OWNER_ID);
@@ -230,6 +235,85 @@ describe("visibility and ownership", () => {
 			entityKey: write().id,
 		});
 		await expect(getTemplate(r, write().id as string, OWNER_ID)).rejects.toBeInstanceOf(NotFoundError);
+	});
+});
+
+describe("versions", () => {
+	async function seeded() {
+		const r = repos();
+		const id = write().id as string;
+		await putTemplate(r, write(), OWNER_ID);
+		await putTemplate(r, { ...write(), body: "<div>v2</div>", ifRevision: 1 }, OWNER_ID);
+		return { r, id };
+	}
+
+	it("lists newest first and reads one, owner-only", async () => {
+		const { r, id } = await seeded();
+		const deps = { templates: r.templates };
+
+		const list = await listVersions(deps, id, OWNER_ID, { page: 1, pageSize: 20 });
+		expect(list.items.map((v) => v.versionNo)).toEqual([2, 1]);
+		expect(list.total).toBe(2);
+
+		await expect(listVersions(deps, id, OTHER_ID, { page: 1, pageSize: 20 })).rejects.toBeInstanceOf(
+			ForbiddenError,
+		);
+		await expect(
+			listVersions(deps, "99999999-9999-4999-8999-999999999999", OWNER_ID, { page: 1, pageSize: 20 }),
+		).rejects.toBeInstanceOf(NotFoundError);
+
+		const two = await readVersion(deps, id, 2, OWNER_ID);
+		expect(two.body).toBe("<div>v2</div>");
+		await expect(readVersion(deps, id, 99, OWNER_ID)).rejects.toBeInstanceOf(NotFoundError);
+		await expect(readVersion(deps, id, 2, OTHER_ID)).rejects.toBeInstanceOf(ForbiddenError);
+	});
+
+	it("restores as a new revision with a restore version", async () => {
+		const { r, id } = await seeded();
+		const deps = { templates: r.templates };
+
+		const result = await restoreVersion(deps, id, 1, OWNER_ID, 2);
+		expect(result.replayed).toBe(false);
+		expect(result.template.revision).toBe(3);
+		expect(result.template.body).toBe("<div>x</div>");
+		expect(r.store.templates.get(id)?.versions).toHaveLength(3);
+		expect(r.store.templates.get(id)?.versions[2]).toMatchObject({ createdBy: "restore" });
+
+		await expect(restoreVersion(deps, id, 1, OWNER_ID, undefined)).rejects.toBeInstanceOf(
+			RevisionRequiredError,
+		);
+		const stale = restoreVersion(deps, id, 2, OWNER_ID, 99);
+		await expect(stale).rejects.toBeInstanceOf(RevisionConflictError);
+		await expect(stale).rejects.toMatchObject({ details: [{ path: "revision", message: "3" }] });
+	});
+
+	it("replays a restore whose content is already current", async () => {
+		const { r, id } = await seeded();
+		const deps = { templates: r.templates };
+		const seqBefore = r.store.seqs.get(OWNER_ID);
+
+		// if_revision 2 matches current revision 2 and content equals v2.
+		const result = await restoreVersion(deps, id, 2, OWNER_ID, 99);
+		expect(result.replayed).toBe(true);
+		expect(result.template.revision).toBe(2);
+		expect(r.store.seqs.get(OWNER_ID)).toBe(seqBefore);
+		expect(r.store.templates.get(id)?.versions).toHaveLength(2);
+	});
+
+	it("refuses the newest version and deletes older ones", async () => {
+		const { r, id } = await seeded();
+		const deps = { templates: r.templates };
+
+		await expect(deleteVersion(deps, id, 2, OWNER_ID)).rejects.toBeInstanceOf(
+			ValidationError,
+		);
+		await expect(deleteVersion(deps, id, 99, OWNER_ID)).rejects.toBeInstanceOf(NotFoundError);
+		await expect(deleteVersion(deps, id, 1, OTHER_ID)).rejects.toBeInstanceOf(ForbiddenError);
+
+		await deleteVersion(deps, id, 1, OWNER_ID);
+		const list = await listVersions(deps, id, OWNER_ID, { page: 1, pageSize: 20 });
+		expect(list.items.map((v) => v.versionNo)).toEqual([2]);
+		expect((await readVersion(deps, id, 2, OWNER_ID)).body).toBe("<div>v2</div>");
 	});
 });
 

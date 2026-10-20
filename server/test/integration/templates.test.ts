@@ -328,6 +328,133 @@ describe("ported B4/P1 characterization", () => {
 	});
 });
 
+describe("endpoints 17-20, versions", () => {
+	async function seeded() {
+		const owner = await register(`vowner-${Date.now().toString(36)}`);
+		const other = await register(`vother-${Date.now().toString(36)}`);
+		const id = randomUUID();
+		await put(id, owner.token, tpl({ body: "<div>v1</div>" }));
+		await put(id, owner.token, tpl({ body: "<div>v2</div>", if_revision: 1 }));
+		return { owner, other, id };
+	}
+
+	it("lists newest first, reads one, and guards ownership", async () => {
+		const { owner, other, id } = await seeded();
+
+		const list = await app.inject({
+			method: "GET",
+			url: `/v2/templates/${id}/versions`,
+			headers: headers(owner.token),
+		});
+		expect(list.statusCode).toBe(200);
+		const body = list.json() as { items: { version_no: number }[]; total: number };
+		expect(body.items.map((v) => v.version_no)).toEqual([2, 1]);
+		expect(body.total).toBe(2);
+
+		const one = await app.inject({
+			method: "GET",
+			url: `/v2/templates/${id}/versions/1`,
+			headers: headers(owner.token),
+		});
+		expect(one.statusCode).toBe(200);
+		expect((one.json() as { body: string }).body).toBe("<div>v1</div>");
+
+		expect((await app.inject({ method: "GET", url: `/v2/templates/${id}/versions/99`, headers: headers(owner.token) })).statusCode).toBe(404);
+		expect((await app.inject({ method: "GET", url: `/v2/templates/${id}/versions/1`, headers: headers(other.token) })).statusCode).toBe(403);
+		expect((await app.inject({ method: "GET", url: `/v2/templates/${id}/versions` })).statusCode).toBe(401);
+		expect((await app.inject({ method: "GET", url: "/v2/templates/99999999-9999-4999-8999-999999999999/versions/1", headers: headers(owner.token) })).statusCode).toBe(404);
+	});
+
+	it("restores as a new revision with a restore version recorded", async () => {
+		const { owner, id } = await seeded();
+
+		const restored = await app.inject({
+			method: "POST",
+			url: `/v2/templates/${id}/versions/1/restore`,
+			headers: headers(owner.token),
+			payload: { if_revision: 2 },
+		});
+		expect(restored.statusCode).toBe(200);
+		const body = restored.json() as { revision: number; body: string };
+		expect(body.revision).toBe(3);
+		expect(body.body).toBe("<div>v1</div>");
+
+		const list = await app.inject({
+			method: "GET",
+			url: `/v2/templates/${id}/versions`,
+			headers: headers(owner.token),
+		});
+		const items = (list.json() as { items: { version_no: number; created_by: string }[] }).items;
+		expect(items.map((v) => v.version_no)).toEqual([3, 2, 1]);
+		expect(items[0]).toMatchObject({ created_by: "restore" });
+
+		const missing = await app.inject({
+			method: "POST",
+			url: `/v2/templates/${id}/versions/1/restore`,
+			headers: headers(owner.token),
+			payload: {},
+		});
+		expect(missing.statusCode).toBe(428);
+		const stale = await app.inject({
+			method: "POST",
+			url: `/v2/templates/${id}/versions/2/restore`,
+			headers: headers(owner.token),
+			payload: { if_revision: 99 },
+		});
+		expect(stale.statusCode).toBe(409);
+		expect((stale.json() as { error: { details: { path: string; message: string }[] } }).error.details).toEqual([
+			{ path: "revision", message: "3" },
+		]);
+	});
+
+	it("replays a restore whose content is already current", async () => {
+		const { owner, id } = await seeded();
+
+	 const replay = await app.inject({
+			method: "POST",
+			url: `/v2/templates/${id}/versions/2/restore`,
+			headers: headers(owner.token),
+			payload: { if_revision: 99 },
+		});
+		expect(replay.statusCode).toBe(200);
+		expect((replay.json() as { revision: number }).revision).toBe(2);
+		const list = await app.inject({
+			method: "GET",
+			url: `/v2/templates/${id}/versions`,
+			headers: headers(owner.token),
+		});
+		expect(((list.json() as { items: unknown[] }).items)).toHaveLength(2);
+	});
+
+	it("refuses the newest version and deletes older ones", async () => {
+		const { owner, other, id } = await seeded();
+
+		const newest = await app.inject({
+			method: "DELETE",
+			url: `/v2/templates/${id}/versions/2`,
+			headers: headers(owner.token),
+		});
+		expect(newest.statusCode).toBe(400);
+		expect((newest.json() as { error: { code: string } }).error.code).toBe("validation_failed");
+
+		expect((await app.inject({ method: "DELETE", url: `/v2/templates/${id}/versions/99`, headers: headers(owner.token) })).statusCode).toBe(404);
+		expect((await app.inject({ method: "DELETE", url: `/v2/templates/${id}/versions/1`, headers: headers(other.token) })).statusCode).toBe(403);
+
+	 const deleted = await app.inject({
+			method: "DELETE",
+			url: `/v2/templates/${id}/versions/1`,
+			headers: headers(owner.token),
+		});
+		expect(deleted.statusCode).toBe(204);
+		const list = await app.inject({
+			method: "GET",
+			url: `/v2/templates/${id}/versions`,
+			headers: headers(owner.token),
+		});
+		expect(((list.json() as { items: { version_no: number }[] }).items).map((v) => v.version_no)).toEqual([2]);
+	});
+});
+
 describe("v2 endpoint contracts", () => {
 	it("conflicts carry the stored revision and replays change nothing", async () => {
 		const { token } = await register("replay");

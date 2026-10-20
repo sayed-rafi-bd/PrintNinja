@@ -9,6 +9,8 @@ export {
 	recordUse,
 	unpublishTemplate,
 } from "./templates.js";
+export { deleteVersion, listVersions, readVersion, restoreVersion } from "./versions.js";
+export type { RestoreResult } from "./versions.js";
 export { listSaved, saveTemplate, unsaveTemplate } from "./saved.js";
 export { MAX_SAVED_PER_USER } from "./saved.js";
 export {

@@ -74,6 +74,20 @@ export function createFakeTemplateRepos(users: {
 		store.seqs.set(userId, next);
 		return next;
 	};
+	const pruneAutosaves = (templateId: string): void => {
+		const stored = store.templates.get(templateId);
+		if (!stored) {
+			return;
+		}
+		const autosaves = stored.versions
+			.filter((v) => v.createdBy === "autosave")
+			.sort((a, b) => a.versionNo - b.versionNo);
+		if (autosaves.length > 50) {
+			const drop = new Set(autosaves.slice(0, autosaves.length - 50).map((v) => v.versionNo));
+			stored.versions = stored.versions.filter((v) => !drop.has(v.versionNo));
+		}
+	};
+
 	const handleOf = (ownerId: string): string => {
 		const user = users.byId.get(ownerId);
 		if (!user) {
@@ -157,6 +171,7 @@ export function createFakeTemplateRepos(users: {
 				],
 			};
 			store.templates.set(stored.id, stored);
+			pruneAutosaves(stored.id);
 			return toView(stored);
 		},
 
@@ -185,6 +200,7 @@ export function createFakeTemplateRepos(users: {
 					...(version.label !== undefined ? { label: version.label } : {}),
 					...(version.note !== undefined ? { note: version.note } : {}),
 				});
+				pruneAutosaves(stored.id);
 			}
 			return toView(stored);
 		},
@@ -225,6 +241,58 @@ export function createFakeTemplateRepos(users: {
 				}
 			}
 			return { ownerId: stored.ownerId };
+		},
+
+		async listVersions(templateId, query) {
+			const stored = store.templates.get(templateId) ?? null;
+			if (!stored) {
+				return toPage([], 0, query);
+			}
+			const rows = [...stored.versions].sort((a, b) => b.versionNo - a.versionNo);
+			const items = rows
+				.slice((query.page - 1) * query.pageSize, query.page * query.pageSize)
+				.map((v) => ({
+					versionNo: v.versionNo,
+					createdBy: v.createdBy as "manual" | "autosave" | "restore",
+					label: v.label ?? null,
+					note: v.note ?? null,
+					createdAt: new Date(BASE_MS),
+				}));
+			return toPage(items, rows.length, query);
+		},
+
+		async findVersion(templateId, versionNo) {
+			const stored = store.templates.get(templateId) ?? null;
+			const v = stored?.versions.find((row) => row.versionNo === versionNo) ?? null;
+			return (
+				v && {
+					templateId,
+					versionNo: v.versionNo,
+					body: v.body,
+					css: v.css,
+					createdBy: v.createdBy as "manual" | "autosave" | "restore",
+					label: v.label ?? null,
+					note: v.note ?? null,
+					createdAt: new Date(BASE_MS),
+				}
+			);
+		},
+
+		async deleteVersion(templateId, versionNo) {
+			const stored = store.templates.get(templateId) ?? null;
+			if (!stored || stored.versions.length === 0) {
+				return "missing";
+			}
+			const max = stored.versions.reduce((m, v) => Math.max(m, v.versionNo), 0);
+			if (max === versionNo) {
+				return "newest";
+			}
+			const index = stored.versions.findIndex((v) => v.versionNo === versionNo);
+			if (index < 0) {
+				return "missing";
+			}
+			stored.versions.splice(index, 1);
+			return "deleted";
 		},
 
 		async listByOwner(ownerId, query) {

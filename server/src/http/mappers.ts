@@ -2,10 +2,14 @@ import type { UserRecord } from "../domain/ports.js";
 import type {
 	TemplateSummaryView,
 	TemplateView,
+	VersionSummaryView,
+	VersionView,
 } from "../domain/templatePorts.js";
 import type {
 	TemplateResponse,
 	TemplateSummaryResponse,
+	VersionResponse,
+	VersionSummaryResponse,
 } from "./schemas/templates.js";
 import type { AuthResponse, UserResponse } from "./schemas/auth.js";
 
@@ -59,5 +63,23 @@ export function toTemplate(view: TemplateView): TemplateResponse {
 		body: view.body,
 		css: view.css,
 		readme: view.readme,
+	};
+}
+
+export function toVersionSummary(view: VersionSummaryView): VersionSummaryResponse {
+	return {
+		version_no: view.versionNo,
+		created_by: view.createdBy,
+		label: view.label,
+		note: view.note,
+		created_at: view.createdAt.toISOString(),
+	};
+}
+
+export function toVersion(view: VersionView): VersionResponse {
+	return {
+		...toVersionSummary(view),
+		body: view.body,
+		css: view.css,
 	};
 }

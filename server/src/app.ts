@@ -18,6 +18,7 @@ import { communityRoutes } from "./http/routes/community.js";
 import { healthRoutes } from "./http/routes/health.js";
 import { savedRoutes } from "./http/routes/saved.js";
 import { templateRoutes } from "./http/routes/templates.js";
+import { versionRoutes } from "./http/routes/versions.js";
 import { APP_VERSION } from "./version.js";
 
 /**
@@ -130,6 +131,7 @@ export async function buildApp(args: {
 	await app.register(templateRoutes, { deps });
 	await app.register(communityRoutes, { deps });
 	await app.register(savedRoutes, { deps });
+	await app.register(versionRoutes, { deps });
 
 	return app;
 }

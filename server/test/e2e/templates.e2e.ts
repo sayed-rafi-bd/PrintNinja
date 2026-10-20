@@ -198,3 +198,28 @@ describe("E7 limits", () => {
 		expect((remote.json as { error: { code: string } }).error.code).toBe("remote_reference");
 	});
 });
+
+describe("versions round-trip", () => {
+	it("lists, reads, restores and deletes over HTTP", async () => {
+		const owner = await register("e8owner");
+		const id = crypto.randomUUID();
+	 expect((await request("PUT", `/v2/templates/${id}`, owner, tpl("E8", { body: "<div>v1</div>" }))).status).toBe(201);
+		expect((await request("PUT", `/v2/templates/${id}`, owner, tpl("E8", { body: "<div>v2</div>", if_revision: 1 }))).status).toBe(200);
+
+		const list = await request("GET", `/v2/templates/${id}/versions?page_size=100`, owner);
+		expect(list.status).toBe(200);
+		expect(((list.json as { items: { version_no: number }[] }).items).map((v) => v.version_no)).toEqual([2, 1]);
+
+		const one = await request("GET", `/v2/templates/${id}/versions/1`, owner);
+		expect((one.json as { body: string }).body).toBe("<div>v1</div>");
+
+		const restored = await request("POST", `/v2/templates/${id}/versions/1/restore`, owner, { if_revision: 2 });
+		expect(restored.status).toBe(200);
+		expect((restored.json as { revision: number }).revision).toBe(3);
+
+		expect((await request("DELETE", `/v2/templates/${id}/versions/3`, owner)).status).toBe(400);
+		expect((await request("DELETE", `/v2/templates/${id}/versions/1`, owner)).status).toBe(204);
+	 const after = await request("GET", `/v2/templates/${id}/versions?page_size=100`, owner);
+		expect(((after.json as { items: { version_no: number }[] }).items).map((v) => v.version_no)).toEqual([3, 2]);
+	});
+});
