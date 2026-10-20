@@ -105,6 +105,7 @@ export async function callApi<T>(deps: ApiDeps, options: CallOptions): Promise<T
 				message: result.error.error.message,
 				requestId: result.error.error.request_id ?? "",
 				status: result.response.status,
+				details: result.error.error.details,
 			});
 		}
 		throw new Error(`Request failed with status ${result.response.status}`);

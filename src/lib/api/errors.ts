@@ -6,14 +6,36 @@ export class ApiError extends Error {
 	readonly code: string;
 	readonly requestId: string;
 	readonly status: number;
+	/** Machine-readable extras; a 409 carries the stored revision here. */
+	readonly details: Array<{ path: string; message: string }>;
 
-	constructor(args: { code: string; message: string; requestId: string; status: number }) {
+	constructor(args: {
+		code: string;
+		message: string;
+		requestId: string;
+		status: number;
+		details?: Array<{ path: string; message: string }>;
+	}) {
 		super(args.message);
 		this.name = "ApiError";
 		this.code = args.code;
 		this.requestId = args.requestId;
 		this.status = args.status;
+		this.details = args.details ?? [];
 	}
+}
+
+/** The stored revision from a 409's details, if the server sent one. */
+export function storedRevision(err: unknown): number | null {
+	if (!(err instanceof ApiError) || err.code !== "revision_conflict") {
+		return null;
+	}
+	const found = err.details.find((d) => d.path === "revision");
+	if (!found) {
+		return null;
+	}
+	const n = Number(found.message);
+	return Number.isInteger(n) && n > 0 ? n : null;
 }
 
 /** The server could not be reached at all (network down, wrong address). */
@@ -34,7 +56,12 @@ export class SessionExpiredError extends Error {
 
 /** True when a response body is the shared error envelope. */
 export function isErrorEnvelope(body: unknown): body is {
-	error: { code: string; message: string; request_id?: string };
+	error: {
+		code: string;
+		message: string;
+		request_id?: string;
+		details?: Array<{ path: string; message: string }>;
+	};
 } {
 	if (typeof body !== "object" || body === null) {
 		return false;

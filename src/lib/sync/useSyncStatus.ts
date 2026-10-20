@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createSyncScheduler, type SyncStatus } from "@/lib/sync/scheduler";
-import { ensureAdoptionChecked, productionApi, productionCache } from "@/lib/sync/wiring";
-import type { EngineApi, EngineCache } from "@/lib/sync/engine";
+import { ensureAdoptionChecked, productionApi, productionCache, productionLibraryApi, productionLibraryCache } from "@/lib/sync/wiring";
+import type { EngineApi, EngineCache, LibraryApi, LibraryCache } from "@/lib/sync/engine";
 
 const INITIAL: SyncStatus = { state: "syncing", pending: 0, conflicts: 0, lastPullAt: null, lastError: null };
 
@@ -17,7 +17,11 @@ export function syncNow(): Promise<void> {
 	return current?.syncNow() ?? Promise.resolve();
 }
 
-export function useSyncStatus(deps?: { cache?: EngineCache; api?: EngineApi }): SyncStatus {
+export function useSyncStatus(deps?: {
+	cache?: EngineCache;
+	api?: EngineApi;
+	library?: { cache: LibraryCache; api: LibraryApi };
+}): SyncStatus {
 	const [status, setStatus] = useState<SyncStatus>(INITIAL);
 	const schedulerRef = useRef<ReturnType<typeof createSyncScheduler> | null>(null);
 
@@ -25,6 +29,7 @@ export function useSyncStatus(deps?: { cache?: EngineCache; api?: EngineApi }): 
 		const scheduler = createSyncScheduler({
 			cache: deps?.cache ?? productionCache(),
 			api: deps?.api ?? productionApi(),
+			library: deps?.library ?? { cache: productionLibraryCache(), api: productionLibraryApi() },
 			onStatus: setStatus,
 		});
 		schedulerRef.current = scheduler;

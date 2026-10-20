@@ -1,4 +1,4 @@
-import { drainUses, pushDirty, pushTombstones, syncOnce, type EngineApi, type EngineCache } from "./engine";
+import { drainUses, pushDirty, pushLibraryDirty, pushLibraryTombstones, downloadFontFiles, pushTombstones, syncOnce, type EngineApi, type EngineCache, type LibraryApi, type LibraryCache } from "./engine";
 
 export type SyncStatusName = "synced" | "syncing" | "pending" | "offline" | "conflict";
 
@@ -15,6 +15,7 @@ export interface SyncStatus {
 export interface SchedulerDeps {
 	cache: EngineCache;
 	api: EngineApi;
+	library?: { cache: LibraryCache; api: LibraryApi };
 	now?: () => number;
 	onStatus?: (status: SyncStatus) => void;
 }
@@ -58,6 +59,15 @@ export function createSyncScheduler(deps: SchedulerDeps) {
 		let pending = 0;
 		try {
 			pending = (await deps.cache.listDirty()).length;
+			if (deps.library) {
+				const [datasets, profiles, settings, fonts] = await Promise.all([
+					deps.library.cache.listDirtyDatasets(),
+					deps.library.cache.listDirtyProfiles(),
+					deps.library.cache.listDirtySettings(),
+					deps.library.cache.listDirtyFonts(),
+				]);
+				pending += datasets.length + profiles.length + settings.length + fonts.length;
+			}
 		} catch {
 			pending = 0;
 		}
@@ -68,8 +78,16 @@ export function createSyncScheduler(deps: SchedulerDeps) {
 
 	async function runPushOnly(): Promise<void> {
 		await pushTombstones(deps.cache, deps.api);
+		if (deps.library) {
+			await pushLibraryTombstones(deps.library.cache, deps.library.api);
+		}
 		const { conflicts } = await pushDirty(deps.cache, deps.api);
 		conflictIds = conflicts;
+		if (deps.library) {
+			await pushLibraryDirty(deps.library.cache, deps.library.api);
+			// Retries failed font downloads without a full pull.
+			await downloadFontFiles(deps.library.cache);
+		}
 		await drainUses(deps.cache, deps.api);
 	}
 
@@ -84,7 +102,7 @@ export function createSyncScheduler(deps: SchedulerDeps) {
 		running = true;
 		await emit("syncing");
 		try {
-			const res = await syncOnce(deps.cache, deps.api);
+			const res = await syncOnce(deps.cache, deps.api, deps.library);
 			conflictIds = res.conflicts;
 			lastPullAt = new Date(now()).toISOString();
 			lastError = null;

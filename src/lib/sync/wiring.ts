@@ -2,7 +2,24 @@ import { callApi, type ApiDeps } from "@/lib/api/client";
 import { agent } from "@/lib/agent/commands";
 import { endSession, getServiceUrl, getSessionToken } from "@/lib/share/client";
 import { adoptLocalTemplates } from "@/lib/share/sync";
-import type { DirtyRow, EngineApi, EngineCache, SyncChange } from "./engine";
+import {
+	deleteRemoteDataset,
+	deleteRemoteFont,
+	deleteRemoteProfile,
+	deleteRemoteSetting,
+	putRemoteDataset,
+	putRemoteFont,
+	putRemoteProfile,
+	putRemoteSetting,
+	uploadRemoteFontFile,
+} from "@/lib/share/client";
+import type {
+	EngineApi,
+	EngineCache,
+	LibraryApi,
+	LibraryCache,
+	SyncChange,
+} from "./engine";
 
 function apiDeps(): ApiDeps {
 	return {
@@ -46,6 +63,56 @@ export function productionCache(): EngineCache {
 	};
 }
 
+/** The production library cache side: thin wrappers over the Tauri cache commands. */
+export function productionLibraryCache(): LibraryCache {
+	return {
+		listDirtyDatasets: () => agent("cache_list_dirty_datasets"),
+		listDirtyProfiles: () => agent("cache_list_dirty_profiles"),
+		listDirtySettings: () => agent("cache_list_dirty_settings"),
+		listDirtyFonts: () => agent("cache_list_dirty_fonts"),
+		listTombstonedDatasets: () => agent("cache_list_tombstoned_datasets"),
+		listTombstonedProfiles: () => agent("cache_list_tombstoned_profiles"),
+		listTombstonedSettings: () => agent("cache_list_tombstoned_settings"),
+		listTombstonedFonts: () => agent("cache_list_tombstoned_fonts"),
+		listSyncedDatasets: () => agent("cache_list_synced_datasets"),
+		listSyncedProfiles: () => agent("cache_list_synced_profiles"),
+		listSyncedSettings: () => agent("cache_list_synced_settings"),
+		listSyncedFonts: () => agent("cache_list_synced_fonts"),
+		markDatasetPushed: async (serverId, revision) => {
+			await agent("cache_mark_dataset_pushed", { server_id: serverId, revision });
+		},
+		markProfilePushed: async (serverId, revision) => {
+			await agent("cache_mark_profile_pushed", { server_id: serverId, revision });
+		},
+		markSettingPushed: async (key) => {
+			await agent("cache_mark_setting_pushed", { key });
+		},
+		markFontPushed: async (serverId, revision) => {
+			await agent("cache_mark_font_pushed", { server_id: serverId, revision });
+		},
+		forgetDataset: (serverId) => agent("cache_forget_dataset", { server_id: serverId }),
+		forgetProfile: (serverId) => agent("cache_forget_profile", { server_id: serverId }),
+		forgetSetting: (key) => agent("cache_forget_setting", { key }),
+		forgetFont: (serverId) => agent("cache_forget_font", { server_id: serverId }),
+		readFontFile: (serverId) => agent("cache_read_font_file", { server_id: serverId }),
+		downloadPendingFonts: () => agent("cache_download_pending_fonts"),
+	};
+}
+
+/** The production library network side: the typed v2 API through callApi. */
+export function productionLibraryApi(deps: ApiDeps = apiDeps()): LibraryApi {
+	return {
+		putDataset: (id, body) => putRemoteDataset({ id, ...body }),
+		deleteDataset: (id) => deleteRemoteDataset(id),
+		putProfile: (id, body) => putRemoteProfile({ id, ...body }),
+		deleteProfile: (id) => deleteRemoteProfile(id),
+		putSetting: (key, value) => putRemoteSetting(key, value),
+		deleteSetting: (key) => deleteRemoteSetting(key),
+		putFont: (id, body) => putRemoteFont({ id, ...body }),
+		putFontFile: (id, bytes) => uploadRemoteFontFile(id, bytes),
+		deleteFont: (id) => deleteRemoteFont(id),
+	};
+}
 /** The production network side: the typed v2 API through `callApi`. */
 export function productionApi(deps: ApiDeps = apiDeps()): EngineApi {
 	return {
