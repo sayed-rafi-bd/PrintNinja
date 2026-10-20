@@ -11,7 +11,9 @@ import {
 import Fastify, { type FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 import type { Config } from "./config.js";
-import { registerErrorHandling } from "./http/errors.js";
+import type { AuthDeps } from "./domain/ports.js";
+import { registerErrorHandling } from "./http/plugins/errorHandler.js";
+import { authRoutes } from "./http/routes/auth.js";
 import { healthRoutes } from "./http/routes/health.js";
 import { APP_VERSION } from "./version.js";
 
@@ -26,7 +28,11 @@ export const DEFAULT_BODY_LIMIT = 16 * 1024;
  * cross-cutting plugins, error envelope, routes. Tests call this too —
  * there is no second wiring path.
  */
-export async function buildApp(config: Config): Promise<FastifyInstance> {
+export async function buildApp(args: {
+	config: Config;
+	deps: AuthDeps;
+}): Promise<FastifyInstance> {
+	const { config, deps } = args;
 	const app = Fastify({
 		// One id per request, echoed in the x-request-id header and the
 		// error envelope (D11). Generated, never trusted from the client.
@@ -112,6 +118,12 @@ export async function buildApp(config: Config): Promise<FastifyInstance> {
 
 	// The health route owns its full /v2/health path; no prefix here.
 	await app.register(healthRoutes);
+
+	await app.register(authRoutes, {
+		deps,
+		rateLimitMax: config.rateLimitAuthMax,
+		rateLimitWindowMs: config.rateLimitAuthWindowSeconds * 1000,
+	});
 
 	return app;
 }

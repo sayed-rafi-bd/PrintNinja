@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Validator } from "@seriousme/openapi-schema-validator";
 import { buildApp } from "../src/app.js";
-import { testConfig } from "./helpers.js";
+import { fakeDeps, testConfig } from "./helpers.js";
 
 type GeneratedDocument = Record<string, unknown> & {
   openapi: string;
@@ -9,7 +9,7 @@ type GeneratedDocument = Record<string, unknown> & {
 };
 
 async function generate(): Promise<GeneratedDocument> {
-  const app = await buildApp(testConfig());
+  const app = await buildApp({ config: testConfig(), deps: fakeDeps() });
   await app.ready();
   const document = app.swagger() as unknown as GeneratedDocument;
   await app.close();
@@ -54,11 +54,43 @@ describe("generated OpenAPI document", () => {
     const document = await generate();
     expect(document.paths).toHaveProperty("/v2/health");
   });
+
+  it("documents the auth endpoints with their v2 statuses", async () => {
+    const document = await generate();
+
+    const register = document.paths["/v2/auth/register"] as {
+      post: { responses: Record<string, unknown> };
+    };
+    expect(Object.keys(register.post.responses).sort()).toEqual([
+      "201",
+      "400",
+      "409",
+      "429",
+    ]);
+    const login = document.paths["/v2/auth/login"] as {
+      post: { responses: Record<string, unknown> };
+    };
+    expect(Object.keys(login.post.responses).sort()).toEqual([
+      "200",
+      "400",
+      "401",
+      "429",
+    ]);
+    const logout = document.paths["/v2/auth/logout"] as {
+      post: { responses: Record<string, unknown> };
+    };
+    expect(Object.keys(logout.post.responses).sort()).toEqual([
+      "204",
+      "401",
+      "429",
+    ]);
+    expect(document.paths).toHaveProperty("/v2/auth/me");
+  });
 });
 
 describe("health route", () => {
   it("answers 200 with status and version", async () => {
-    const app = await buildApp(testConfig());
+    const app = await buildApp({ config: testConfig(), deps: fakeDeps() });
     const response = await app.inject({ method: "GET", url: "/v2/health" });
     await app.close();
 
@@ -69,7 +101,7 @@ describe("health route", () => {
   });
 
   it("serves the raw document at /openapi.json and the UI at /docs", async () => {
-    const app = await buildApp(testConfig());
+    const app = await buildApp({ config: testConfig(), deps: fakeDeps() });
     const json = await app.inject({ method: "GET", url: "/openapi.json" });
     const docs = await app.inject({ method: "GET", url: "/docs" });
     await app.close();

@@ -1,4 +1,13 @@
+import { randomUUID } from "node:crypto";
 import type { Config } from "../src/config.js";
+import type { AuthDeps } from "../src/domain/ports.js";
+import {
+	createFakeClock,
+	createFakeHasher,
+	createFakeSessions,
+	createFakeTokens,
+	createFakeUsers,
+} from "./fakes/index.js";
 
 /**
  * Builds a valid Config for tests without touching process.env. Env
@@ -23,6 +32,25 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
 		argon2TimeCost: 2,
 		argon2Parallelism: 1,
 		docsEnabled: true,
+		...overrides,
+	};
+}
+
+/**
+ * Full AuthDeps with in-memory fakes, for tests that only exercise the
+ * HTTP layer (envelope, headers, docs gating). Anything touching real
+ * behaviour uses test/integration/ with PostgreSQL instead.
+ */
+export function fakeDeps(overrides: Partial<AuthDeps> = {}): AuthDeps {
+	const users = createFakeUsers();
+	return {
+		users,
+		sessions: createFakeSessions(users),
+		hasher: createFakeHasher(),
+		tokens: createFakeTokens(),
+		clock: createFakeClock(new Date("2026-10-20T00:00:00Z")),
+		ids: { newId: () => randomUUID() },
+		sessionTtlDays: 30,
 		...overrides,
 	};
 }

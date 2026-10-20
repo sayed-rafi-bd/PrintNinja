@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp, DEFAULT_BODY_LIMIT } from "../src/app.js";
-import { DomainError } from "../src/http/errors.js";
-import { testConfig } from "./helpers.js";
+import { RevisionConflictError } from "../src/domain/errors.js";
+import { fakeDeps, testConfig } from "./helpers.js";
 
 let app: FastifyInstance | undefined;
 
@@ -13,7 +13,7 @@ afterEach(async () => {
 
 describe("error envelope", () => {
   it("answers an unknown route with the 404 envelope", async () => {
-    app = await buildApp(testConfig());
+    app = await buildApp({ config: testConfig(), deps: fakeDeps() });
     const response = await app.inject({ method: "GET", url: "/v2/nope" });
 
     expect(response.statusCode).toBe(404);
@@ -25,7 +25,7 @@ describe("error envelope", () => {
   });
 
   it("answers malformed JSON with validation_failed, not a stack", async () => {
-    app = await buildApp(testConfig());
+    app = await buildApp({ config: testConfig(), deps: fakeDeps() });
     const response = await app.inject({
       method: "POST",
       url: "/v2/nope",
@@ -40,11 +40,9 @@ describe("error envelope", () => {
   });
 
   it("maps a thrown DomainError to its code, status and details", async () => {
-    app = await buildApp(testConfig());
+    app = await buildApp({ config: testConfig(), deps: fakeDeps() });
     app.get("/v2/__domain-error", async () => {
-      throw new DomainError("revision_conflict", 409, "Stale revision", [
-        { path: "revision", message: "5" },
-      ]);
+      throw new RevisionConflictError(5);
     });
     await app.ready();
 
@@ -60,7 +58,7 @@ describe("error envelope", () => {
   });
 
   it("hides internals behind internal_error for unexpected throws", async () => {
-    app = await buildApp(testConfig());
+    app = await buildApp({ config: testConfig(), deps: fakeDeps() });
     app.get("/v2/__boom", async () => {
       throw new Error("connection string: postgresql://secret");
     });
@@ -78,7 +76,7 @@ describe("error envelope", () => {
 
 describe("request ids", () => {
   it("echoes x-request-id on success and inside the envelope", async () => {
-    app = await buildApp(testConfig());
+    app = await buildApp({ config: testConfig(), deps: fakeDeps() });
     const ok = await app.inject({ method: "GET", url: "/v2/health" });
     const missing = await app.inject({ method: "GET", url: "/v2/nope" });
 
@@ -94,7 +92,7 @@ describe("request ids", () => {
   });
 
   it("generates a distinct id per request", async () => {
-    app = await buildApp(testConfig());
+    app = await buildApp({ config: testConfig(), deps: fakeDeps() });
     const first = await app.inject({ method: "GET", url: "/v2/health" });
     const second = await app.inject({ method: "GET", url: "/v2/health" });
 
@@ -104,7 +102,7 @@ describe("request ids", () => {
 
 describe("CORS allow-list", () => {
   it("sets the allow-origin header for an allowed origin", async () => {
-    app = await buildApp(testConfig());
+    app = await buildApp({ config: testConfig(), deps: fakeDeps() });
     const response = await app.inject({
       method: "GET",
       url: "/v2/health",
@@ -117,7 +115,7 @@ describe("CORS allow-list", () => {
   });
 
   it("omits the header for an origin that is not on the list", async () => {
-    app = await buildApp(testConfig());
+    app = await buildApp({ config: testConfig(), deps: fakeDeps() });
     const response = await app.inject({
       method: "GET",
       url: "/v2/health",
@@ -137,7 +135,7 @@ describe("client IP attribution", () => {
     headers: Record<string, string> = {},
     remoteAddress?: string,
   ): Promise<string> {
-    app = await buildApp(testConfig({ trustProxy }));
+    app = await buildApp({ config: testConfig({ trustProxy }), deps: fakeDeps() });
     app.get("/v2/__ip", async (request) => ({ ip: request.ip }));
     await app.ready();
     const response = await app.inject({
@@ -168,7 +166,7 @@ describe("client IP attribution", () => {
 
 describe("rate limit", () => {
   it("returns the 429 envelope once the limit is exhausted", async () => {
-    app = await buildApp(testConfig({ rateLimitMax: 3 }));
+    app = await buildApp({ config: testConfig({ rateLimitMax: 3 }), deps: fakeDeps() });
     for (let i = 0; i < 3; i += 1) {
       await app.inject({ method: "GET", url: "/v2/health" });
     }
@@ -189,7 +187,7 @@ describe("rate limit", () => {
 
 describe("body limit", () => {
   it("rejects a body larger than the default cap with 413", async () => {
-    app = await buildApp(testConfig());
+    app = await buildApp({ config: testConfig(), deps: fakeDeps() });
     // The route need not exist: Fastify enforces the cap while reading
     // the body, before dispatch.
     app.post("/v2/__big", async () => ({ ok: true }));
@@ -210,13 +208,13 @@ describe("body limit", () => {
 
 describe("docs gating", () => {
   it("serves /docs and /openapi.json when enabled", async () => {
-    app = await buildApp(testConfig({ docsEnabled: true }));
+    app = await buildApp({ config: testConfig({ docsEnabled: true }), deps: fakeDeps() });
     expect((await app.inject({ url: "/docs" })).statusCode).toBe(200);
     expect((await app.inject({ url: "/openapi.json" })).statusCode).toBe(200);
   });
 
   it("returns the 404 envelope for /docs when disabled", async () => {
-    app = await buildApp(testConfig({ docsEnabled: false }));
+    app = await buildApp({ config: testConfig({ docsEnabled: false }), deps: fakeDeps() });
     const response = await app.inject({ url: "/docs" });
 
     expect(response.statusCode).toBe(404);

@@ -1,36 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import type { ErrorCode } from "./schemas/error.js";
-
-// The code vocabulary and envelope shape live in http/schemas/error.ts
-// (plan section 9); this module maps failures onto it. One code per
-// business rule — the client must not have to parse messages.
-
-/**
- * A business-rule failure that knows exactly how it should appear on
- * the wire. Domain code throws these; the HTTP layer maps them to the
- * error envelope. Never build one with a status outside 4xx/5xx.
- * Details stay in the envelope's path/message pairs — for example the
- * stored revision on a revision_conflict rides as
- * [{ path: "revision", message: "<stored>" }].
- */
-export class DomainError extends Error {
-	readonly code: ErrorCode;
-	readonly statusCode: number;
-	readonly details?: { path: string; message: string }[];
-
-	constructor(
-		code: ErrorCode,
-		statusCode: number,
-		message: string,
-		details?: { path: string; message: string }[],
-	) {
-		super(message);
-		this.name = "DomainError";
-		this.code = code;
-		this.statusCode = statusCode;
-		this.details = details;
-	}
-}
+import { DomainError } from "../../domain/errors.js";
+import type { ErrorCode } from "../../domain/errors.js";
 
 /** Framework-level errors Fastify raises before a handler runs (bad
  * JSON, oversized body, rate limit, unknown route). */
@@ -55,13 +25,47 @@ const codeForStatus = (statusCode: number): ErrorCode => {
 
 /**
  * What the error seam is prepared to receive: a real Error plus the
- * optional status code Fastify and its plugins attach. Fastify 5 types
- * the handler's error as unknown, so the seam declares this shape
- * instead of narrowing blindly at every use.
+ * optional status code Fastify and its plugins attach, plus the
+ * validation report Fastify builds for schema failures (an array of
+ * Ajv-shaped { instancePath, message } items, whatever the underlying
+ * validator was). Fastify 5 types the handler's error as unknown, so
+ * the seam declares this shape instead of narrowing blindly at every use.
  */
 export type HandlerError = Error & {
 	statusCode?: unknown;
+	validation?: unknown;
+	validationContext?: unknown;
 };
+
+/** Maps a Fastify validation report onto the envelope's path/message
+ * pairs. instancePath "/address/street" becomes "address.street"; a
+ * root-level failure falls back to the context ("body", "query"). */
+function validationDetails(error: HandlerError): {
+	path: string;
+	message: string;
+}[] {
+	const context =
+		typeof error.validationContext === "string" &&
+		error.validationContext.length > 0
+			? error.validationContext
+			: "request";
+	const items = error.validation as {
+		instancePath?: unknown;
+		message?: unknown;
+	}[];
+	return items.map((item) => {
+		const raw =
+			typeof item?.instancePath === "string" ? item.instancePath : "";
+		const dotted = raw.replace(/^\//, "").replace(/\//g, ".");
+		return {
+			path: dotted.length > 0 ? dotted : context,
+			message:
+				typeof item?.message === "string" && item.message.length > 0
+					? item.message
+					: "Invalid value",
+		};
+	});
+}
 
 /**
  * The single error seam. Every failure leaves the service through here
@@ -93,7 +97,23 @@ export function registerErrorHandling(app: FastifyInstance): void {
 			return;
 		}
 
-		request.log.error({ err: error }, "unhandled error");
+		if (error.statusCode === 400 && Array.isArray(error.validation)) {
+			request.log.info({ validation: error.validation }, "invalid request");
+			reply.status(400).send({
+				error: {
+					code: "validation_failed" as const,
+					message: error.message,
+					details: validationDetails(error),
+					request_id: request.id,
+				},
+			});
+			return;
+		}
+		if (typeof error.statusCode === "number" && error.statusCode < 500) {
+			request.log.info({ err: error }, "client error");
+		} else {
+			request.log.error({ err: error }, "unhandled error");
+		}
 		reply.status(statusCode).send({
 			error: {
 				code: codeForStatus(statusCode),

@@ -1,23 +1,12 @@
 import { z } from "zod";
+import { ERROR_CODES } from "../../domain/errors.js";
 
 // The error envelope (REFACTORING.md section 9). Every failure response in
 // the API uses this shape; routes reference it in their error responses.
+// The code list itself lives in the domain — this schema only restates it
+// as Zod so it can ride into the OpenAPI document.
 
-export const errorCode = z.enum([
-  "validation_failed",
-  "remote_reference",
-  "payload_too_large",
-  "unauthorized",
-  "invalid_credentials",
-  "forbidden",
-  "not_found",
-  "handle_taken",
-  "revision_conflict",
-  "revision_required",
-  "quota_exceeded",
-  "rate_limited",
-  "internal_error",
-]);
+export const errorCode = z.enum(ERROR_CODES);
 
 export const errorBody = z.object({
   error: z.object({
