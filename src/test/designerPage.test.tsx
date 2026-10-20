@@ -25,12 +25,17 @@ vi.mock("@tauri-apps/api/core", async (importOriginal) => {
 
 // Which layout the page renders: `lg` and up is the desktop workspace, below it the tabs.
 let desktop = false;
-const setViewport = (kind: "phone" | "desktop") => { desktop = kind === "desktop"; };
+// `wide` is the 1440 px breakpoint above which the controls column is not an icon rail.
+let wide = true;
+const setViewport = (kind: "phone" | "desktop" | "narrow-desktop") => {
+  desktop = kind !== "phone";
+  wide = kind === "desktop";
+};
 
 beforeAll(() => {
   window.matchMedia = ((q: string) =>
     ({
-      matches: q.includes("min-width: 1024px") ? desktop : false, media: q, onchange: null,
+      matches: q.includes("min-width: 1440px") ? desktop && wide : q.includes("min-width: 1024px") ? desktop : false, media: q, onchange: null,
       addListener: vi.fn(), removeListener: vi.fn(),
       addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(),
     }) as unknown as MediaQueryList) as typeof window.matchMedia;
@@ -139,7 +144,7 @@ describe("Designer page layout on a phone", () => {
 });
 
 describe("Designer page layout on desktop", () => {
-  beforeEach(() => setViewport("desktop"));
+  beforeEach(() => { window.localStorage.clear(); setViewport("desktop"); });
   afterEach(() => setViewport("phone"));
 
   it("shows the editor and the canvas together, with no view tabs", async () => {
@@ -235,5 +240,102 @@ describe("Designer page layout on desktop", () => {
     await screen.findByTitle("Canvas preview");
     expect(screen.getByRole("button", { name: "Save to server" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /New/ })).toBeInTheDocument();
+  });
+});
+
+describe("Designer page, phase 3 polish on desktop", () => {
+  beforeEach(() => { window.localStorage.clear(); setViewport("desktop"); });
+  afterEach(() => setViewport("phone"));
+
+  it("starts side by side and switches to canvas only and back, remembering the choice", async () => {
+    const first = renderDesigner();
+    await screen.findByTitle("Canvas preview");
+    expect(screen.getByRole("button", { name: "Side by side" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Canvas only" }));
+    expect(screen.queryByLabelText("HTML editor")).not.toBeInTheDocument();
+    expect(screen.getByTitle("Canvas preview")).toBeInTheDocument();
+    first.unmount();
+
+    // A new visit comes back in the layout it was left in.
+    renderDesigner();
+    await screen.findByTitle("Canvas preview");
+    expect(screen.getByRole("button", { name: "Canvas only" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByLabelText("HTML editor")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Stacked" }));
+    expect(screen.getByLabelText("HTML editor")).toBeInTheDocument();
+    expect(screen.getByTitle("Canvas preview")).toBeInTheDocument();
+  });
+
+  it("has no layout toggle on a phone", async () => {
+    setViewport("phone");
+    renderDesigner();
+    await screen.findByRole("tablist", { name: "Designer views" });
+    expect(screen.queryByRole("group", { name: "Workspace layout" })).not.toBeInTheDocument();
+  });
+
+  it("remembers which accordion sections are open", async () => {
+    const first = renderDesigner();
+    const aside = await screen.findByRole("complementary", { name: "Designer controls" });
+    fireEvent.click(within(aside).getByRole("button", { name: "Versions" }));
+    first.unmount();
+
+    renderDesigner();
+    const again = await screen.findByRole("complementary", { name: "Designer controls" });
+    expect(within(again).getByRole("button", { name: "Versions" })).toHaveAttribute("aria-expanded", "true");
+    expect(within(again).getByRole("button", { name: "Page Setup" })).toHaveAttribute("aria-expanded", "true");
+    expect(within(again).getByRole("button", { name: "Templates" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("clicking a helper inserts it into the HTML editor", async () => {
+    renderDesigner();
+    const aside = await screen.findByRole("complementary", { name: "Designer controls" });
+    fireEvent.click(within(aside).getByRole("button", { name: "Helpers" }));
+    const before = EditorView.findFromDOM(screen.getByLabelText("HTML editor") as HTMLElement)!.state.doc.toString();
+    await act(async () => { fireEvent.click(within(aside).getByRole("button", { name: "Insert currency helper" })); });
+    const after = EditorView.findFromDOM(screen.getByLabelText("HTML editor") as HTMLElement)!.state.doc.toString();
+    expect(after.length).toBe(before.length + "{{currency }}".length);
+    expect(after).toContain("{{currency }}");
+  });
+
+  it("clicking a helper in canvas-only layout brings the editor back and inserts there", async () => {
+    renderDesigner();
+    const aside = await screen.findByRole("complementary", { name: "Designer controls" });
+    fireEvent.click(within(aside).getByRole("button", { name: "Helpers" }));
+    fireEvent.click(screen.getByRole("button", { name: "Canvas only" }));
+    expect(screen.queryByLabelText("HTML editor")).not.toBeInTheDocument();
+    await act(async () => { fireEvent.click(within(aside).getByRole("button", { name: "Insert upper helper" })); });
+    const doc = EditorView.findFromDOM(screen.getByLabelText("HTML editor") as HTMLElement)!.state.doc.toString();
+    expect(doc).toContain("{{upper }}");
+  });
+
+  it("collapses the controls to an icon rail on a narrow desktop and opens a section from it", async () => {
+    setViewport("narrow-desktop");
+    renderDesigner();
+    await screen.findByTitle("Canvas preview");
+    expect(screen.queryByRole("complementary", { name: "Designer controls" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open Versions" }));
+    const aside = await screen.findByRole("complementary", { name: "Designer controls" });
+    expect(within(aside).getByRole("button", { name: "Versions" })).toHaveAttribute("aria-expanded", "true");
+    // It can be collapsed again by hand.
+    fireEvent.click(within(aside).getByRole("button", { name: "Collapse controls" }));
+    expect(screen.queryByRole("complementary", { name: "Designer controls" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand controls" })).toBeInTheDocument();
+  });
+
+  it("shows the full controls column on a wide desktop, with no rail", async () => {
+    renderDesigner();
+    await screen.findByRole("complementary", { name: "Designer controls" });
+    expect(screen.queryByRole("button", { name: "Expand controls" })).not.toBeInTheDocument();
+  });
+
+  it("shows an error banner while typing an unclosed block, and clears it once fixed", async () => {
+    renderDesigner();
+    await screen.findByTitle("Canvas preview");
+    const view = EditorView.findFromDOM(screen.getByLabelText("HTML editor") as HTMLElement)!;
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await act(async () => { view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "{{#each items}}<p>" } }); });
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/Template error/), { timeout: 2000 });
+    await act(async () => { view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "<p>ok</p>" } }); });
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument(), { timeout: 2000 });
   });
 });

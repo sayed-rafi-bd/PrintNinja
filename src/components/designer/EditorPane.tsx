@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import CodeMirror from "@uiw/react-codemirror";
+import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
+import CodeMirror, { type EditorView, type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { css } from "@codemirror/lang-css";
 import { html } from "@codemirror/lang-html";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -62,6 +62,16 @@ export function CodeEditors({ templateName, htmlCode, cssCode, onHtmlChange, onC
 
 type EditorTab = "html" | "css" | "readme";
 
+/** What a parent can ask the editor pane to do. */
+export interface EditorPaneHandle {
+  /**
+   * Insert `text` at the HTML editor's cursor (replacing any selection), then
+   * leave the cursor `back` characters before the end of the inserted text.
+   * Switches to the HTML tab first, since that is where helpers go.
+   */
+  insertAtCursor: (text: string, back?: number) => void;
+}
+
 interface Props extends CodeProps {
   readme: string;
   onReadmeChange: (value: string) => void;
@@ -77,11 +87,38 @@ interface Props extends CodeProps {
  * parent and scrolls on its own. Both code editors stay mounted, so switching
  * tabs keeps each one's cursor, scroll position and undo history.
  */
-export function EditorPane({
+export const EditorPane = forwardRef<EditorPaneHandle, Props>(function EditorPane({
   templateName, htmlCode, cssCode, onHtmlChange, onCssChange,
   readme, onReadmeChange, readmeSaving, onSaveReadme, notices, className,
-}: Props) {
+}, ref) {
+  const htmlEditor = useRef<ReactCodeMirrorRef>(null);
   const [tab, setTab] = useState<EditorTab>("html");
+
+  // CodeMirror creates its view a moment after it mounts. An insert asked for
+  // before then (the pane has just come back from canvas-only) waits here.
+  const pendingInsert = useRef<{ text: string; back: number } | null>(null);
+
+  const applyInsert = (view: EditorView, text: string, back: number) => {
+    const { from, to } = view.state.selection.main;
+    // Dispatching fires the editor's change listener, so the page state and
+    // the canvas update exactly as if the text had been typed.
+    view.dispatch({
+      changes: { from, to, insert: text },
+      selection: { anchor: from + text.length - back },
+    });
+    // The HTML tab may have been hidden a moment ago; focus once it is shown.
+    setTimeout(() => view.focus(), 0);
+  };
+
+  useImperativeHandle(ref, () => ({
+    insertAtCursor(text, back = 0) {
+      setTab("html");
+      const view = htmlEditor.current?.view;
+      if (view) applyInsert(view, text, back);
+      else pendingInsert.current = { text, back };
+    },
+  }), []);
+
   // `data-[state=inactive]:hidden` rather than the `hidden` attribute alone: a
   // display class on the element would otherwise win over it.
   const pane = "mt-0 min-h-0 flex-1 data-[state=inactive]:hidden";
@@ -98,6 +135,13 @@ export function EditorPane({
       {tab !== "readme" && notices && <div className="max-h-40 shrink-0 overflow-auto border-b p-2">{notices}</div>}
       <TabsContent value="html" forceMount className={pane}>
         <CodeMirror
+          ref={htmlEditor}
+          onCreateEditor={(view) => {
+            const pending = pendingInsert.current;
+            if (!pending) return;
+            pendingInsert.current = null;
+            applyInsert(view, pending.text, pending.back);
+          }}
           className="h-full"
           value={htmlCode}
           height="100%"
@@ -127,4 +171,4 @@ export function EditorPane({
       </TabsContent>
     </Tabs>
   );
-}
+});

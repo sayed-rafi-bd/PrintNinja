@@ -1,6 +1,6 @@
 # PrintNinja: Designer Layout Plan
 
-Branch: `develop` · Status: Final · Phases 1 and 2 done, phases 3–4 not started · Date: 2026-10-20
+Branch: `develop` · Status: Final · Phases 1–3 done, phase 4 not started · Date: 2026-10-20
 
 Goal: make the Designer a code-first workspace where you can type and watch the page change at the same time. Controls move into a left accordion, the editor and the canvas sit side by side, and the unused Visual tab is removed. Mobile keeps today's single-column layout.
 
@@ -133,13 +133,23 @@ What Phase 2 did differently from the list above:
 - Accordion headers render as `<h2>`, not Radix's default `<h3>`, to keep heading order under the page `<h1>` (the existing axe test caught this).
 - Checked so far by unit tests only (jsdom): typing in the HTML or CSS editor updates the canvas without a tab change, on desktop. Real-browser checks of fill-height, pane sizing and Fit are still to do in Phase 4.
 
-### Phase 3: Polish (about ½ day)
+### Phase 3: Polish (about ½ day) — done
 
 - Layout toggle (side by side, stacked, canvas only).
 - Remember pane sizes and open accordion sections.
 - Click-to-insert helpers.
 - Collapse the controls column to an icon rail below about 1440 px.
 - Mid-typing error banner on the canvas.
+
+What Phase 3 did, and where it differs from the list above:
+
+- **Layout toggle** (`LayoutToggle`) sits in the page header, desktop only. The choice is stored in localStorage (`printninja.designer.layout`). Stacked puts the editor above the canvas. In canvas-only the editor is unmounted, so its undo history is lost on the way back; the text itself is kept in page state. Barcode, Font and Save Version live under the editor, so they are hidden in canvas-only (Save version is still in the Versions section).
+- **Remembered sizes and sections.** The split uses `react-resizable-panels`' `autoSaveId`, one per direction, so a side-by-side size does not leak into stacked. The accordion is now controlled by the page (`openSections`, stored under `printninja.designer.openSections`); default is still Page Setup only. A phone keeps the uncontrolled, collapsed accordion. Persistence goes through the new `usePersistentState` hook, which ignores stored values that fail validation.
+- **Click-to-insert.** The correction to section 4: helpers were not copied to the clipboard before; they were plain badges. They are now buttons that insert `{{name }}` at the cursor, with the cursor left before the closing braces so the argument can be typed straight away. Insertion goes through `EditorPane`'s `insertAtCursor` handle and switches to the HTML tab first. In canvas-only it brings the editor back and inserts once CodeMirror has created its view (the insert waits for that). On a phone the helpers stay a reference list, since the editor is not on screen in the Sample data tab.
+- **Icon rail** (`ControlsRail`) replaces the 280 px column below 1440 px (`WIDE_QUERY`). One icon per section opens the column with that section open; Expand and Collapse buttons toggle it by hand. Crossing 1440 px in either direction resets it to the automatic state. Whether it is expanded is not remembered, since it follows the window width.
+- **Error banner.** `getTemplateError` (in `renderTemplate.ts`) compiles and renders the template and returns one line (the first and last lines of Handlebars' message), or null. `CanvasWorkspace` shows it as a `role="alert"` bar above the page. The page itself still shows the raw source as `renderTemplate` always did, so printing is unchanged. Closes the "not yet verified" item in section 4.
+- **Starter template.** The single bundled starter is now Shipping Label 4x6 (it was Receipt 120mm). Existing installs keep what they have.
+- Checked by unit tests only (jsdom). Real-browser checks of the rail breakpoint, split sizes and stacked layout are Phase 4.
 
 ### Phase 4: Verify
 

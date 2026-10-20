@@ -2,7 +2,9 @@ import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/PageHeader";
 import { ControlsAccordion } from "@/components/designer/ControlsAccordion";
 import { CanvasWorkspace } from "@/components/designer/CanvasWorkspace";
-import { CodeEditors, EditorPane } from "@/components/designer/EditorPane";
+import { CodeEditors, EditorPane, type EditorPaneHandle } from "@/components/designer/EditorPane";
+import { ControlsRail, type ControlsSection } from "@/components/designer/ControlsRail";
+import { LayoutToggle, isDesignerLayout, type DesignerLayout } from "@/components/designer/LayoutToggle";
 import { DesignerActions } from "@/components/designer/DesignerActions";
 import { DesignerToolbar } from "@/components/designer/DesignerToolbar";
 import { HelpersPanel } from "@/components/designer/HelpersPanel";
@@ -11,8 +13,9 @@ import { SampleDataPanel, type Dataset } from "@/components/designer/SampleDataP
 import { TemplateSyncBar } from "@/components/designer/TemplateSyncBar";
 import { ClassWarnings } from "@/components/designer/ClassWarnings";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { DESKTOP_QUERY, useMediaQuery } from "@/lib/hooks/useMediaQuery";
-import { useEffect, useMemo, useState } from "react";
+import { DESKTOP_QUERY, WIDE_QUERY, useMediaQuery } from "@/lib/hooks/useMediaQuery";
+import { usePersistentState } from "@/lib/hooks/usePersistentState";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@/lib/invoke";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,7 +37,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { QrCode } from "lucide-react";
+import { PanelLeftClose, QrCode } from "lucide-react";
 import { useTemplateStore, type Template, type TemplateVersion } from "@/lib/store/templateStore";
 import { toast } from "sonner";
 import CodeMirror from "@uiw/react-codemirror";
@@ -87,6 +90,31 @@ export function DesignerPage() {
   const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait");
   // Which tab is open on a phone. On desktop the canvas and editor are always both on screen.
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
+  // Desktop workspace preferences, remembered across launches.
+  const [layout, setLayout] = usePersistentState<DesignerLayout>("printninja.designer.layout", "side", isDesignerLayout);
+  const [openSections, setOpenSections] = usePersistentState<string[]>(
+    "printninja.designer.openSections",
+    ["page"],
+    (v): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string"),
+  );
+  // Below ~1440 px the controls column shrinks to an icon rail. Crossing that
+  // width in either direction resets it; the person can still toggle it by hand.
+  const isWide = useMediaQuery(WIDE_QUERY);
+  const [controlsExpanded, setControlsExpanded] = useState(isWide);
+  useEffect(() => setControlsExpanded(isWide), [isWide]);
+  const editorRef = useRef<EditorPaneHandle>(null);
+  const pendingInsert = useRef<{ text: string; back: number } | null>(null);
+  useEffect(() => {
+    const pending = pendingInsert.current;
+    if (pending && editorRef.current) {
+      pendingInsert.current = null;
+      editorRef.current.insertAtCursor(pending.text, pending.back);
+    }
+  }, [layout]);
+  const openControlsSection = (section: ControlsSection) => {
+    setOpenSections(openSections.includes(section) ? openSections : [...openSections, section]);
+    setControlsExpanded(true);
+  };
   const [activeTab, setActiveTab] = useState("canvas");
   const [readme, setReadme] = useState("");
   const [readmeSaving, setReadmeSaving] = useState(false);
@@ -704,6 +732,36 @@ export function DesignerPage() {
     handleRestoreVersion,
   };
 
+  const insertHelper = (text: string, back = 0) => {
+    if (editorRef.current) {
+      editorRef.current.insertAtCursor(text, back);
+      return;
+    }
+    // Canvas only: no editor is mounted. Bring it back, then insert once it is.
+    pendingInsert.current = { text, back };
+    setLayout("side");
+  };
+
+  const editorPane = (padding: string) => (
+    <div className={`flex h-full min-h-0 flex-col gap-2 ${padding}`}>
+      <EditorPane
+        ref={editorRef}
+        className="flex-1"
+        templateName={templateName}
+        htmlCode={htmlCode}
+        cssCode={cssCode}
+        onHtmlChange={setHtmlCode}
+        onCssChange={setCssCode}
+        readme={readme}
+        onReadmeChange={setReadme}
+        readmeSaving={readmeSaving}
+        onSaveReadme={() => void handleSaveReadme()}
+        notices={<ClassWarnings html={debouncedHtml} />}
+      />
+      <DesignerActions onBarcode={() => setShowBarcodeDialog(true)} onSaveVersion={() => setShowVersionDialog(true)} />
+    </div>
+  );
+
   const canvas = (fill: boolean) => (
     <CanvasWorkspace
       fill={fill}
@@ -720,6 +778,7 @@ export function DesignerPage() {
     // On desktop the page fills the viewport (see Layout) and each pane scrolls on its own.
     <div className="space-y-4 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-4 lg:space-y-0">
       <PageHeader title={t("designer.title")} description={t("pages.designer")}>
+        {isDesktop && <LayoutToggle value={layout} onChange={setLayout} />}
         <DesignerToolbar onNew={() => setShowNewTemplateDialog(true)} onImportFile={handleImportFile} onExport={handleExport} />
       </PageHeader>
 
@@ -738,33 +797,47 @@ export function DesignerPage() {
 
       {isDesktop ? (
         <div className="flex min-h-0 flex-1 gap-4">
-          <aside aria-label="Designer controls" className="w-[280px] shrink-0 overflow-y-auto">
-            <ControlsAccordion {...controls} sampleData={sampleDataPanel} />
-          </aside>
-          <ResizablePanelGroup direction="horizontal" className="min-w-0 flex-1">
-            <ResizablePanel defaultSize={50} minSize={25}>
-              <div className="flex h-full min-h-0 flex-col gap-2 pr-2">
-                <EditorPane
-                  className="flex-1"
-                  templateName={templateName}
-                  htmlCode={htmlCode}
-                  cssCode={cssCode}
-                  onHtmlChange={setHtmlCode}
-                  onCssChange={setCssCode}
-                  readme={readme}
-                  onReadmeChange={setReadme}
-                  readmeSaving={readmeSaving}
-                  onSaveReadme={() => void handleSaveReadme()}
-                  notices={<ClassWarnings html={debouncedHtml} />}
-                />
-                <DesignerActions onBarcode={() => setShowBarcodeDialog(true)} onSaveVersion={() => setShowVersionDialog(true)} />
-              </div>
-            </ResizablePanel>
-            <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={50} minSize={25}>
-              <div className="h-full pl-2">{canvas(true)}</div>
-            </ResizablePanel>
-          </ResizablePanelGroup>
+          {controlsExpanded ? (
+            <aside aria-label="Designer controls" className="flex w-[280px] shrink-0 flex-col gap-2 overflow-y-auto">
+              <button
+                type="button"
+                aria-label="Collapse controls"
+                title="Collapse controls"
+                onClick={() => setControlsExpanded(false)}
+                className="flex h-7 shrink-0 items-center gap-1.5 self-start rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <PanelLeftClose className="h-3.5 w-3.5" aria-hidden="true" />
+                Collapse
+              </button>
+              <ControlsAccordion
+                {...controls}
+                sampleData={sampleDataPanel}
+                openSections={openSections}
+                onOpenSectionsChange={setOpenSections}
+                onInsertHelper={insertHelper}
+              />
+            </aside>
+          ) : (
+            <ControlsRail onOpenSection={openControlsSection} onExpand={() => setControlsExpanded(true)} />
+          )}
+          {layout === "canvas" ? (
+            <div className="min-h-0 min-w-0 flex-1">{canvas(true)}</div>
+          ) : (
+            <ResizablePanelGroup
+              key={layout}
+              direction={layout === "stacked" ? "vertical" : "horizontal"}
+              autoSaveId={`printninja.designer.split.${layout}`}
+              className="min-w-0 flex-1"
+            >
+              <ResizablePanel id="editor" order={1} defaultSize={50} minSize={25}>
+                {editorPane(layout === "stacked" ? "pb-2" : "pr-2")}
+              </ResizablePanel>
+              <ResizableHandle withHandle />
+              <ResizablePanel id="canvas" order={2} defaultSize={50} minSize={25}>
+                <div className={layout === "stacked" ? "h-full pt-2" : "h-full pl-2"}>{canvas(true)}</div>
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          )}
         </div>
       ) : (
         <div className="space-y-4">

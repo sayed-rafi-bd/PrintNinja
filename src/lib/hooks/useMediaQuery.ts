@@ -3,6 +3,9 @@ import { useEffect, useState } from "react";
 /** Tailwind's `lg` breakpoint: the desktop workspace starts here. */
 export const DESKTOP_QUERY = "(min-width: 1024px)";
 
+/** Wide enough to show the Designer's controls column at full width; narrower desktops get the icon rail. */
+export const WIDE_QUERY = "(min-width: 1440px)";
+
 const read = (query: string) =>
   typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia(query).matches : false;
 

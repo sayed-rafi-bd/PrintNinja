@@ -133,6 +133,30 @@ ${body}
 </html>`;
 }
 
+/**
+ * Why `html` cannot be rendered with `data`, as one short line, or null if it
+ * renders fine. `renderTemplate` hides the failure (it shows the raw source so
+ * printing never crashes); the Designer uses this to tell the person what is
+ * wrong while they are still typing.
+ */
+export function getTemplateError(
+  html: string,
+  data: Record<string, unknown>,
+): string | null {
+  registerHelpers();
+  try {
+    Handlebars.compile(html)(data);
+    return null;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    // Parse errors span several lines (the message, the source line, a caret
+    // pointer, what was expected). Keep the first and last.
+    const lines = message.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.length <= 1) return lines[0] ?? "Unknown template error";
+    return `${lines[0]} ${lines[lines.length - 1]}`;
+  }
+}
+
 /** Wrap a fragment in a full document with the bundled print stylesheet. */
 export function wrapWithTailwind(html: string, css: string): string {
   return renderTemplate(html, css, {});

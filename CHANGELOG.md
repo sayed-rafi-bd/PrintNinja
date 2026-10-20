@@ -5,6 +5,12 @@ All notable changes to PrintNinja are documented here. The format is based on Ke
 ## [Unreleased] — Online-only server migration
 
 ### Added
+- **Designer polish (layout plan, phase 3).** On desktop: a layout toggle in the header (side by side, stacked, canvas only); the editor/canvas split and the open accordion sections are remembered between launches; clicking a helper such as `{{currency}}` inserts it at the editor cursor; below 1440 px the controls column shrinks to a 48 px icon rail (click an icon to open that section, or use Expand/Collapse); and a red banner on the canvas says what is wrong while the template is half-typed (an unclosed `{{#each}}`, say).
+
+### Changed
+- **The only bundled starter template is now Shipping Label 4x6** (was Receipt 120mm). It is what a fresh install seeds and what the Designer falls back to. Existing installs keep the templates they already have.
+
+### Added
 - **Per-template Tailwind CSS.** Each template version now carries a stylesheet compiled from the classes it actually uses, so any Tailwind class works, including arbitrary values such as `w-[37mm]`, `bg-rose-500` and `grid-cols-5`. Before, only the Designer's fixed palette had rules and anything else silently did nothing. Compilation runs in the app (Tailwind v4 `compile()`, installed as the `tailwind4` alias) when a template is saved, seeded, refreshed or downloaded; the result is stored as `compiled_css`/`compiled_key` on `template_versions`, and previews and the Rust print path inline the same CSS.
 - To style from data, write each full class in every branch (`{{#if urgent}}bg-red-600{{else}}bg-green-600{{/if}}`) or use a CSS variable. Class names built at render time (`bg-{{color}}-500`) cannot be compiled, and the Designer warns about them.
 - **Save to server** (migration phase 1). The Designer and every Templates row push the local copy to the server, HTML and CSS together. A first Save stores the template private; Publish makes it visible in Community as before. `remote_id` comes back and links the two copies.

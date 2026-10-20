@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
-import { ZoomIn, ZoomOut } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, ZoomIn, ZoomOut } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { getTemplateError } from "@/lib/render/renderTemplate";
 import { cn } from "@/lib/utils";
 import { CanvasPane } from "./CanvasPane";
 
@@ -67,6 +68,9 @@ export function CanvasWorkspace({ html, css, compiledCss, data, pageWidthMm, pag
   const pageHeight = pageHeightMm * MM_TO_PX;
   const zoom = mode === "fit" ? fitZoom(areaWidth, pageWidth) : mode;
   const pct = Math.round(zoom * 100);
+  // While the template is momentarily invalid (an unclosed {{#each}}, say) the
+  // page below shows the raw source; this says why.
+  const error = useMemo(() => getTemplateError(html, data), [html, data]);
 
   const isPreset = mode !== "fit" && ZOOM_PRESETS.includes(mode);
   const selectValue = mode === "fit" ? "fit" : isPreset ? String(mode) : "custom";
@@ -119,6 +123,14 @@ export function CanvasWorkspace({ html, css, compiledCss, data, pageWidthMm, pag
           </Button>
         </div>
       </div>
+      {error && (
+        <div role="alert" className="flex shrink-0 items-start gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 break-words">
+            <strong className="font-semibold">Template error:</strong> {error}
+          </span>
+        </div>
+      )}
       {/* m-auto centres a small page and still lets a large one scroll to its left edge.
           The stable gutter stops a scrollbar appearing and re-fitting the page in a loop. */}
       <div

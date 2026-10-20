@@ -35,6 +35,11 @@ interface Props<T extends { id: number; name: string }> {
   showHelpers?: boolean;
   /** Section ids open at first: "templates", "page", "sample-data", "versions", "helpers". Desktop opens only "page"; a phone opens none. */
   defaultOpen?: string[];
+  /** Controlled open sections. When given, the parent owns (and can remember) which are open. */
+  openSections?: string[];
+  onOpenSectionsChange?: (sections: string[]) => void;
+  /** Click-to-insert for the Helpers section; without it the helpers are only a reference. */
+  onInsertHelper?: (text: string) => void;
 }
 
 /**
@@ -46,10 +51,14 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
   pageWidth, setPageWidth, pageHeight, setPageHeight, presets: PAGE_PRESETS,
   orientation, setOrientation, versions, onNewVersion, openDiff, handleRestoreVersion,
   sampleData, showHelpers = true, defaultOpen = ["page"],
+  openSections, onOpenSectionsChange, onInsertHelper,
 }: Props<T>) {
   const { t } = useTranslation();
+  const open = openSections
+    ? { value: openSections, onValueChange: onOpenSectionsChange }
+    : { defaultValue: defaultOpen };
   return (
-    <Accordion type="multiple" defaultValue={defaultOpen} className="rounded-lg border bg-card px-3">
+    <Accordion type="multiple" {...open} className="rounded-lg border bg-card px-3">
       <AccordionItem value="templates">
         <AccordionTrigger>Templates</AccordionTrigger>
         <AccordionContent className="space-y-1">
@@ -196,7 +205,7 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
         <AccordionItem value="helpers">
           <AccordionTrigger>Helpers</AccordionTrigger>
           <AccordionContent>
-            <HelpersPanel />
+            <HelpersPanel onInsert={onInsertHelper} />
           </AccordionContent>
         </AccordionItem>
       )}
