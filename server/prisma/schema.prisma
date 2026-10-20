@@ -1,6 +1,6 @@
 // Phase 1 slice of REFACTORING.md section 7: identity, sessions and the
-// change-tracking tables. Template, version, dataset, profile, setting
-// and font models arrive with Phase 2, each with its own migration.
+// change-tracking tables. Phase 2 adds the library models below, each
+// slice with its own migration.
 generator client {
   provider = "prisma-client-js"
   output   = "../src/infra/prisma/generated"
@@ -20,6 +20,8 @@ model User {
   passwordHash String    @map("password_hash")
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
   sessions     Session[]
+  templates    Template[]
+  saved        SavedTemplate[]
   sync         UserSync?
 
   @@map("users")
@@ -58,4 +60,70 @@ model Tombstone {
   @@id([userId, seq])
   @@index([userId, deletedAt])
   @@map("tombstones")
+}
+
+// Phase 2, deliverable 1: the template library (section 7). Datasets,
+// profiles, settings and fonts arrive in later slices with their own
+// migrations, which is when their Template relation fields land here too.
+model Template {
+  id          String          @id @db.Uuid // client-generated, kept from v1
+  ownerId     String          @map("owner_id") @db.Uuid
+  name        String
+  summary     String          @default("")
+  pageWMm     Float           @map("page_w_mm")
+  pageHMm     Float           @map("page_h_mm")
+  language    String          @default("html")
+  body        String // HTML; 512 KiB cap checked in the domain
+  css         String          @default("") // 256 KiB cap
+  readme      String          @default("") // 64 KiB cap
+  useCount    Int             @default(0) @map("use_count")
+  revision    Int             @default(1) // +1 on every content change; checked on update
+  changeSeq   BigInt          @map("change_seq") // owner's sequence number at the last change
+  publishedAt DateTime?       @map("published_at") @db.Timestamptz // null means private
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz
+  owner       User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  savedBy     SavedTemplate[]
+  versions    TemplateVersion[]
+
+  @@index([ownerId, changeSeq])
+  @@index([ownerId, updatedAt])
+  @@index([publishedAt, updatedAt])
+  @@map("templates")
+}
+
+model SavedTemplate {
+  userId     String   @map("user_id") @db.Uuid
+  templateId String   @map("template_id") @db.Uuid
+  addedAt    DateTime @default(now()) @map("added_at") @db.Timestamptz
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  template   Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@id([userId, templateId])
+  @@map("saved_templates")
+}
+
+// Every content-changing PUT appends one row (Phase 2, deliverable 4).
+model TemplateVersion {
+  id         String        @id @default(uuid()) @db.Uuid
+  templateId String        @map("template_id") @db.Uuid
+  versionNo  Int           @map("version_no")
+  body       String
+  css        String        @default("")
+  label      String?
+  note       String?
+  createdBy  VersionSource @map("created_by")
+  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  template   Template      @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, versionNo])
+  @@map("template_versions")
+}
+
+// Matches the app's CHECK constraint. `sync` is gone: pulling a server copy no longer
+// writes a version, because versions now live on the server (this removes the cause of P2).
+enum VersionSource {
+  manual
+  autosave
+  restore
 }
