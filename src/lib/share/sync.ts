@@ -7,11 +7,14 @@
  */
 import { invoke } from "@/lib/invoke";
 import { compiledFields } from "@/lib/templates/compileTemplateCss";
+import { ApiError } from "@/lib/api/errors";
 import {
   fetchMyRemoteTemplates,
   fetchRemoteTemplate,
   fetchSavedRemoteTemplates,
-  publishTemplate,
+  publishRemoteTemplate,
+  putRemoteTemplate,
+  unpublishRemoteTemplate,
   type RemoteTemplate,
   type RemoteTemplateSummary,
 } from "./client";
@@ -70,31 +73,56 @@ export interface SaveOptions {
 
 /**
  * Push the current local version to the server. A template that was never
- * published is stored private; an existing one keeps the visibility it has.
+ * saved is created private; an existing one keeps the visibility it has
+ * unless asked otherwise. The server revision is read first, since the
+ * local row does not track it yet (the sync engine will); a concurrent
+ * edit elsewhere fails here with a revision conflict instead of silently
+ * overwriting it.
  */
 export async function saveToServer(
   template: SyncTemplate,
   options: SaveOptions = {},
 ): Promise<SaveResult> {
   const { html, css } = await getCurrentVersion(template.id);
-  const remoteId = template.remote_id ?? crypto.randomUUID();
-  const remote = await publishTemplate({
-    id: remoteId,
+  const body = {
     name: template.name,
     summary: template.summary ?? "",
     page_w_mm: template.page_w_mm,
     page_h_mm: template.page_h_mm,
-    language: "html",
+    language: "html" as const,
     body: html,
     css,
     readme: template.readme ?? "",
-    // A plain Save leaves an existing template's visibility alone; a first Save
-    // stores it private, because that is what Save means.
-    publish: options.publish ?? (template.remote_id ? undefined : false),
-  });
-  const updatedAt = remote.updated_at ?? remote.published_at ?? new Date().toISOString();
-  const isPublished = !!remote.published_at;
-  const storedId = remote.id ?? remoteId;
+  };
+  let remote: RemoteTemplate;
+  if (!template.remote_id) {
+    const remoteId = crypto.randomUUID();
+    remote = await putRemoteTemplate({ id: remoteId, ...body });
+    if (options.publish === true) {
+      remote = await publishRemoteTemplate(remote.id);
+    }
+  } else {
+    const current = await fetchRemoteTemplate(template.remote_id);
+    try {
+      remote = await putRemoteTemplate({ id: template.remote_id, ...body, if_revision: current.revision });
+    } catch (err) {
+      // A fuller conflict dialog arrives with the sync engine; until then,
+      // say what happened in words the toast can show.
+      if (err instanceof ApiError && err.code === "revision_conflict") {
+        throw new Error("Changed on another PC — refresh and try again");
+      }
+      throw err;
+    }
+    if (options.publish === true && !remote.published_at) {
+      remote = await publishRemoteTemplate(remote.id);
+    } else if (options.publish === false && remote.published_at) {
+      await unpublishRemoteTemplate(remote.id);
+      remote = { ...remote, published_at: null };
+    }
+  }
+  const updatedAt = remote.updated_at;
+  const isPublished = remote.published_at != null;
+  const storedId = remote.id;
   // The local copy and the server copy now agree. A published template records the
   // moment the server copy was published; a private one has no publish time at all.
   await invoke("set_publish_info", {

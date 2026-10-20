@@ -165,21 +165,6 @@ export async function logout(): Promise<void> {
   }
 }
 
-export interface PublishPayload {
-  id: string; // UUID, client-generated
-  name: string;
-  summary: string;
-  page_w_mm: number;
-  page_h_mm: number;
-  language: string;
-  body: string;
-  /** Template CSS. Optional so an older server that does not know the column still accepts it. */
-  css?: string;
-  readme: string;
-  /** Omit to keep the template's current visibility. `false` keeps it private. */
-  publish?: boolean;
-}
-
 /** A template as the v2 service stores it. `published_at` is null when
  * private (v1 used an empty string); every existing falsy check keeps
  * working unchanged. */
@@ -190,16 +175,32 @@ export type RemoteTemplate =
 export type RemoteTemplateSummary =
   paths["/v2/templates/mine"]["get"]["responses"][200]["content"]["application/json"]["items"][number];
 
-export async function publishTemplate(payload: PublishPayload): Promise<RemoteTemplate> {
-  const res = await authedFetch(`/v1/templates/${payload.id}`, {
-    method: "PUT",
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `Publish failed: ${res.status}`);
-  }
-  return res.json();
+export interface PutTemplateInput {
+  id: string;
+  name: string;
+  summary?: string;
+  page_w_mm: number;
+  page_h_mm: number;
+  language?: "html";
+  body: string;
+  css?: string;
+  readme?: string;
+  if_revision?: number;
+}
+
+/** Create or update a template by client UUID. Updates need if_revision. */
+export async function putRemoteTemplate(input: PutTemplateInput): Promise<RemoteTemplate> {
+  return callApi<RemoteTemplate>(apiDeps(), { method: "PUT", path: `/v2/templates/${input.id}`, body: input });
+}
+
+/** Make a template public, keeping the first publish time. */
+export async function publishRemoteTemplate(id: string): Promise<RemoteTemplate> {
+  return callApi<RemoteTemplate>(apiDeps(), { method: "POST", path: `/v2/templates/${id}/publish` });
+}
+
+/** Make a template private. The server copy is kept. */
+export async function unpublishRemoteTemplate(id: string): Promise<void> {
+  await callApi<unknown>(apiDeps(), { method: "POST", path: `/v2/templates/${id}/unpublish` });
 }
 
 export async function unpublishTemplate(id: string): Promise<void> {

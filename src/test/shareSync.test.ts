@@ -4,12 +4,16 @@ const invoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...a) }));
 
 const client = vi.hoisted(() => ({
-  publishTemplate: vi.fn(),
+  putRemoteTemplate: vi.fn(),
+  publishRemoteTemplate: vi.fn(),
+  unpublishRemoteTemplate: vi.fn(),
   fetchRemoteTemplate: vi.fn(),
   fetchMyRemoteTemplates: vi.fn(),
   fetchSavedRemoteTemplates: vi.fn(),
 }));
 vi.mock("@/lib/share/client", () => client);
+
+import { ApiError } from "@/lib/api/errors";
 
 import {
   downloadToLocal,
@@ -33,8 +37,11 @@ const REMOTE = {
   css: ".remote {}",
   readme: "# Invoice",
   use_count: 0,
-  published_at: "2026-03-01 00:00:00",
-  updated_at: "2026-03-02 00:00:00",
+  revision: 1,
+  version_count: 1,
+  published_at: null as string | null,
+  created_at: "2026-03-01T00:00:00Z",
+  updated_at: "2026-03-02T00:00:00Z",
 };
 
 const local = (over: Partial<SyncTemplate> = {}): SyncTemplate => ({
@@ -56,7 +63,9 @@ const argOf = (cmd: string, index = 1) => invoke.mock.calls.find((c) => c[0] ===
 
 beforeEach(() => {
   invoke.mockReset();
-  client.publishTemplate.mockReset();
+  client.putRemoteTemplate.mockReset();
+  client.publishRemoteTemplate.mockReset();
+  client.unpublishRemoteTemplate.mockReset();
   client.fetchRemoteTemplate.mockReset();
   client.fetchMyRemoteTemplates.mockReset();
   client.fetchSavedRemoteTemplates.mockReset();
@@ -75,46 +84,75 @@ describe("saved copies", () => {
 });
 
 describe("saveToServer", () => {
-  it("sends the current version's HTML and CSS and stores the returned id", async () => {
-    client.publishTemplate.mockResolvedValue({ ...REMOTE, published_at: "" });
+  it("creates private with the current HTML and CSS and stores the returned id", async () => {
+    client.putRemoteTemplate.mockResolvedValue({ ...REMOTE, published_at: null });
     const result = await saveToServer(local());
 
-    const payload = client.publishTemplate.mock.calls[0][0];
+    const payload = client.putRemoteTemplate.mock.calls[0][0];
     expect(payload.body).toBe("<p>local</p>");
     expect(payload.css).toBe(".local {}"); // CSS must not be left behind
     expect(payload.readme).toBe("# Invoice");
+    expect(payload.if_revision).toBeUndefined(); // creates need none
+    expect(client.publishRemoteTemplate).not.toHaveBeenCalled();
+    expect(client.unpublishRemoteTemplate).not.toHaveBeenCalled();
     expect(result.remoteId).toBe(REMOTE.id);
+    expect(result.published).toBe(false);
     expect(invoke).toHaveBeenCalledWith("set_publish_info", {
       req: { id: 7, remote_id: REMOTE.id, published_at: null },
     });
   });
 
-  it("stores a first save as a private copy", async () => {
-    client.publishTemplate.mockResolvedValue({ ...REMOTE, published_at: "" });
-    await saveToServer(local());
-    expect(client.publishTemplate.mock.calls[0][0].publish).toBe(false);
-  });
+  it("fetches the revision first and leaves visibility alone when unasked", async () => {
+    client.fetchRemoteTemplate.mockResolvedValue({ ...REMOTE, published_at: null, revision: 4 });
+    client.putRemoteTemplate.mockResolvedValue({ ...REMOTE, published_at: null, revision: 5 });
+    const result = await saveToServer(local({ remote_id: REMOTE.id }));
 
-  it("leaves the visibility of a published template alone", async () => {
-    client.publishTemplate.mockResolvedValue(REMOTE);
-    await saveToServer(local({ remote_id: REMOTE.id, published_at: "2026-03-01T00:00:00Z" }));
-    expect(client.publishTemplate.mock.calls[0][0].publish).toBeUndefined();
+    expect(client.putRemoteTemplate.mock.calls[0][0]).toMatchObject({ if_revision: 4 });
+    expect(client.publishRemoteTemplate).not.toHaveBeenCalled();
+    expect(client.unpublishRemoteTemplate).not.toHaveBeenCalled();
+    expect(result.published).toBe(false);
+    expect(result.remoteId).toBe(REMOTE.id);
   });
 
   it("publishes when asked to", async () => {
-    client.publishTemplate.mockResolvedValue(REMOTE);
-    const result = await saveToServer(local(), { publish: true });
-    expect(client.publishTemplate.mock.calls[0][0].publish).toBe(true);
+    client.fetchRemoteTemplate.mockResolvedValue({ ...REMOTE, published_at: null, revision: 2 });
+    client.putRemoteTemplate.mockResolvedValue({ ...REMOTE, published_at: null, revision: 3 });
+    client.publishRemoteTemplate.mockResolvedValue({ ...REMOTE, published_at: "2026-03-03T00:00:00Z", revision: 3 });
+    const result = await saveToServer(local({ remote_id: REMOTE.id }), { publish: true });
+
+    expect(client.publishRemoteTemplate).toHaveBeenCalledWith(REMOTE.id);
     expect(result.published).toBe(true);
     expect(invoke).toHaveBeenCalledWith("set_publish_info", {
       req: { id: 7, remote_id: REMOTE.id, published_at: REMOTE.updated_at },
     });
   });
+
+  it("unpublishes when asked to", async () => {
+    client.fetchRemoteTemplate.mockResolvedValue({ ...REMOTE, published_at: "2026-03-01T00:00:00Z", revision: 2 });
+    client.putRemoteTemplate.mockResolvedValue({ ...REMOTE, published_at: "2026-03-01T00:00:00Z", revision: 3 });
+    await saveToServer(local({ remote_id: REMOTE.id }), { publish: false });
+
+    expect(client.unpublishRemoteTemplate).toHaveBeenCalledWith(REMOTE.id);
+    expect(invoke).toHaveBeenCalledWith("set_publish_info", {
+      req: { id: 7, remote_id: REMOTE.id, published_at: null },
+    });
+  });
+
+  it("reports a concurrent edit as a conflict instead of overwriting it", async () => {
+    client.fetchRemoteTemplate.mockResolvedValue({ ...REMOTE, revision: 2 });
+    client.putRemoteTemplate.mockRejectedValue(
+      new ApiError({ code: "revision_conflict", message: "Stale revision", requestId: "r1", status: 409 }),
+    );
+    await expect(saveToServer(local({ remote_id: REMOTE.id }))).rejects.toThrow(/another PC/i);
+    expect(calls("set_publish_info")).toHaveLength(0);
+  });
 });
 
 describe("refreshFromServer", () => {
+  const PUBLISHED = { ...REMOTE, published_at: "2026-03-01T00:00:00Z" };
+
   it("overwrites the local copy with the server one", async () => {
-    client.fetchRemoteTemplate.mockResolvedValue(REMOTE);
+    client.fetchRemoteTemplate.mockResolvedValue(PUBLISHED);
     const result = await refreshFromServer(local({ remote_id: REMOTE.id }));
 
     expect(calls("create_version")[0][1]).toMatchObject({
