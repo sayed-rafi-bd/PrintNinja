@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/PageHeader";
-import { ControlsAccordion } from "@/components/designer/ControlsAccordion";
+import { ControlsAccordion, type VersionRow } from "@/components/designer/ControlsAccordion";
 import { CanvasWorkspace } from "@/components/designer/CanvasWorkspace";
 import { CodeEditors, EditorPane, type EditorPaneHandle } from "@/components/designer/EditorPane";
 import { ControlsRail, type ControlsSection } from "@/components/designer/ControlsRail";
@@ -73,7 +73,7 @@ type SyncAction = "save" | "publish" | "unpublish" | "sync";
 export function DesignerPage() {
   const { t } = useTranslation();
   const store = useTemplateStore();
-  const [versions, setVersions] = useState<TemplateVersion[]>([]);
+  const [versions, setVersions] = useState<VersionRow[]>([]);
   const [showVersionDialog, setShowVersionDialog] = useState(false);
   const [versionLabel, setVersionLabel] = useState("");
   const [versionNote, setVersionNote] = useState("");
@@ -167,7 +167,7 @@ export function DesignerPage() {
     // Load readme and publish info if provided, otherwise fetch from DB
     if (tpl.readme !== undefined) {
       setReadme(tpl.readme);
-      setRemoteId((tpl as any).remote_id ?? null);
+      setRemoteId((tpl as any).server_id ?? (tpl as any).remote_id ?? null);
       setPublishedAt((tpl as any).published_at ?? null);
       setTemplateUpdatedAt((tpl as any).updated_at ?? null);
       setOrigin(((tpl as any).origin ?? "own") === "saved" ? "saved" : "own");
@@ -176,7 +176,7 @@ export function DesignerPage() {
         try {
           const full = await invoke<any>("get_template", { id: tpl.id });
           setReadme(full.readme ?? "");
-          setRemoteId(full.remote_id ?? null);
+          setRemoteId(full.server_id ?? full.remote_id ?? null);
           setPublishedAt(full.published_at ?? null);
           setTemplateUpdatedAt(full.updated_at ?? null);
           setOrigin(full.origin === "saved" ? "saved" : "own");
@@ -195,7 +195,19 @@ export function DesignerPage() {
         const list = await invoke<TemplateVersion[]>("list_versions", {
           template_id: tpl.id,
         });
-        setVersions(list ?? []);
+        setVersions(
+          (list ?? []).map((v) => ({
+            key: `local-${v.id}`,
+            versionNo: v.version_no,
+            label: v.label,
+            note: v.note,
+            createdAt: v.created_at,
+            createdBy: v.created_by,
+            html: v.html,
+            css: v.css,
+            localId: v.id,
+          })),
+        );
       } catch {
         setVersions([]);
       }
@@ -470,7 +482,7 @@ export function DesignerPage() {
           try {
             const full = await invoke<any>("get_template", { id: hydrated[0].id });
             setReadme(full.readme ?? "");
-            setRemoteId(full.remote_id ?? null);
+            setRemoteId(full.server_id ?? full.remote_id ?? null);
             setPublishedAt(full.published_at ?? null);
             setTemplateUpdatedAt(full.updated_at ?? null);
             setOrigin(full.origin === "saved" ? "saved" : "own");
@@ -514,10 +526,12 @@ export function DesignerPage() {
   }, []);
 
   useEffect(() => {
-    // Load persisted versions for the active template.
+    // Load persisted versions for the active template. Keyed on the
+    // remote id too: it arrives after the row loads, and flips the
+    // panel from local rows to the server list.
     if (currentTemplateDbId != null) refreshVersions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTemplateDbId]);
+  }, [currentTemplateDbId, remoteId]);
 
   useEffect(() => {
     const template: Template = {
@@ -540,6 +554,11 @@ export function DesignerPage() {
     store.setCurrentTemplate(template);
   }, []);
 
+  /**
+   * A labelled version goes through the server when the template is
+   * pushed (the PUT records the label alongside the content); the local
+   * row is written first so the panel updates at once, offline or not.
+   */
   const handleSaveVersion = async () => {
     try {
       const version = await invoke<TemplateVersion>("create_version", {
@@ -553,11 +572,26 @@ export function DesignerPage() {
           created_by: "manual",
         },
       });
-      setVersions((prev) => [version, ...prev]);
       setShowVersionDialog(false);
       setVersionLabel("");
       setVersionNote("");
-      notifyLocalEdit();
+      if (remoteId) {
+        try {
+          const row = await getLocalTemplate(currentTemplateDbId);
+          const saved = await saveToServer(
+            { ...row, name: templateName, page_w_mm: pageWidth, page_h_mm: pageHeight },
+            { version: { label: version.label, note: version.note } },
+          );
+          setRemoteId(saved.remoteId);
+          setPublishedAt(saved.published ? saved.updatedAt : null);
+          setTemplateUpdatedAt(saved.updatedAt);
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : String(e));
+        }
+      } else {
+        notifyLocalEdit();
+      }
+      await refreshVersions();
       toast.success(`Version ${version.version_no} saved`);
     } catch (e) {
       // Web mode / no backend: keep a local snapshot so the UI stays usable.
@@ -572,7 +606,20 @@ export function DesignerPage() {
         created_at: new Date().toISOString(),
         created_by: "manual",
       };
-      setVersions((prev) => [local, ...prev]);
+      setVersions((prev) => [
+        {
+          key: `local-${local.id}`,
+          versionNo: local.version_no,
+          label: local.label,
+          note: local.note,
+          createdAt: local.created_at,
+          createdBy: local.created_by,
+          html: local.html,
+          css: local.css,
+          localId: local.id,
+        },
+        ...prev,
+      ]);
       setShowVersionDialog(false);
       setVersionLabel("");
       setVersionNote("");
@@ -604,12 +651,48 @@ export function DesignerPage() {
     }
   };
 
+  /**
+   * The version history, newest first. A pushed template reads the
+   * server list (the source of truth both PCs share); anything else
+   * reads the local rows. Server rows fetch bodies on demand.
+   */
   const refreshVersions = async () => {
+    if (!currentTemplateDbId) {
+      setVersions([]);
+      return;
+    }
     try {
+      if (remoteId) {
+        const list = await share.listRemoteVersions(remoteId);
+        setVersions(
+          list.map((v) => ({
+            key: `srv-${v.version_no}`,
+            versionNo: v.version_no,
+            label: v.label,
+            note: v.note,
+            createdAt: v.created_at,
+            createdBy: v.created_by,
+            remoteNo: v.version_no,
+          })),
+        );
+        return;
+      }
       const list = await invoke<TemplateVersion[]>("list_versions", {
         template_id: currentTemplateDbId,
       });
-      setVersions(list ?? []);
+      setVersions(
+        (list ?? []).map((v) => ({
+          key: `local-${v.id}`,
+          versionNo: v.version_no,
+          label: v.label,
+          note: v.note,
+          createdAt: v.created_at,
+          createdBy: v.created_by,
+          html: v.html,
+          css: v.css,
+          localId: v.id,
+        })),
+      );
       const latest = list?.[0];
       if (latest) {
         setHtmlCode(formatHtml(latest.html));
@@ -620,46 +703,108 @@ export function DesignerPage() {
     }
   };
 
-  const handleRestoreVersion = async (version: TemplateVersion) => {
+  const handleRestoreVersion = async (version: VersionRow) => {
+    if (version.remoteNo != null && remoteId) {
+      // Server restore copies the version into a new revision; the
+      // current revision guards against overwriting a newer edit.
+      try {
+        const current = await share.fetchRemoteTemplate(remoteId);
+        const restored = await share.restoreRemoteVersion(remoteId, version.remoteNo, current.revision);
+        await refreshVersions();
+        setHtmlCode(formatHtml(restored.body ?? ""));
+        setCssCode(formatCss(restored.css ?? ""));
+        setTemplateUpdatedAt(restored.updated_at);
+        toast.success(`Restored v${version.versionNo} as v${restored.revision}`);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
+    if (version.localId == null) return;
     try {
       // Restore creates a NEW version server-side; nothing is overwritten.
       const created = await invoke<TemplateVersion>("restore_version", {
-        id: version.id,
+        id: version.localId,
       });
-      setVersions((prev) => [created, ...prev]);
+      await refreshVersions();
       setHtmlCode(formatHtml(created.html));
       setCssCode(formatCss(created.css));
-      toast.success(`Restored v${version.version_no} as v${created.version_no}`);
+      toast.success(`Restored v${version.versionNo} as v${created.version_no}`);
     } catch {
-      setHtmlCode(formatHtml(version.html));
-      setCssCode(formatCss(version.css));
-      toast.success(`Restored version ${version.version_no}`);
+      if (version.html !== undefined) setHtmlCode(formatHtml(version.html));
+      if (version.css !== undefined) setCssCode(formatCss(version.css));
+      toast.success(`Restored version ${version.versionNo}`);
     }
   };
 
-  const openDiff = async (from: TemplateVersion, to: TemplateVersion) => {
+  const handleDeleteVersion = async (version: VersionRow) => {
+    if (version.remoteNo != null && remoteId) {
+      try {
+        await share.deleteRemoteVersion(remoteId, version.remoteNo);
+        await refreshVersions();
+        toast.success(`Deleted v${version.versionNo}`);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
+    if (version.localId == null) return;
     try {
-      const d = await invoke<{
-        from_version_no: number;
-        to_version_no: number;
-        html_from: string;
-        html_to: string;
-        css_from: string;
-        css_to: string;
-        html_changed: boolean;
-        css_changed: boolean;
-      }>("diff_versions", { from_id: from.id, to_id: to.id });
-      setDiff(d);
-    } catch {
+      await invoke("delete_version", { id: version.localId });
+      await refreshVersions();
+      toast.success(`Deleted v${version.versionNo}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const openDiff = async (from: VersionRow, to: VersionRow) => {
+    // Server rows fetch bodies on demand; local rows already carry them.
+    const bodies = async (v: VersionRow): Promise<{ html: string; css: string }> => {
+      if (v.html !== undefined) return { html: v.html ?? "", css: v.css ?? "" };
+      if (v.remoteNo != null && remoteId) {
+        const full = await share.readRemoteVersion(remoteId, v.remoteNo);
+        return { html: full.body ?? "", css: full.css ?? "" };
+      }
+      return { html: "", css: "" };
+    };
+    try {
+      const [f, t] = await Promise.all([bodies(from), bodies(to)]);
+      if (from.localId != null && to.localId != null) {
+        const d = await invoke<{
+          from_version_no: number;
+          to_version_no: number;
+          html_from: string;
+          html_to: string;
+          css_from: string;
+          css_to: string;
+          html_changed: boolean;
+          css_changed: boolean;
+        }>("diff_versions", { from_id: from.localId, to_id: to.localId });
+        setDiff(d);
+        return;
+      }
       setDiff({
-        from_version_no: from.version_no,
-        to_version_no: to.version_no,
-        html_from: from.html,
-        html_to: to.html,
-        css_from: from.css,
-        css_to: to.css,
-        html_changed: from.html !== to.html,
-        css_changed: from.css !== to.css,
+        from_version_no: from.versionNo,
+        to_version_no: to.versionNo,
+        html_from: f.html,
+        html_to: t.html,
+        css_from: f.css,
+        css_to: t.css,
+        html_changed: f.html !== t.html,
+        css_changed: f.css !== t.css,
+      });
+    } catch {
+      const [f, t] = await Promise.all([bodies(from).catch(() => ({ html: "", css: "" })), bodies(to).catch(() => ({ html: "", css: "" }))]);
+      setDiff({
+        from_version_no: from.versionNo,
+        to_version_no: to.versionNo,
+        html_from: f.html,
+        html_to: t.html,
+        css_from: f.css,
+        css_to: t.css,
+        html_changed: f.html !== t.html,
+        css_changed: f.css !== t.css,
       });
     }
   };
@@ -742,6 +887,7 @@ export function DesignerPage() {
     onNewVersion: () => setShowVersionDialog(true),
     openDiff,
     handleRestoreVersion,
+    handleDeleteVersion,
   };
 
   const insertHelper = (text: string, back = 0) => {
@@ -989,7 +1135,7 @@ export function DesignerPage() {
           <div className="space-y-3">
             <div className="space-y-1">
               <Label>Label</Label>
-              <Input placeholder="e.g. Added logo" value={versionLabel} onChange={(e) => setVersionLabel(e.target.value)} />
+              <Input data-testid="version-label" placeholder="e.g. Added logo" value={versionLabel} onChange={(e) => setVersionLabel(e.target.value)} />
             </div>
             <div className="space-y-1">
               <Label>Note</Label>

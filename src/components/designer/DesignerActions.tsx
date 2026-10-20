@@ -53,7 +53,7 @@ export function DesignerActions({ onBarcode, onSaveVersion, onShowCanvas, classN
         />
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" onClick={onSaveVersion}>
+        <Button variant="outline" size="sm" onClick={onSaveVersion} data-testid="designer-save-version">
           <Save className="h-4 w-4" />
           Save Version
         </Button>

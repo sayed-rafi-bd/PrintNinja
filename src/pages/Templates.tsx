@@ -463,7 +463,7 @@ export function TemplatesPage() {
               {community.map((tpl) => {
                 const savedState = isSaved(tpl.id);
                 const savingState = saving.has(tpl.id);
-                const own = mine.some((m) => m.remote_id === tpl.id);
+                const own = mine.some((m) => m.remote_id === tpl.id || m.server_id === tpl.id);
                 return (
                   <li key={tpl.id}>
                     <Card className="h-full">

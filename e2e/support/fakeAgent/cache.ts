@@ -13,6 +13,8 @@ export interface FakeVersion {
 	html: string;
 	css: string;
 	created_by: string;
+	label?: string | null;
+	note?: string | null;
 }
 
 export interface FakeTemplateRow {
@@ -543,8 +545,8 @@ export function createFakeCache() {
 					version_no: v.version_no,
 					html: v.html,
 					css: v.css,
-					label: null,
-					note: null,
+					label: v.label ?? null,
+					note: v.note ?? null,
 					created_at: row.updated_at,
 					created_by: v.created_by,
 					compiled_css: "",
@@ -563,14 +565,18 @@ export function createFakeCache() {
 				version_no: maxNo + 1,
 				html: String(req["html"] ?? ""),
 				css: String(req["css"] ?? ""),
+				label: (req["label"] as string | null) ?? null,
+				note: (req["note"] as string | null) ?? null,
 				created_by: String(req["created_by"] ?? "manual"),
+				compiled_css: String(req["compiled_css"] ?? ""),
+				compiled_key: String(req["compiled_key"] ?? ""),
 			};
 			row.versions.push(version);
 			pruneVersions(row);
 			row.updated_at = nowIso();
 			row.sync_state = "dirty";
 			persist();
-			return { id: templateId * 1000 + version.version_no, template_id: templateId, ...version };
+			return { id: templateId * 1000 + version.version_no, template_id: templateId, created_at: row.updated_at, ...version };
 		},
 
 		deleteTemplate(id: number): void {

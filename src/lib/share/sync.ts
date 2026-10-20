@@ -71,6 +71,8 @@ export interface SaveResult {
 export interface SaveOptions {
   /** `true` publishes, `false` keeps it private, omitted leaves it as it is. */
   publish?: boolean;
+  /** A labelled save records a server version alongside the content. */
+  version?: { label?: string | null; note?: string | null };
 }
 
 /**
@@ -100,16 +102,24 @@ export async function saveToServer(
     readme: template.readme ?? "",
   };
   let remote: RemoteTemplate;
-  if (!template.remote_id) {
-    const remoteId = template.server_id ?? crypto.randomUUID();
-    remote = await putRemoteTemplate({ id: remoteId, ...body });
+  // Either id means pushed: server_id is the sync identity, remote_id the
+  // legacy column (kept in sync by set_publish_info below).
+  const serverRef = template.server_id ?? template.remote_id;
+  if (!serverRef) {
+    const remoteId = crypto.randomUUID();
+    remote = await putRemoteTemplate({ id: remoteId, ...body, ...(options.version ? { version: options.version } : {}) });
     if (options.publish === true) {
       remote = await publishRemoteTemplate(remote.id);
     }
   } else {
-    const current = await fetchRemoteTemplate(template.remote_id);
+    const current = await fetchRemoteTemplate(serverRef);
     try {
-      remote = await putRemoteTemplate({ id: template.remote_id, ...body, if_revision: current.revision });
+      remote = await putRemoteTemplate({
+        id: serverRef,
+        ...body,
+        if_revision: current.revision,
+        ...(options.version ? { version: options.version } : {}),
+      });
     } catch (err) {
       // A fuller conflict dialog arrives with the sync engine; until then,
       // say what happened in words the toast can show.
@@ -151,10 +161,11 @@ export interface RefreshResult {
  * is written, so a failed fetch leaves the local copy as it was.
  */
 export async function refreshFromServer(template: SyncTemplate): Promise<RefreshResult> {
-  if (!template.remote_id) {
+  const serverRef = template.server_id ?? template.remote_id;
+  if (!serverRef) {
     throw new Error("This template is not on the server yet. Save it first.");
   }
-  const remote = await fetchRemoteTemplate(template.remote_id);
+  const remote = await fetchRemoteTemplate(serverRef);
 
   await invoke("create_version", {
     req: {

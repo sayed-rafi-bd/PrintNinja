@@ -1,12 +1,31 @@
 import type { ReactNode } from "react";
-import { FileText, GitCompare, Plus, RotateCcw } from "lucide-react";
+import { FileText, GitCompare, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { TemplateVersion } from "@/lib/store/templateStore";
+
+/**
+ * One row of the version history, whatever backs it. Local rows carry
+ * their content; server rows carry the version number and fetch bodies
+ * on demand (the list endpoint stays light).
+ */
+export interface VersionRow {
+  key: string;
+  versionNo: number;
+  label: string | null;
+  note: string | null;
+  createdAt: string;
+  createdBy: string;
+  html?: string;
+  css?: string;
+  /** Set for server rows: restore/delete/diff go through the API. */
+  remoteNo?: number;
+  /** Set for local rows: restore/delete/diff go through IPC. */
+  localId?: number;
+}
 import { cn } from "@/lib/utils";
 import { HelpersPanel } from "./HelpersPanel";
 
@@ -25,10 +44,11 @@ interface Props<T extends { id: number; name: string }> {
   presets: PagePreset[];
   orientation: "portrait" | "landscape";
   setOrientation: (v: "portrait" | "landscape") => void;
-  versions: TemplateVersion[];
+  versions: VersionRow[];
   onNewVersion: () => void;
-  openDiff: (from: TemplateVersion, to: TemplateVersion) => void;
-  handleRestoreVersion: (v: TemplateVersion) => void;
+  openDiff: (from: VersionRow, to: VersionRow) => void;
+  handleRestoreVersion: (v: VersionRow) => void;
+  handleDeleteVersion: (v: VersionRow) => void;
   /** The Sample data section's content. Omitted on a phone, where Sample data is a tab. */
   sampleData?: ReactNode;
   /** Show the Helpers section. A phone shows the helpers inside the Sample data tab instead. */
@@ -49,7 +69,7 @@ interface Props<T extends { id: number; name: string }> {
 export function ControlsAccordion<T extends { id: number; name: string }>({
   templates, currentTemplateId, loadTemplate, templateName, setTemplateName,
   pageWidth, setPageWidth, pageHeight, setPageHeight, presets: PAGE_PRESETS,
-  orientation, setOrientation, versions, onNewVersion, openDiff, handleRestoreVersion,
+  orientation, setOrientation, versions, onNewVersion, openDiff, handleRestoreVersion, handleDeleteVersion,
   sampleData, showHelpers = true, defaultOpen = ["page"],
   openSections, onOpenSectionsChange, onInsertHelper,
 }: Props<T>) {
@@ -145,7 +165,7 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
             <Plus className="h-3 w-3" />
             Save version
           </Button>
-          <div className="max-h-64 space-y-1 overflow-y-auto">
+          <div className="max-h-64 space-y-1 overflow-y-auto" data-testid="version-list">
             {versions.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 No versions yet — use “Save Version” to snapshot.
@@ -156,16 +176,17 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
                 const older = versions[i + 1];
                 return (
                   <div
-                    key={v.id}
+                    key={v.key}
+                    data-testid={`version-row-${v.versionNo}`}
                     className={cn("flex items-center justify-between rounded-md border p-2", isCurrent && "bg-secondary")}
                   >
                     <div className="min-w-0">
                       <p className="text-xs font-medium">
-                        v{v.version_no}
+                        v{v.versionNo}
                         {isCurrent && <span className="ml-1 text-xs text-primary">current</span>}
                       </p>
                       <p className="truncate text-xs text-muted-foreground">
-                        {v.label || v.note || v.created_at.slice(0, 16)}
+                        {v.label || v.note || v.createdAt.slice(0, 16)}
                       </p>
                     </div>
                     <div className="flex shrink-0 gap-1">
@@ -174,8 +195,9 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
                           variant="ghost"
                           size="sm"
                           className="h-6 w-6 p-0"
-                          title={`Diff v${older.version_no} → v${v.version_no}`}
-                          aria-label={`Diff v${older.version_no} to v${v.version_no}`}
+                          title={`Diff v${older.versionNo} → v${v.versionNo}`}
+                          aria-label={`Diff v${older.versionNo} to v${v.versionNo}`}
+                          data-testid={`version-diff-${v.versionNo}`}
                           onClick={() => openDiff(older, v)}
                         >
                           <GitCompare className="h-3 w-3" />
@@ -186,11 +208,24 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
                         size="sm"
                         className="h-6 w-6 p-0"
                         title="Restore this version"
-                        aria-label={`Restore version ${v.version_no}`}
+                        aria-label={`Restore version ${v.versionNo}`}
+                        data-testid={`version-restore-${v.versionNo}`}
                         disabled={isCurrent}
                         onClick={() => handleRestoreVersion(v)}
                       >
                         <RotateCcw className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 hover:text-danger"
+                        title="Delete this version"
+                        aria-label={`Delete version ${v.versionNo}`}
+                        data-testid={`version-delete-${v.versionNo}`}
+                        disabled={isCurrent}
+                        onClick={() => handleDeleteVersion(v)}
+                      >
+                        <Trash2 className="h-3 w-3" />
                       </Button>
                     </div>
                   </div>

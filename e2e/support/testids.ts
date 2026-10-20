@@ -44,8 +44,12 @@ export const testids = {
 	templatePublish: "template-publish",
 	/** Designer sync bar: unpublish button. */
 	templateUnpublish: "template-unpublish",
+	/** Designer version panel: list container. */
+	versionList: "version-list",
+	/** Save-version dialog: label input. */
+	versionLabel: "version-label",
+	/** Designer actions: open the save-version dialog. */
+	designerSaveVersion: "designer-save-version",
 	/** Designer sync bar: manual sync button. */
 	templateSyncNow: "template-sync-now",
 } as const;
-
-export type TestId = (typeof testids)[keyof typeof testids];

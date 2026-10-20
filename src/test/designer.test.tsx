@@ -105,9 +105,9 @@ describe("TemplateSyncBar", () => {
 
 describe("ControlsAccordion", () => {
   const versions = [
-    { id: 2, version_no: 2, label: "second", note: "", created_at: "2026-02-01T10:00:00Z" },
-    { id: 1, version_no: 1, label: "first", note: "", created_at: "2026-01-01T10:00:00Z" },
-  ] as any;
+    { key: "local-2", versionNo: 2, label: "second", note: "", createdAt: "2026-02-01T10:00:00Z", createdBy: "manual", html: "<p>2</p>", css: "", localId: 2 },
+    { key: "local-1", versionNo: 1, label: "first", note: "", createdAt: "2026-01-01T10:00:00Z", createdBy: "manual", html: "<p>1</p>", css: "", localId: 1 },
+  ];
   const props = () => ({
     templates: [{ id: 1, name: "Receipt" }, { id: 2, name: "Label" }],
     currentTemplateId: 2, loadTemplate: vi.fn(),
@@ -115,7 +115,7 @@ describe("ControlsAccordion", () => {
     pageWidth: 80, setPageWidth: vi.fn(), pageHeight: 200, setPageHeight: vi.fn(),
     presets: [{ label: "A4", width: 210, height: 297 }],
     orientation: "portrait" as const, setOrientation: vi.fn(),
-    versions, onNewVersion: vi.fn(), openDiff: vi.fn(), handleRestoreVersion: vi.fn(),
+    versions, onNewVersion: vi.fn(), openDiff: vi.fn(), handleRestoreVersion: vi.fn(), handleDeleteVersion: vi.fn(),
   });
 
   const ALL_OPEN = ["templates", "page", "sample-data", "versions", "helpers"];
@@ -178,6 +178,16 @@ describe("ControlsAccordion", () => {
     expect(p.handleRestoreVersion).toHaveBeenCalledWith(versions[1]);
     fireEvent.click(screen.getByRole("button", { name: "Diff v1 to v2" }));
     expect(p.openDiff).toHaveBeenCalledWith(versions[1], versions[0]);
+  });
+
+  it("deletes only non-current versions", () => {
+    const p = props();
+    render(<ControlsAccordion {...p} defaultOpen={ALL_OPEN} />);
+    expect(screen.getByRole("button", { name: "Delete version 2" })).toBeDisabled();
+    const del = screen.getByRole("button", { name: "Delete version 1" });
+    expect(del).not.toBeDisabled();
+    fireEvent.click(del);
+    expect(p.handleDeleteVersion).toHaveBeenCalledWith(versions[1]);
   });
 
   it("renders each section header as an h2, so heading order stays under the page h1", () => {
@@ -535,7 +545,7 @@ describe("ControlsAccordion, controlled", () => {
     templateName: "Label", setTemplateName: vi.fn(),
     pageWidth: 100, setPageWidth: vi.fn(), pageHeight: 150, setPageHeight: vi.fn(),
     presets: [], orientation: "portrait" as const, setOrientation: vi.fn(),
-    versions: [], onNewVersion: vi.fn(), openDiff: vi.fn(), handleRestoreVersion: vi.fn(),
+    versions: [], onNewVersion: vi.fn(), openDiff: vi.fn(), handleRestoreVersion: vi.fn(), handleDeleteVersion: vi.fn(),
   });
 
   it("opens the sections it is given and reports every change, so the parent can remember them", () => {

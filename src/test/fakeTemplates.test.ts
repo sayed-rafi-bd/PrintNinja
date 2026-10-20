@@ -37,6 +37,19 @@ describe("fake template store", () => {
 		expect(() => cache.createTemplate({ name: "fresh" })).toThrow(/already exists/);
 	});
 
+	it("creates labelled versions with notes", () => {
+		const cache = createFakeCache();
+		const row = cache.createTemplate({ name: "T", html: "<p>1</p>" });
+		const v = cache.createVersion(row.id, { html: "<p>2</p>", css: "", label: "Shipped", note: "n", created_by: "manual" }) as {
+			label: string | null;
+			note: string | null;
+		};
+		expect(v.label).toBe("Shipped");
+		expect(v.note).toBe("n");
+		const listed = cache.listVersions(row.id) as Array<{ label: string | null }>;
+		expect(listed[0]?.label).toBe("Shipped");
+	});
+
 	it("marks edits dirty and hides tombstones from lists", () => {
 		const cache = createFakeCache();
 		const row = cache.createTemplate({ name: "T", html: "<p>1</p>" });

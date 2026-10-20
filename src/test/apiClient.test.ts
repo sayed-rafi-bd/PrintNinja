@@ -127,7 +127,9 @@ describe("fetchCommunityTemplates", () => {
 	});
 
 	it("passes search, sort and paging through and returns the items", async () => {
-		localStorage.setItem("printninja-setting:share_service_url", "https://api.test");
+		// A fresh host: the typed client caches per base URL, so reusing
+		// api.test would replay an earlier test's fetch mock.
+		localStorage.setItem("printninja-setting:share_service_url", "https://api-versions.test");
 		localStorage.setItem("printninja-setting:share_session_token", "tok");
 		const seen: string[] = [];
 		vi.stubGlobal(
@@ -152,3 +154,4 @@ describe("fetchCommunityTemplates", () => {
 		}
 	});
 });
+
