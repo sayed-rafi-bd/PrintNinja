@@ -166,15 +166,17 @@ versioned separately from the app. Deploy it by hand.
 - Docker with the Compose plugin (for the Docker route), or Rust (for the manual route).
 - HTTPS in front of the service. The app sends session tokens as Bearer headers,
   so plain HTTP must not be used outside a trusted network.
-- Manual route only: Rust stable on the build machine. `server/Cargo.lock` is
+- Manual route only: Rust stable on the build machine. `server-legacy/Cargo.lock` is
   lockfile version 4, which needs Cargo 1.78 or newer (the Docker build image
   already has a recent one).
 
 ### Deploy with Docker (recommended)
-Files: `server/Dockerfile`, `server/.dockerignore` and `docker-compose.yml`.
+Files: `server-legacy/Dockerfile`, `server-legacy/.dockerignore` and
+`server-legacy/docker-compose.yml`. Every `docker compose` command below runs
+from `server-legacy/`.
 
 ```bash
-git clone <repo> && cd PrintNinja && git checkout v2
+git clone <repo> && cd PrintNinja && git checkout v2 && cd server-legacy
 
 # Listens on 127.0.0.1:3001. Put your own HTTPS reverse proxy on the same host in front:
 docker compose up -d --build
@@ -189,8 +191,8 @@ What this sets up:
 - The port is published on `127.0.0.1` only, so nothing outside the host can
   reach the plain HTTP service. A reverse proxy on the same host must forward to it
   and should set `X-Forwarded-For` to the real client address. Without a proxy,
-  other machines cannot connect; the comment in `docker-compose.yml` explains how to
-  open the port, at the cost of unencrypted traffic.
+  other machines cannot connect; the comment in `server-legacy/docker-compose.yml`
+  explains how to open the port, at the cost of unencrypted traffic.
 - The container has a health check on `/health`. See `docker compose ps`.
 
 Check it:
@@ -210,8 +212,8 @@ docker run --rm -v printninja_printninja-data:/data -v "$PWD":/backup busybox \
   cp /data/printninja-server.db /backup/printninja-$(date +%F).db
 docker compose start printninja-server
 ```
-The volume name is `<project folder>_printninja-data`; check it with
-`docker volume ls`.
+The compose project name is pinned in the file, so the volume is always
+`printninja_printninja-data`; check it with `docker volume ls`.
 
 Update and roll back:
 ```bash
@@ -226,8 +228,8 @@ schema needs a manual migration first.
 
 ### Without Docker: build
 ```bash
-cargo build --release --manifest-path server/Cargo.toml
-# binary: server/target/release/printninja-server
+cargo build --release --manifest-path server-legacy/Cargo.toml
+# binary: server-legacy/target/release/printninja-server
 ```
 Copy that one file to the host.
 

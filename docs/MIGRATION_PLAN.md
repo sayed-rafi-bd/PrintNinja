@@ -19,7 +19,7 @@ Minimum scope: the server stores a copy of each user's templates and owns sign-i
 | Print pipeline, queue, transports, history, batches | Local, unchanged. Reads the local copy only |
 | Local REST API, deep links | Local, unchanged. Look up the local copy only |
 
-The server already has register, login, logout, `me`, throttling, template PUT/GET/DELETE, saved templates and use counts (`server/src/main.rs`, 9 routes under `/v1`). The client already calls it with `fetch` from `src/lib/share/client.ts`. The local `templates` table already has `remote_id`, `origin`, `origin_owner`, `published_at` and `withdrawn`.
+The server already has register, login, logout, `me`, throttling, template PUT/GET/DELETE, saved templates and use counts (`server-legacy/src/main.rs`, 9 routes under `/v1`). The client already calls it with `fetch` from `src/lib/share/client.ts`. The local `templates` table already has `remote_id`, `origin`, `origin_owner`, `published_at` and `withdrawn`.
 
 ## 2. Decisions
 
@@ -62,7 +62,7 @@ Still open:
 - Make Saved (community) templates read-only: hide Edit, Save and Publish on them, using the existing local `origin` value `saved`.
 - Done when: a template saved on one PC appears on another through Get from server, an edit shows up there after Refresh, and prints from the local copy.
 
-**Built.** `update_template_meta` and the `sync` version marker were added to `src-tauri`; the `css` column, the client sync module and the three actions live in `server/src/db.rs`, `src/lib/share/sync.ts` and the Designer and Templates screens. Covered by `src-tauri/tests/template_sync.rs`, `src/test/shareSync.test.ts`, the server route tests and the Templates and Designer page tests. The manual walk-through in section 4 has not been run.
+**Built.** `update_template_meta` and the `sync` version marker were added to `src-tauri`; the `css` column, the client sync module and the three actions live in `server-legacy/src/db.rs`, `src/lib/share/sync.ts` and the Designer and Templates screens. Covered by `src-tauri/tests/template_sync.rs`, `src/test/shareSync.test.ts`, the server route tests and the Templates and Designer page tests. The manual walk-through in section 4 has not been run.
 
 ### Phase 2: Check the print path
 

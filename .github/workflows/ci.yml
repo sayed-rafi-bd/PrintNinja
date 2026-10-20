@@ -73,8 +73,8 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
   # The Rust share server is its own crate with its own 22 tests; they never
-  # ran on a pull request (Phase 0, item 0.1). The path moves to
-  # server-legacy/ when the TypeScript service takes server/ (Phase 1).
+  # ran on a pull request (Phase 0, item 0.1). It lives in server-legacy/
+  # since Phase 1 and is deleted at cutover (Phase 3).
   server-test:
     runs-on: ubuntu-latest
     steps:
@@ -82,8 +82,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.90.0
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: server
-      - run: cargo test --manifest-path server/Cargo.toml
+          workspaces: server-legacy
+      - run: cargo test --manifest-path server-legacy/Cargo.toml
 
   # 5. Windows is the shipped desktop target, so run the Rust tests there on
   # every PR/push instead of only discovering breakage during the tag build.
