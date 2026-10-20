@@ -39,6 +39,27 @@ describe("legacy scrypt passwords", () => {
 		expect(hasher.needsRehash(RUST_SHAPED_HASH)).toBe(true);
 	});
 
+	it("does not block the event loop while verifying scrypt (P9)", async () => {
+		// The legacy hash costs ~400 ms of CPU. verify() runs it on
+		// libuv, so the loop keeps ticking and other requests are served
+		// meanwhile; a synchronous scrypt would starve them to ~zero ticks.
+		let done = false;
+		let ticks = 0;
+		const counting = (async () => {
+			while (!done) {
+				ticks += 1;
+				await new Promise((resolve) => setImmediate(resolve));
+			}
+		})();
+
+		const ok = await hasher.verify(RUST_SHAPED_HASH, "password123");
+		done = true;
+		await counting;
+
+		expect(ok).toBe(true);
+		expect(ticks).toBeGreaterThan(10);
+	});
+
 	it("rejects a truncated scrypt string without throwing", async () => {
 		expect(await hasher.verify("$scrypt$ln=17,r=8,p=1$abc", "x")).toBe(false);
 	});
