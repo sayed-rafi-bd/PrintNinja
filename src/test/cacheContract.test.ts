@@ -1,13 +1,20 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { createFakeCache } from "../../e2e/support/fakeAgent/cache.js";
 
 // The other half of the sync-cache contract (REFACTORING.md section 11,
 // Phase 3): the same tests/fixtures/cache_cases.json that the Rust suite
 // runs, executed here against the TypeScript fake agent. A behavior that
 // differs between the two fails in one of the two suites.
+//
+// The fake persists rows to localStorage for reload survival; each case
+// gets a fresh cache, so the persisted state is cleared first.
+beforeEach(() => {
+	localStorage.removeItem("fake-agent:templates");
+	localStorage.removeItem("fake-agent:seed");
+});
 
 interface FixtureTemplate {
 	name?: string;

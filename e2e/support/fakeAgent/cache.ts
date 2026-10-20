@@ -57,6 +57,45 @@ export interface ApplyReport {
 	skipped_dirty: number;
 }
 
+/** One template to pre-seed the fake cache (AgentSeed.templates). */
+export interface SeedTemplate {
+	name?: string;
+	server_id?: string | null;
+	html?: string;
+	css?: string;
+	sync_state?: SyncStateName;
+	published_at?: string | null;
+	summary?: string;
+	readme?: string;
+	page_w?: number;
+	page_h?: number;
+}
+
+const SEED_KEY = "fake-agent:seed";
+const PERSIST_KEY = "fake-agent:templates";
+
+function readSeedTemplates(): SeedTemplate[] {
+	try {
+		const raw = localStorage.getItem(SEED_KEY);
+		if (!raw) return [];
+		const seed = JSON.parse(raw) as { templates?: SeedTemplate[] };
+		return Array.isArray(seed.templates) ? seed.templates : [];
+	} catch {
+		return [];
+	}
+}
+
+function readPersistedTemplates(): FakeTemplateRow[] | null {
+	try {
+		const raw = localStorage.getItem(PERSIST_KEY);
+		if (!raw) return null;
+		const rows = JSON.parse(raw) as FakeTemplateRow[];
+		return Array.isArray(rows) ? rows : null;
+	} catch {
+		return null;
+	}
+}
+
 export function createFakeCache() {
 	let nextId = 1;
 	const templates = new Map<number, FakeTemplateRow>();
@@ -68,6 +107,52 @@ export function createFakeCache() {
 		last_pull_at: null,
 		last_error: null,
 	};
+
+	function persist(): void {
+		try {
+			localStorage.setItem(PERSIST_KEY, JSON.stringify([...templates.values()]));
+		} catch {
+			// Storage full or unavailable: the cache keeps serving memory.
+		}
+	}
+
+	// Reload persistence first (a reload behaves like restarting the app),
+	// otherwise the one-shot seed. nextId continues past restored rows.
+	const persisted = readPersistedTemplates();
+	if (persisted) {
+		for (const row of persisted) {
+			templates.set(row.id, row);
+			nextId = Math.max(nextId, row.id + 1);
+		}
+	} else {
+		for (const seed of readSeedTemplates()) {
+			const id = nextId++;
+			const html = seed.html ?? "<p>seed</p>";
+			const css = seed.css ?? "";
+			templates.set(id, {
+				id,
+				server_id: seed.server_id ?? null,
+				name: seed.name ?? "Seeded",
+				summary: seed.summary ?? "",
+				page_w: seed.page_w ?? 210,
+				page_h: seed.page_h ?? 297,
+				orientation: (seed.page_w ?? 210) > (seed.page_h ?? 297) ? "landscape" : "portrait",
+				readme: seed.readme ?? "",
+				published_at: seed.published_at ?? null,
+				updated_at: new Date().toISOString(),
+				server_revision: seed.server_id ? 1 : null,
+				base_revision: seed.server_id ? 1 : null,
+				sync_state: seed.sync_state ?? (seed.server_id ? "synced" : "dirty"),
+				kind: "own",
+				owner_handle: null,
+				synced_at: null,
+				versions: [{ version_no: 1, html, css, created_by: "manual" }],
+			});
+		}
+		if (templates.size > 0) {
+			persist();
+		}
+	}
 
 	const findByServerId = (serverId: string): FakeTemplateRow | undefined => {
 		for (const row of templates.values()) {
@@ -189,6 +274,7 @@ export function createFakeCache() {
 			sync.cursor = newCursor;
 			sync.last_pull_at = nowIso();
 			sync.last_error = null;
+			persist();
 			return report;
 		},
 
@@ -208,6 +294,7 @@ export function createFakeCache() {
 			row.sync_state = "synced";
 			row.server_revision = revision;
 			row.base_revision = revision;
+			persist();
 		},
 
 		markConflicted(serverId: string): void {
@@ -216,6 +303,7 @@ export function createFakeCache() {
 				throw new Error(`no cached template with server id ${serverId}`);
 			}
 			row.sync_state = "conflict";
+			persist();
 		},
 
 		resolveConflict(serverId: string, resolution: "theirs" | "mine", serverCopy?: Record<string, unknown>): void {
@@ -225,6 +313,7 @@ export function createFakeCache() {
 			}
 			if (resolution === "mine") {
 				row.sync_state = "dirty";
+				persist();
 				return;
 			}
 			if (!serverCopy) {
@@ -247,6 +336,7 @@ export function createFakeCache() {
 			row.versions.push({ version_no: maxNo + 1, html, css, created_by: "sync" });
 			pruneVersions(row);
 			row.sync_state = "synced";
+			persist();
 		},
 
 		listTombstoned(): string[] {
@@ -265,6 +355,7 @@ export function createFakeCache() {
 			for (const [id, t] of templates) {
 				if (t.server_id === serverId) {
 					templates.delete(id);
+					persist();
 					return true;
 				}
 			}
@@ -276,6 +367,179 @@ export function createFakeCache() {
 				.filter((t) => t.sync_state === "conflict")
 				.sort((a, b) => a.id - b.id)
 				.map((t) => ({ id: t.id, server_id: t.server_id, name: t.name }));
+		},
+
+		/** Templates for list_templates: tombstones hidden, like Rust. */
+		listTemplates(): Record<string, unknown>[] {
+			return [...templates.values()]
+				.filter((t) => t.sync_state !== "deleted_pending")
+				.sort((a, b) => (a.name < b.name ? -1 : 1))
+				.map((t) => ({
+					id: t.id,
+					name: t.name,
+					current_version_id: t.versions[t.versions.length - 1]
+						? t.id * 1000 + (t.versions[t.versions.length - 1]?.version_no ?? 0)
+						: null,
+					page_w_mm: t.page_w,
+					page_h_mm: t.page_h,
+					orientation: t.orientation,
+					readme: t.readme,
+					summary: t.summary,
+					remote_id: t.server_id,
+					published_at: t.published_at,
+					origin: t.kind === "saved" ? "saved" : "own",
+					origin_owner: t.owner_handle,
+					withdrawn: false,
+					created_at: t.updated_at,
+					updated_at: t.updated_at,
+				}));
+		},
+
+		getTemplate(id: number): FakeTemplateRow {
+			const row = templates.get(id);
+			if (!row || row.sync_state === "deleted_pending") {
+				throw new Error(`Template ${id} not found`);
+			}
+			return row;
+		},
+
+		createTemplate(req: Record<string, unknown>): FakeTemplateRow {
+			const name = String(req["name"] ?? "").trim();
+			if (!name) {
+				throw new Error("Template name required");
+			}
+			for (const t of templates.values()) {
+				if (t.sync_state !== "deleted_pending" && t.name.toLowerCase() === name.toLowerCase()) {
+					throw new Error(`A template named '${name}' already exists`);
+				}
+			}
+			const id = nextId++;
+			const html = String(req["html"] ?? "");
+			const css = String(req["css"] ?? "");
+			const pageW = Number(req["page_w_mm"] ?? 210);
+			const pageH = Number(req["page_h_mm"] ?? 297);
+			const row: FakeTemplateRow = {
+				id,
+				// Rust mints a fresh server id for brand-new local rows.
+				server_id: (req["server_id"] as string) ?? crypto.randomUUID(),
+				name,
+				summary: String(req["summary"] ?? ""),
+				page_w: pageW,
+				page_h: pageH,
+				orientation: pageW > pageH ? "landscape" : "portrait",
+				readme: String(req["readme"] ?? ""),
+				published_at: null,
+				updated_at: nowIso(),
+				server_revision: (req["server_revision"] as number) ?? null,
+				base_revision: (req["base_revision"] as number) ?? null,
+				sync_state: (req["sync_state"] as SyncStateName) ?? "dirty",
+				kind: ((req["kind"] as string) ?? "own") as "own" | "saved",
+				owner_handle: (req["owner_handle"] as string) ?? null,
+				synced_at: null,
+				versions: [{ version_no: 1, html, css, created_by: "manual" }],
+			};
+			templates.set(id, row);
+			persist();
+			return row;
+		},
+
+		updateTemplateMeta(id: number, req: Record<string, unknown>): void {
+			const row = templates.get(id);
+			if (!row || row.sync_state === "deleted_pending") {
+				throw new Error(`Template ${id} not found`);
+			}
+			const name = String(req["name"] ?? row.name).trim();
+			if (!name) {
+				throw new Error("Template name required");
+			}
+			row.name = name;
+			row.page_w = Number(req["page_w_mm"] ?? row.page_w);
+			row.page_h = Number(req["page_h_mm"] ?? row.page_h);
+			row.orientation = row.page_w > row.page_h ? "landscape" : "portrait";
+			if (typeof req["summary"] === "string") {
+				row.summary = req["summary"];
+			}
+			row.updated_at = nowIso();
+			row.sync_state = "dirty";
+			persist();
+		},
+
+		updateReadme(id: number, readme: string): void {
+			const row = templates.get(id);
+			if (!row || row.sync_state === "deleted_pending") {
+				throw new Error(`Template ${id} not found`);
+			}
+			row.readme = readme;
+			row.updated_at = nowIso();
+			row.sync_state = "dirty";
+			persist();
+		},
+
+		listVersions(templateId: number): Record<string, unknown>[] {
+			const row = templates.get(templateId);
+			if (!row) {
+				throw new Error(`Template ${templateId} not found`);
+			}
+			return [...row.versions]
+				.sort((a, b) => b.version_no - a.version_no)
+				.map((v, i) => ({
+					id: templateId * 1000 + v.version_no,
+					template_id: templateId,
+					version_no: v.version_no,
+					html: v.html,
+					css: v.css,
+					label: null,
+					note: null,
+					created_at: row.updated_at,
+					created_by: v.created_by,
+					compiled_css: "",
+					compiled_key: "",
+					_current: i === 0,
+				}));
+		},
+
+		createVersion(templateId: number, req: Record<string, unknown>): Record<string, unknown> {
+			const row = templates.get(templateId);
+			if (!row || row.sync_state === "deleted_pending") {
+				throw new Error(`Template ${templateId} not found`);
+			}
+			const maxNo = row.versions.reduce((m, v) => Math.max(m, v.version_no), 0);
+			const version = {
+				version_no: maxNo + 1,
+				html: String(req["html"] ?? ""),
+				css: String(req["css"] ?? ""),
+				created_by: String(req["created_by"] ?? "manual"),
+			};
+			row.versions.push(version);
+			pruneVersions(row);
+			row.updated_at = nowIso();
+			row.sync_state = "dirty";
+			persist();
+			return { id: templateId * 1000 + version.version_no, template_id: templateId, ...version };
+		},
+
+		deleteTemplate(id: number): void {
+			const row = templates.get(id);
+			if (!row || row.sync_state === "deleted_pending") {
+				throw new Error(`Template ${id} not found`);
+			}
+			row.sync_state = "deleted_pending";
+			persist();
+		},
+
+		updateTemplateOrigin(id: number, req: Record<string, unknown>): void {
+			const row = templates.get(id);
+			if (!row) {
+				throw new Error(`Template ${id} not found`);
+			}
+			const origin = String(req["origin"] ?? "");
+			if (origin !== "own" && origin !== "saved") {
+				throw new Error("origin must be 'own' or 'saved'");
+			}
+			row.kind = origin;
+			row.owner_handle = (req["origin_owner"] as string) ?? null;
+			row.updated_at = nowIso();
+			persist();
 		},
 
 		queueUse(serverId: string, delta: number): number {
@@ -305,6 +569,7 @@ export function createFakeCache() {
 			sync.cursor = "";
 			sync.last_pull_at = null;
 			sync.last_error = null;
+			persist();
 			return count;
 		},
 	};

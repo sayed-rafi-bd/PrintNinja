@@ -62,6 +62,39 @@ const implemented: Record<string, Handler> = {
 		return cache.forgetTemplate(String(args["server_id"] ?? ""));
 	},
 	cache_list_conflicted: () => cache.listConflicted(),
+	// Template reads/writes over the same cache rows (dirty-write rules
+	// mirror the Rust commands; tombstones stay hidden from lists).
+	list_templates: () => cache.listTemplates(),
+	get_template: (args) => cache.getTemplate(Number(args["id"] ?? 0)),
+	create_template: (args) => {
+		const req = (args["req"] ?? args) as Record<string, unknown>;
+		const row = cache.createTemplate(req);
+		return cache.listTemplates().find((t) => t["id"] === row.id);
+	},
+	update_template_meta: (args) => {
+		const req = (args["req"] ?? args) as Record<string, unknown>;
+		cache.updateTemplateMeta(Number(req["id"] ?? 0), req);
+		return cache.listTemplates().find((t) => t["id"] === Number(req["id"] ?? 0));
+	},
+	update_readme: (args) => {
+		const req = (args["req"] ?? args) as Record<string, unknown>;
+		cache.updateReadme(Number(req["id"] ?? 0), String(req["readme"] ?? ""));
+		return cache.listTemplates().find((t) => t["id"] === Number(req["id"] ?? 0));
+	},
+	list_versions: (args) => cache.listVersions(Number(args["template_id"] ?? 0)),
+	create_version: (args) => {
+		const req = (args["req"] ?? args) as Record<string, unknown>;
+		return cache.createVersion(Number(req["template_id"] ?? 0), req);
+	},
+	delete_template: (args) => {
+		cache.deleteTemplate(Number(args["id"] ?? 0));
+		return null;
+	},
+	update_template_origin: (args) => {
+		const req = (args["req"] ?? args) as Record<string, unknown>;
+		cache.updateTemplateOrigin(Number(req["id"] ?? 0), req);
+		return cache.listTemplates().find((t) => t["id"] === Number(req["id"] ?? 0));
+	},
 };
 
 /** Every Rust command without real behavior yet (src-tauri/src/lib.rs).
@@ -73,15 +106,8 @@ const acknowledgedStubs: string[] = [
 	"delete_printer",
 	"get_printer",
 	"test_printer",
-	"list_templates",
-	"create_template",
-	"get_template",
-	"update_readme",
-	"update_template_meta",
 	"set_publish_info",
 	"clear_publish_info",
-	"update_template_origin",
-	"delete_template",
 	"list_jobs",
 	"get_job",
 	"reprint_job",
@@ -92,8 +118,6 @@ const acknowledgedStubs: string[] = [
 	"print_html",
 	"enumerate_system_printers",
 	"spike_test_print",
-	"list_versions",
-	"create_version",
 	"delete_version",
 	"restore_version",
 	"diff_versions",
