@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import * as share from "@/lib/share/client";
+import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
 import { downloadToLocal, refreshFromServer, saveToServer } from "@/lib/share/sync";
 import { cn } from "@/lib/utils";
 
@@ -234,6 +235,7 @@ export function TemplatesPage() {
     }
     try {
       await invoke("delete_template", { id: localTpl.id });
+      notifyLocalEdit();
       toast.success("Removed from Saved");
       await loadMine();
     } catch (e) {
@@ -243,18 +245,12 @@ export function TemplatesPage() {
 
   // Opens the Print page with this template selected.
   const handleUse = async (tpl: LocalTemplate, isSavedCopy: boolean) => {
-    // For saved copies, record use on the share service (best effort, silent if offline).
+    // For saved copies, queue a use count locally; the sync engine sends
+    // it later (section 6.6). Never blocks navigation, silent if offline.
     if (isSavedCopy && tpl.remote_id) {
-      const url = await share.getServiceUrl();
-      const token = await share.getSessionToken();
-      if (url && token) {
-        try {
-          await fetch(`${url}/v1/templates/${tpl.remote_id}/use`, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-          });
-        } catch {}
-      }
+      try {
+        await invoke("cache_queue_use", { server_id: tpl.remote_id, delta: 1 });
+      } catch {}
     }
     usePrintStore.getState().setTemplateId(String(tpl.id));
     navigate("/print");

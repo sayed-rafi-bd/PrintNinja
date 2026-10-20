@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { useSystemPrinters } from "@/lib/hooks/useSystemPrinters";
 import { toast } from "sonner";
 import { usePrintStore } from "@/lib/store/printStore";
+import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
 import { DEFAULT_MOCK_DATA } from "@/lib/templates/defaultTemplate";
 import { ensureStarterTemplates, type TemplateRow } from "@/lib/templates/seedTemplates";
 import { compileTemplateCss } from "@/lib/templates/compileTemplateCss";
@@ -130,7 +131,9 @@ export function PrintPage() {
                 note: "Compiled Tailwind CSS",
                 created_by: "autosave",
               },
-            }).catch((e) => console.warn("Could not store compiled CSS:", e));
+            })
+              .then(() => notifyLocalEdit())
+              .catch((e) => console.warn("Could not store compiled CSS:", e));
           }
         }
 

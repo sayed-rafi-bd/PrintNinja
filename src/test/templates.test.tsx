@@ -150,6 +150,15 @@ describe("Templates page", () => {
     });
   });
 
+  it("queues a use count when printing a saved copy, without touching the network", async () => {
+    renderPage();
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: /Saved/ }));
+    const row = (await screen.findByText("Saved A")).closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: /Print/ }));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/print"));
+    expect(invoke).toHaveBeenCalledWith("cache_queue_use", { server_id: "x1", delta: 1 });
+  });
+
   it("does not call a saved copy withdrawn when the server cannot be reached", async () => {
     share.fetchRemoteTemplate.mockRejectedValue(new share.ServerUnreachableError("http://srv"));
     renderPage();

@@ -49,6 +49,7 @@ import { useCompiledCss } from "@/lib/templates/useCompiledCss";
 import { formatCss, formatHtml } from "@/lib/utils/format";
 import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
 import * as share from "@/lib/share/client";
+import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
 import {
   getLocalTemplate,
   isReadOnly,
@@ -244,6 +245,7 @@ export function DesignerPage() {
       setRemoteId(result.remoteId);
       setPublishedAt(result.published ? result.updatedAt : null);
       setTemplateUpdatedAt(result.updatedAt);
+      notifyLocalEdit();
       toast.success(done);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -363,6 +365,7 @@ export function DesignerPage() {
       loadTemplate(tpl);
       setVersions([]);
       setCurrentTemplateDbId(tpl.id);
+      notifyLocalEdit();
       toast.success(`Template "${name}" created`);
     } catch {
       // Web mode / DB unavailable — keep in-memory fallback so UI stays usable.
@@ -547,6 +550,7 @@ export function DesignerPage() {
       setShowVersionDialog(false);
       setVersionLabel("");
       setVersionNote("");
+      notifyLocalEdit();
       toast.success(`Version ${version.version_no} saved`);
     } catch (e) {
       // Web mode / no backend: keep a local snapshot so the UI stays usable.
@@ -675,6 +679,7 @@ export function DesignerPage() {
     setReadmeSaving(true);
     try {
       await invoke("update_readme", { req: { id: currentTemplateDbId, readme } });
+      notifyLocalEdit();
       toast.success("README saved");
     } catch (e) {
       toast.error(String(e));
