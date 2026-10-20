@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ServerUnreachableScreen } from "@/components/ServerUnreachableScreen";
 import { SignInScreen } from "@/components/SignInScreen";
 import { getServiceUrl, onSessionEnded } from "@/lib/share/client";
-import { checkSession, type SessionCheck } from "@/lib/share/session";
+import { checkSession, canOpenOffline, type SessionCheck } from "@/lib/share/session";
 
 type Gate =
   | { kind: "checking" }
@@ -31,11 +31,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       setGate({ kind: "ready" });
       return;
     }
-    setGate(
-      result.state === "unreachable"
-        ? { kind: "unreachable", url: result.url, retrying: false }
-        : { kind: "signin", url: result.url, expired: false },
-    );
+    if (result.state === "unreachable") {
+      // Offline start: a stored session plus cached templates opens the
+      // app; the status chip shows offline and the scheduler retries.
+      void canOpenOffline().then((offline) => {
+        setGate(
+          offline
+            ? { kind: "ready" }
+            : { kind: "unreachable", url: result.url, retrying: false },
+        );
+      });
+      return;
+    }
+    setGate({ kind: "signin", url: result.url, expired: false });
   }, []);
 
   useEffect(() => {

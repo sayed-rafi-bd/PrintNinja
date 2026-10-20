@@ -10,6 +10,9 @@ const URL_KEY = "printninja-setting:share_service_url";
 const TOKEN_KEY = "printninja-setting:share_session_token";
 const SERVER = "http://server.test";
 
+const tauriInvoke = vi.hoisted(() => ({ fn: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => tauriInvoke.fn(...a) }));
+
 type Handler = (url: string, init?: RequestInit) => Response | Promise<Response>;
 
 function json(body: unknown, status = 200) {
@@ -23,6 +26,24 @@ beforeEach(() => {
   localStorage.clear();
   calls = [];
   handler = () => json({ error: "unexpected request" }, 500);
+  // The local agent: settings persist to the same localStorage keys the
+  // client falls back to, and the template cache is empty unless a test
+  // seeds it (offline start needs at least one cached template).
+  tauriInvoke.fn.mockReset();
+  tauriInvoke.fn.mockImplementation(async (cmd: string, args?: { key?: string; value?: string }) => {
+    if (cmd === "list_templates") return [];
+    if (cmd === "get_setting") return localStorage.getItem(`printninja-setting:${args?.key}`);
+    if (cmd === "set_setting" && args?.key) {
+      if (args.value) {
+        localStorage.setItem(`printninja-setting:${args.key}`, args.value);
+      } else {
+        // The client clears by writing ""; the agent treats it as missing.
+        localStorage.removeItem(`printninja-setting:${args.key}`);
+      }
+      return null;
+    }
+    return null;
+  });
   // openapi-fetch calls fetch with a single Request object, not
   // (url, init) — normalize so handlers keep seeing (url, init).
   vi.stubGlobal(
@@ -253,6 +274,50 @@ describe("cannot reach server screen", () => {
     await waitFor(() => expect(calls.length).toBe(2));
     expect(await screen.findByRole("button", { name: "Retry" })).toBeEnabled();
     expect(screen.queryByText("The app")).toBeNull();
+  });
+
+  it("stays blocked offline without a stored session, even with cached templates", async () => {
+    localStorage.removeItem(TOKEN_KEY);
+    handler = () => {
+      throw new TypeError("Failed to fetch");
+    };
+    tauriInvoke.fn.mockImplementation(async (cmd: string, args?: { key?: string }) => {
+      if (cmd === "list_templates") return [{ id: 1, name: "Cached" }];
+      if (cmd === "get_setting") return localStorage.getItem(`printninja-setting:${args?.key}`);
+      return null;
+    });
+    renderGate();
+    expect(await screen.findByRole("heading", { level: 1, name: "Cannot reach the server" })).toBeInTheDocument();
+    expect(screen.queryByText("The app")).toBeNull();
+  });
+
+  it("opens the app offline when the cache has templates", async () => {
+    handler = () => {
+      throw new TypeError("Failed to fetch");
+    };
+    tauriInvoke.fn.mockImplementation(async (cmd: string, args?: { key?: string }) => {
+      if (cmd === "list_templates") return [{ id: 1, name: "Cached" }];
+      if (cmd === "get_setting") return localStorage.getItem(`printninja-setting:${args?.key}`);
+      return null;
+    });
+    renderGate();
+    expect(await screen.findByText("The app")).toBeVisible();
+    expect(screen.queryByRole("heading", { level: 1, name: "Cannot reach the server" })).toBeNull();
+  });
+
+  it("opens the app offline after a failed Retry with cached templates", async () => {
+    handler = () => {
+      throw new TypeError("Failed to fetch");
+    };
+    renderGate();
+    expect(await screen.findByRole("heading", { level: 1, name: "Cannot reach the server" })).toBeInTheDocument();
+    tauriInvoke.fn.mockImplementation(async (cmd: string, args?: { key?: string }) => {
+      if (cmd === "list_templates") return [{ id: 1, name: "Cached" }];
+      if (cmd === "get_setting") return localStorage.getItem(`printninja-setting:${args?.key}`);
+      return null;
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("The app")).toBeVisible();
   });
 
   it("lets the person fix a wrong server address", async () => {

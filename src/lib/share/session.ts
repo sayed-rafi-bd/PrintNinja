@@ -70,3 +70,18 @@ export async function checkSession(): Promise<SessionCheck> {
     return { state: "unreachable", url };
   }
 }
+
+/** Never throws. True when the app can open without the server: a stored
+ * session plus at least one cached template to work with. Anything else
+ * (no token, empty cache, no local agent) means the unreachable screen. */
+export async function canOpenOffline(): Promise<boolean> {
+  try {
+    const token = await getSessionToken();
+    if (!token) return false;
+    const { invoke } = await import("@/lib/invoke");
+    const templates = await invoke<unknown[]>("list_templates");
+    return Array.isArray(templates) && templates.length > 0;
+  } catch {
+    return false;
+  }
+}
