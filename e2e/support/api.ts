@@ -87,6 +87,14 @@ export function apiMine(token: string): Promise<{ items: ApiTemplateSummary[] }>
 	return request<{ items: ApiTemplateSummary[] }>("GET", "/v2/templates/mine?page=1&page_size=100", { token });
 }
 
+export function apiCommunity(token: string, q = ""): Promise<{ items: ApiTemplateSummary[] }> {
+	const params = new URLSearchParams({ page: "1", page_size: "100", sort: "updated" });
+	if (q) {
+		params.set("q", q);
+	}
+	return request<{ items: ApiTemplateSummary[] }>("GET", `/v2/community/templates?${params.toString()}`, { token });
+}
+
 export interface ApiVersion {
 	version_no: number;
 	body: string;

@@ -3,14 +3,23 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const invoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...a) }));
 
-const client = vi.hoisted(() => ({
-  putRemoteTemplate: vi.fn(),
-  publishRemoteTemplate: vi.fn(),
-  unpublishRemoteTemplate: vi.fn(),
-  fetchRemoteTemplate: vi.fn(),
-  fetchMyRemoteTemplates: vi.fn(),
-  fetchSavedRemoteTemplates: vi.fn(),
-}));
+const client = vi.hoisted(() => {
+  class NotFound extends Error {
+    constructor(id: string) {
+      super(`Template ${id} not found`);
+      this.name = "RemoteTemplateNotFoundError";
+    }
+  }
+  return {
+    putRemoteTemplate: vi.fn(),
+    publishRemoteTemplate: vi.fn(),
+    unpublishRemoteTemplate: vi.fn(),
+    fetchRemoteTemplate: vi.fn(),
+    fetchMyRemoteTemplates: vi.fn(),
+    fetchSavedRemoteTemplates: vi.fn(),
+    RemoteTemplateNotFoundError: NotFound,
+  };
+});
 vi.mock("@/lib/share/client", () => client);
 
 import { ApiError } from "@/lib/api/errors";
@@ -156,6 +165,31 @@ describe("saveToServer", () => {
       version: { label: "Added logo" },
     });
     expect(invoke).toHaveBeenCalledWith("cache_mark_pushed", { server_id: REMOTE.id, revision: 3 });
+  });
+
+  it("falls back to create when the server never saw the row", async () => {
+    client.fetchRemoteTemplate.mockRejectedValue(new client.RemoteTemplateNotFoundError("ghost"));
+    client.putRemoteTemplate.mockResolvedValue({ ...REMOTE, published_at: null, revision: 1 });
+    const result = await saveToServer(local({ remote_id: null }));
+    expect(client.putRemoteTemplate.mock.calls[0][0]).not.toHaveProperty("if_revision");
+    expect(result.remoteId).toBe(REMOTE.id);
+    expect(invoke).toHaveBeenCalledWith("cache_mark_pushed", { server_id: REMOTE.id, revision: 1 });
+  });
+
+  it("retries a raced create as an update instead of failing", async () => {
+    client.fetchRemoteTemplate
+      .mockRejectedValueOnce(new client.RemoteTemplateNotFoundError("ghost"))
+      .mockResolvedValue({ ...REMOTE, revision: 1 });
+    client.putRemoteTemplate
+      .mockRejectedValueOnce(
+        new ApiError({ code: "revision_required", message: "Update needs if_revision", requestId: "r", status: 428 }),
+      )
+      .mockResolvedValue({ ...REMOTE, published_at: null, revision: 2 });
+    client.publishRemoteTemplate.mockResolvedValue({ ...REMOTE, published_at: "2026-03-03T00:00:00Z", revision: 2 });
+    const result = await saveToServer(local({ remote_id: null }), { publish: true });
+    expect(client.putRemoteTemplate.mock.calls[0][0]).not.toHaveProperty("if_revision");
+    expect(client.putRemoteTemplate.mock.calls[1][0]).toMatchObject({ if_revision: 1 });
+    expect(result.published).toBe(true);
   });
 
   it("reports a concurrent edit as a conflict instead of overwriting it", async () => {

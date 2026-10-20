@@ -14,6 +14,7 @@ import {
   fetchSavedRemoteTemplates,
   publishRemoteTemplate,
   putRemoteTemplate,
+  RemoteTemplateNotFoundError,
   unpublishRemoteTemplate,
   type RemoteTemplate,
   type RemoteTemplateSummary,
@@ -103,26 +104,53 @@ export async function saveToServer(
   };
   let remote: RemoteTemplate;
   // Either id means pushed: server_id is the sync identity, remote_id the
-  // legacy column (kept in sync by set_publish_info below).
+  // legacy column (kept in sync by set_publish_info below). A row whose id
+  // the server never saw (never pushed, or pushed pre-migration) falls
+  // back to create.
   const serverRef = template.server_id ?? template.remote_id;
-  if (!serverRef) {
-    const remoteId = crypto.randomUUID();
-    remote = await putRemoteTemplate({ id: remoteId, ...body, ...(options.version ? { version: options.version } : {}) });
+  const current = serverRef
+    ? await fetchRemoteTemplate(serverRef).catch((err: unknown) => {
+        if (err instanceof RemoteTemplateNotFoundError) return null;
+        throw err;
+      })
+    : null;
+  // PUT, retrying once as an update when a concurrent push created
+  // the row first (428): without this the loser of the race fails
+  // instead of converging on the same revision.
+  const putUpsert = async (id: string, ifRevision: number | undefined): Promise<RemoteTemplate> => {
+    try {
+      return await putRemoteTemplate({
+        id,
+        ...body,
+        ...(ifRevision === undefined ? {} : { if_revision: ifRevision }),
+        ...(options.version ? { version: options.version } : {}),
+      });
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "revision_required") {
+        const latest = await fetchRemoteTemplate(id);
+        return putRemoteTemplate({
+          id,
+          ...body,
+          if_revision: latest.revision,
+          ...(options.version ? { version: options.version } : {}),
+        });
+      }
+      throw err;
+    }
+  };
+  if (!current) {
+    const remoteId = serverRef ?? crypto.randomUUID();
+    remote = await putUpsert(remoteId, undefined);
     if (options.publish === true) {
       remote = await publishRemoteTemplate(remote.id);
     }
   } else {
-    const current = await fetchRemoteTemplate(serverRef);
     try {
-      remote = await putRemoteTemplate({
-        id: serverRef,
-        ...body,
-        if_revision: current.revision,
-        ...(options.version ? { version: options.version } : {}),
-      });
+      remote = await putUpsert(current.id, current.revision);
     } catch (err) {
       // A fuller conflict dialog arrives with the sync engine; until then,
       // say what happened in words the toast can show.
+      console.log("[dbg] saveToServer update threw", String(err));
       if (err instanceof ApiError && err.code === "revision_conflict") {
         throw new Error("Changed on another PC — refresh and try again");
       }

@@ -56,7 +56,6 @@ test("F8 version history on the server", async ({ browser }) => {
 	}
 
 	async function saveLabelled(html: string, label: string) {
-		console.log(`STEP save start ${label}`);
 		await pageA.getByLabel("HTML editor").locator(".cm-content").click();
 		await pageA.keyboard.press("ControlOrMeta+a");
 		await pageA.keyboard.press("Backspace");
@@ -66,7 +65,6 @@ test("F8 version history on the server", async ({ browser }) => {
 		await pageA.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click();
 		await openVersions(pageA);
 		await expect(pageA.getByText(label)).toBeVisible({ timeout: 15_000 });
-		console.log(`STEP saved ${label}`);
 	}
 
 	await saveLabelled("<p>v1-a</p>", "First");
@@ -84,7 +82,6 @@ test("F8 version history on the server", async ({ browser }) => {
 			{},
 		).then((rows) => (rows as Array<{ id: number; name: string }>).find((r) => r.name === "Versioned")?.id ?? -1),
 	);
-	console.log("STEP B designer");
 	await pageB.goto(`/template/${idB}`);
 	await openVersions(pageB);
 	await expect(pageB.getByTestId(testids.versionList)).toBeVisible({ timeout: 15_000 });
@@ -93,7 +90,6 @@ test("F8 version history on the server", async ({ browser }) => {
 
 	// Restoring the first makes a new revision; nothing is lost.
 	await pageB.getByRole("button", { name: "Restore version 1" }).click();
-	console.log("STEP restore clicked");
 	await expect(pageB.getByTestId("version-row-4")).toBeVisible({ timeout: 30_000 });
 	await expect(pageB.getByTestId(testids.versionList)).toContainText("Second");
 
