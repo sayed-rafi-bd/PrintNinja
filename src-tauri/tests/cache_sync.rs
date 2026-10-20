@@ -362,3 +362,21 @@ fn non_synced_rows_skip_pulls() {
         assert_eq!(sync_state_of(&conn, "srv-k"), state);
     }
 }
+
+#[test]
+fn conflicted_lists_only_conflicted_rows_in_id_order() {
+    use printninja_lib::commands::cache::{list_conflicted, mark_conflicted};
+    let conn = Connection::open_in_memory().unwrap();
+    printninja_lib::db::init(&conn).unwrap();
+    seed_synced(&conn, "srv-a", 1);
+    seed_synced(&conn, "srv-b", 1);
+    seed_synced(&conn, "srv-c", 1);
+    mark_conflicted(&conn, "srv-c").unwrap();
+    mark_conflicted(&conn, "srv-a").unwrap();
+
+    let listed = list_conflicted(&conn).unwrap();
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[0].server_id.as_deref(), Some("srv-a"));
+    assert_eq!(listed[1].server_id.as_deref(), Some("srv-c"));
+    assert!(listed.iter().all(|r| r.id > 0 && !r.name.is_empty()));
+}

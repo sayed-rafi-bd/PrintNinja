@@ -115,6 +115,7 @@ pub fn run() {
             commands::cache::cache_list_tombstoned,
             commands::cache::cache_list_synced,
             commands::cache::cache_forget_template,
+            commands::cache::cache_list_conflicted,
             commands::print::print_html,
             commands::print::enumerate_system_printers,
             commands::print::spike_test_print,

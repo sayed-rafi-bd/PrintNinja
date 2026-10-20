@@ -271,6 +271,13 @@ export function createFakeCache() {
 			return false;
 		},
 
+		listConflicted(): { id: number; server_id: string | null; name: string }[] {
+			return [...templates.values()]
+				.filter((t) => t.sync_state === "conflict")
+				.sort((a, b) => a.id - b.id)
+				.map((t) => ({ id: t.id, server_id: t.server_id, name: t.name }));
+		},
+
 		queueUse(serverId: string, delta: number): number {
 			const total = (queued.get(serverId)?.count ?? 0) + delta;
 			if (total <= 0) {

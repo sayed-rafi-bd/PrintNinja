@@ -61,6 +61,7 @@ const implemented: Record<string, Handler> = {
 	cache_forget_template: (args) => {
 		return cache.forgetTemplate(String(args["server_id"] ?? ""));
 	},
+	cache_list_conflicted: () => cache.listConflicted(),
 };
 
 /** Every Rust command without real behavior yet (src-tauri/src/lib.rs).

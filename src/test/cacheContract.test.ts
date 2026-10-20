@@ -251,6 +251,20 @@ describe("cache ops parity", () => {
 		expect(cache.listTombstoned()).toEqual([]);
 	});
 
+	it("lists only conflicted rows in id order", () => {
+		const { cache, seed } = seeded();
+		const a = seed("srv-a", {});
+		seed("srv-b", {});
+		const c = seed("srv-c", {});
+		cache.markConflicted("srv-c");
+		cache.markConflicted("srv-a");
+
+		expect(cache.listConflicted()).toEqual([
+			{ id: a, server_id: "srv-a", name: "T" },
+			{ id: c, server_id: "srv-c", name: "T" },
+		]);
+	});
+
 	it("skips pulls for conflicted and tombstoned rows", () => {
 		const { cache, seed } = seeded();
 		seed("srv-k", {});

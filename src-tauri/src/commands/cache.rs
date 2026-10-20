@@ -400,6 +400,28 @@ pub fn list_synced(conn: &Connection) -> AppResult<Vec<String>> {
     Ok(rows.collect::<Result<Vec<String>, _>>()?)
 }
 
+/// Conflicted rows for the conflict dialog: local id, server id and name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ConflictedTemplate {
+    pub id: i64,
+    pub server_id: Option<String>,
+    pub name: String,
+}
+
+pub fn list_conflicted(conn: &Connection) -> AppResult<Vec<ConflictedTemplate>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, server_id, name FROM templates WHERE sync_state = 'conflict' ORDER BY id",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(ConflictedTemplate {
+            id: r.get(0)?,
+            server_id: r.get(1)?,
+            name: r.get(2)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
 /// Forgets a local copy outright: hard-deletes the row (versions cascade).
 /// Used after the server confirms a delete and when a reset pass proves
 /// a synced row is gone. Idempotent.
@@ -660,4 +682,12 @@ pub fn cache_forget_template(db: State<'_, DbState>, server_id: String) -> AppRe
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
     forget_template(guard.connection(), &server_id)
+}
+
+#[tauri::command]
+pub fn cache_list_conflicted(db: State<'_, DbState>) -> AppResult<Vec<ConflictedTemplate>> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    list_conflicted(guard.connection())
 }
