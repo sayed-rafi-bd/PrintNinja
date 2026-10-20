@@ -30,6 +30,7 @@ import { toast } from "sonner";
 import { usePrintStore } from "@/lib/store/printStore";
 import { DEFAULT_MOCK_DATA } from "@/lib/templates/defaultTemplate";
 import { ensureStarterTemplates, type TemplateRow } from "@/lib/templates/seedTemplates";
+import { compileTemplateCss } from "@/lib/templates/compileTemplateCss";
 interface PrintResponse {
   success: boolean;
   job_id: string;
@@ -108,8 +109,33 @@ export function PrintPage() {
         const latest = versions?.[0];
         if (!latest) { if (!cancelled) { setPreviewHtml(""); setPreviewError("This template has no versions yet. Open it in Designer and save it."); } return; }
         const { renderTemplate } = await import("@/lib/render/renderTemplate");
+
+        // A version saved before per-template compilation existed (or whose
+        // compile failed) has no stored Tailwind CSS. Compile it now so the
+        // preview matches the Designer, and save the result so the actual
+        // print job (which reads the stored stylesheet) is styled too.
+        let compiledCss = latest.compiled_css ?? "";
+        if (!compiledCss.trim()) {
+          const built = await compileTemplateCss(latest.html);
+          compiledCss = built.css;
+          if (built.css.trim() && !cancelled) {
+            invoke("create_version", {
+              req: {
+                template_id: template.id,
+                html: latest.html,
+                css: latest.css,
+                compiled_css: built.css,
+                compiled_key: built.key,
+                label: null,
+                note: "Compiled Tailwind CSS",
+                created_by: "autosave",
+              },
+            }).catch((e) => console.warn("Could not store compiled CSS:", e));
+          }
+        }
+
         if (!cancelled) {
-          setPreviewHtml(renderTemplate(latest.html, latest.css, DEFAULT_MOCK_DATA as any, latest.compiled_css));
+          setPreviewHtml(renderTemplate(latest.html, latest.css, DEFAULT_MOCK_DATA as any, compiledCss));
           setPreviewError("");
         }
       } catch (e) {

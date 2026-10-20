@@ -6,7 +6,7 @@ Silent print for Windows and Android — design HTML templates, fetch JSON data,
 
 ## Features
 
-- **Designer** — HTML/CSS (CodeMirror) + visual canvas, page presets (A4, 80 mm roll, 4×6 label…), zoom, Handlebars helpers (`currency`, `date`, `padLeft`…), `bwip-js` barcodes (14 symbologies → inline SVG), custom fonts, version history with diff/restore, **README** tab (markdown, 64 KiB cap) and **Publish** with a Draft/Published badge and an unpublished-changes strip. Compact view switcher; unpublish asks first and names the template.
+- **Designer** — HTML/CSS (CodeMirror) + live canvas, page presets (A4, 80 mm roll, 4×6 label…), fit-to-width and manual zoom, Handlebars helpers (`currency`, `date`, `padLeft`…), `bwip-js` barcodes (14 symbologies → inline SVG), custom fonts, version history with diff/restore, **README** tab next to HTML and CSS (markdown, 64 KiB cap) and **Publish** with a Draft/Published badge and an unpublished-changes strip. Compact view switcher; unpublish asks first and names the template.
 - **Print** — choose printer, template, data source and copies on the left, one **Print** button (with the reason when it is disabled), live preview on the right. Orientation, fit, margins, page range, grayscale and the test page sit under **Advanced options**. Batch (JSON array or CSV with column mapping), per-printer profiles, clear success/failure banners with Try again.
 - **Templates** — Mine and Saved as tables (status, page size, updated); Community stays a gallery with search and sort. Print and Edit straight from a row. Save, download as a read-only copy, and print offline.
 - **Printers** — grouped Network, USB, Bluetooth and System; test print per row; setup in a side panel (IPP / raw TCP 9100, language, paper, DPI). Status shows only when known.
@@ -36,7 +36,7 @@ Silent print for Windows and Android — design HTML templates, fetch JSON data,
 
 ```
 UI (Designer + README + Templates / Print / PrinterSetup / History) ──invoke()──► Rust core
-  Designer: canvas/visual/code/readme/preview + Publish (remote_id/published_at)        Data fetcher → Handlebars (sanitize + CSP) → Layout (@page) → PDF → Queue (per-printer) → Transport → History
+  Designer: controls accordion + HTML/CSS/README editor + canvas + Publish (remote_id/published_at)        Data fetcher → Handlebars (sanitize + CSP) → Layout (@page) → PDF → Queue (per-printer) → Transport → History
   Templates: Community (search/sort, offline) / Mine (Draft / Published badge) / Saved / Withdrawn badges  Share client ──fetch──► server (`share_service_url` + Bearer)
 REST API ──┐
 Deep link ─┼──► same queue/pipeline (idempotency, copies, redaction)
@@ -55,8 +55,8 @@ Server SQLite file (`server/src/db.rs`, path from `DATABASE_URL`): `users` (`han
 
 ```
 src/                         # React
-  pages/Designer (canvas/visual/code/readme/preview + Publish)  Templates (Community/Mine/Saved)  Print  PrinterSetup  History  Settings (Share)
-  components/ui  Layout  VisualDesigner  ReadmeEditor
+  pages/Designer (controls/editor/canvas + Publish)  Templates (Community/Mine/Saved)  Print  PrinterSetup  History  Settings (Share)
+  components/ui  Layout  designer/{ControlsAccordion,EditorPane,CanvasWorkspace,CanvasPane,…}  ReadmeEditor
   lib/{store,render{renderTemplate,sanitize},templates,share/client,hooks,utils}
 src-tauri/src/
   commands/{print,printer,template{readme, publish info, origin},version,history,batch,font,profile,settings,api}

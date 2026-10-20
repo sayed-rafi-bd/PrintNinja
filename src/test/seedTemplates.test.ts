@@ -21,9 +21,9 @@ describe("ensureStarterTemplates", () => {
         if (cmd === "create_template") {
           return Promise.resolve({
             id: 1,
-            name: "Receipt 120mm",
-            page_w_mm: 120,
-            page_h_mm: 200,
+            name: "Shipping Label 4x6",
+            page_w_mm: 102,
+            page_h_mm: 152,
             orientation: "portrait",
           });
         }
@@ -56,6 +56,12 @@ describe("ensureStarterTemplates", () => {
       expect(req.page_w_mm).toBe(starter.page_w_mm);
       expect(req.page_h_mm).toBe(starter.page_h_mm);
     }
+  });
+
+  it("bundles only the Shipping Label 4x6 starter", () => {
+    expect(STARTER_TEMPLATES.map((t) => t.name)).toEqual(["Shipping Label 4x6"]);
+    expect(STARTER_TEMPLATES[0].page_w_mm).toBe(102);
+    expect(STARTER_TEMPLATES[0].page_h_mm).toBe(152);
   });
 
   it("does not re-seed when templates already exist", async () => {
