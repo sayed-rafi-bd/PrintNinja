@@ -35,6 +35,27 @@ const implemented: Record<string, Handler> = {
 		cache.markPushed(String(args["server_id"] ?? ""), Number(args["revision"] ?? 0));
 		return null;
 	},
+	cache_mark_conflicted: (args) => {
+		cache.markConflicted(String(args["server_id"] ?? ""));
+		return null;
+	},
+	cache_resolve_conflict: (args) => {
+		const resolution = args["resolution"];
+		if (resolution !== "theirs" && resolution !== "mine") {
+			throw new Error(`unknown resolution: ${String(resolution)}`);
+		}
+		cache.resolveConflict(
+			String(args["server_id"] ?? ""),
+			resolution,
+			(args["server_copy"] as Record<string, unknown> | undefined),
+		);
+		return null;
+	},
+	cache_queue_use: (args) => {
+		return cache.queueUse(String(args["server_id"] ?? ""), Number(args["delta"] ?? 0));
+	},
+	cache_list_queued_uses: () => cache.listQueuedUses(),
+	cache_clear_account: () => cache.clearAccount(),
 };
 
 /** Every Rust command without real behavior yet (src-tauri/src/lib.rs).

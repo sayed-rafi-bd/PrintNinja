@@ -204,3 +204,112 @@ fn cache_cases_match_rust_behavior() {
         );
     }
 }
+
+fn seed_synced(conn: &Connection, server_id: &str, revision: i64) {
+    conn.execute(
+        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, readme, summary, server_id, server_revision, base_revision, sync_state, kind)
+         VALUES ('T', 210, 297, 'portrait', '', '', ?1, ?2, ?2, 'synced', 'own')",
+        rusqlite::params![server_id, revision],
+    )
+    .unwrap();
+    let id: i64 = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO template_versions (template_id, version_no, html, css, created_by) VALUES (?1, 1, '<p></p>', '', 'manual')",
+        [id],
+    )
+    .unwrap();
+    let vid: i64 = conn.last_insert_rowid();
+    conn.execute(
+        "UPDATE templates SET current_version_id = ?1 WHERE id = ?2",
+        rusqlite::params![vid, id],
+    )
+    .unwrap();
+}
+
+fn sync_state_of(conn: &Connection, server_id: &str) -> String {
+    conn.query_row(
+        "SELECT sync_state FROM templates WHERE server_id = ?1",
+        [server_id],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
+#[test]
+fn conflict_marks_and_resolves_both_ways() {
+    use printninja_lib::commands::cache::{
+        mark_conflicted, resolve_conflict, ConflictResolution, TemplateDataIn,
+    };
+    let conn = Connection::open_in_memory().unwrap();
+    printninja_lib::db::init(&conn).unwrap();
+    seed_synced(&conn, "srv-c", 5);
+    mark_conflicted(&conn, "srv-c").unwrap();
+    assert_eq!(sync_state_of(&conn, "srv-c"), "conflict");
+
+    // Unknown rows cannot be marked.
+    assert!(mark_conflicted(&conn, "srv-nope").is_err());
+
+    // Only conflicted rows resolve.
+    let data = TemplateDataIn {
+        id: "srv-c".to_string(),
+        name: "C".to_string(),
+        summary: String::new(),
+        page_w_mm: 210.0,
+        page_h_mm: 297.0,
+        body: "<p>server</p>".to_string(),
+        css: String::new(),
+        readme: String::new(),
+        revision: 6,
+        published_at: None,
+        updated_at: "2026-10-20T00:00:00Z".to_string(),
+    };
+    // "mine" puts it back to dirty for the next push.
+    resolve_conflict(&conn, "srv-c", ConflictResolution::Mine, None).unwrap();
+    assert_eq!(sync_state_of(&conn, "srv-c"), "dirty");
+
+    // Back to conflict, then take theirs.
+    mark_conflicted(&conn, "srv-c").unwrap();
+    resolve_conflict(&conn, "srv-c", ConflictResolution::Theirs, Some(&data)).unwrap();
+    let (state, rev, html): (String, i64, String) = conn
+        .query_row(
+            "SELECT t.sync_state, t.server_revision, v.html FROM templates t
+             JOIN template_versions v ON v.id = t.current_version_id
+             WHERE t.server_id = 'srv-c'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(state, "synced");
+    assert_eq!(rev, 6);
+    assert_eq!(html, "<p>server</p>");
+
+    // Non-conflicted rows refuse to resolve.
+    let err = resolve_conflict(&conn, "srv-c", ConflictResolution::Mine, None).unwrap_err();
+    assert!(format!("{err}").contains("not conflicted"));
+}
+
+#[test]
+fn queued_uses_accumulate_drain_and_clear() {
+    use printninja_lib::commands::cache::{clear_account, list_queued_uses, queue_use};
+    let conn = Connection::open_in_memory().unwrap();
+    printninja_lib::db::init(&conn).unwrap();
+    seed_synced(&conn, "srv-q", 1);
+
+    assert_eq!(queue_use(&conn, "srv-q", 3).unwrap(), 3);
+    assert_eq!(queue_use(&conn, "srv-q", 2).unwrap(), 5);
+    assert_eq!(queue_use(&conn, "srv-other", 1).unwrap(), 1);
+    let queued = list_queued_uses(&conn).unwrap();
+    assert_eq!(queued.len(), 2);
+
+    // A successful POST drains by the same amount.
+    assert_eq!(queue_use(&conn, "srv-q", -5).unwrap(), 0);
+    assert_eq!(list_queued_uses(&conn).unwrap().len(), 1);
+
+    // Clearing the account wipes templates and the queue.
+    assert_eq!(clear_account(&conn).unwrap(), 1);
+    assert_eq!(list_queued_uses(&conn).unwrap().len(), 0);
+    let remaining: i64 = conn
+        .query_row("SELECT COUNT(*) FROM templates", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(remaining, 0);
+}

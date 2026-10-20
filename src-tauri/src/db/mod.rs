@@ -351,5 +351,15 @@ pub fn ensure_sync_schema(conn: &Connection) -> rusqlite::Result<()> {
          WHERE kind = 'saved' AND owner_handle IS NULL AND origin_owner IS NOT NULL",
         [],
     )?;
+    // Queued use-counts for the sync engine: the print worker increments
+    // the row, the engine sends POST /use and decrements on success.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS queued_uses (
+            server_template_id TEXT PRIMARY KEY,
+            count INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )",
+        [],
+    )?;
     Ok(())
 }

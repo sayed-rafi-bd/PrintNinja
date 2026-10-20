@@ -60,6 +60,7 @@ export interface ApplyReport {
 export function createFakeCache() {
 	let nextId = 1;
 	const templates = new Map<number, FakeTemplateRow>();
+	const queued = new Map<string, { count: number; updatedAt: string }>();
 	const sync: FakeSyncState = {
 		account_handle: null,
 		server_url: null,
@@ -205,6 +206,80 @@ export function createFakeCache() {
 			row.sync_state = "synced";
 			row.server_revision = revision;
 			row.base_revision = revision;
+		},
+
+		markConflicted(serverId: string): void {
+			const row = findByServerId(serverId);
+			if (!row) {
+				throw new Error(`no cached template with server id ${serverId}`);
+			}
+			row.sync_state = "conflict";
+		},
+
+		resolveConflict(
+			serverId: string,
+			resolution: "theirs" | "mine",
+			serverCopy?: Record<string, unknown>,
+		): void {
+			const row = findByServerId(serverId);
+			if (!row || row.sync_state !== "conflict") {
+				throw new Error(`template ${serverId} is not conflicted`);
+			}
+			if (resolution === "mine") {
+				row.sync_state = "dirty";
+				return;
+			}
+			if (!serverCopy) {
+				throw new Error("resolving to theirs needs the server copy");
+			}
+			// Overwrite with the server copy and mark clean, mirroring the
+			// Rust resolve path (which reuses the upsert logic).
+			row.name = String(serverCopy["name"] ?? row.name);
+			row.summary = typeof serverCopy["summary"] === "string" ? (serverCopy["summary"] as string) : row.summary;
+			row.page_w = Math.round(Number(serverCopy["page_w_mm"] ?? row.page_w));
+			row.page_h = Math.round(Number(serverCopy["page_h_mm"] ?? row.page_h));
+			row.orientation = row.page_w > row.page_h ? "landscape" : "portrait";
+			row.readme = typeof serverCopy["readme"] === "string" ? (serverCopy["readme"] as string) : row.readme;
+			row.published_at = (serverCopy["published_at"] as string | null) ?? null;
+			row.updated_at = String(serverCopy["updated_at"] ?? nowIso());
+			const rev = Number(serverCopy["revision"] ?? row.server_revision ?? 1);
+			row.server_revision = rev;
+			row.base_revision = rev;
+			const html = String(serverCopy["body"] ?? "");
+			const css = String(serverCopy["css"] ?? "");
+			row.versions.push({ version_no: row.versions.reduce((m, v) => Math.max(m, v.version_no), 0) + 1, html, css, created_by: "sync" });
+			pruneVersions(row);
+			row.sync_state = "synced";
+		},
+
+		queueUse(serverId: string, delta: number): number {
+			const total = (queued.get(serverId)?.count ?? 0) + delta;
+			if (total <= 0) {
+				queued.delete(serverId);
+				return 0;
+			}
+			queued.set(serverId, { count: total, updatedAt: nowIso() });
+			return total;
+		},
+
+		listQueuedUses(): { server_template_id: string; count: number }[] {
+			return [...queued.entries()]
+				.sort(([a], [b]) => (a < b ? -1 : 1))
+				.map(([server_template_id, v]) => ({ server_template_id, count: v.count }));
+		},
+
+		clearAccount(): number {
+			const count = templates.size;
+			templates.clear();
+			for (const key of [...queued.keys()]) {
+				queued.delete(key);
+			}
+			sync.account_handle = null;
+			sync.server_url = null;
+			sync.cursor = "";
+			sync.last_pull_at = null;
+			sync.last_error = null;
+			return count;
 		},
 	};
 }

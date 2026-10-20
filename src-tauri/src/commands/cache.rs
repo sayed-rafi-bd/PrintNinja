@@ -369,6 +369,144 @@ pub fn mark_pushed(conn: &Connection, server_id: &str, revision: i64) -> AppResu
     Ok(())
 }
 
+/// Marks a row conflicted after the server refused its push with 409.
+/// The UI dialog resolves it; pushing again without resolving is a
+/// protocol error, so the row stays out of the dirty list meanwhile.
+pub fn mark_conflicted(conn: &Connection, server_id: &str) -> AppResult<()> {
+    let changed = conn.execute(
+        "UPDATE templates SET sync_state = 'conflict' WHERE server_id = ?1",
+        [server_id],
+    )?;
+    if changed == 0 {
+        return Err(AppError::NotFound(format!(
+            "no cached template with server id {server_id}"
+        )));
+    }
+    Ok(())
+}
+
+/// How a conflicted row leaves the conflict state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictResolution {
+    /// Discard the local edits, apply the given server copy, mark synced.
+    Theirs,
+    /// Keep the local content: back to dirty so the next push retries it.
+    Mine,
+}
+
+/// Resolves a conflicted row. `Theirs` overwrites the row with a server
+/// copy the caller already fetched and marks it synced; `Mine` puts the
+/// row back to dirty so the next push retries it. Only conflicted rows
+/// can be resolved — anything else is a caller bug.
+pub fn resolve_conflict(
+    conn: &Connection,
+    server_id: &str,
+    resolution: ConflictResolution,
+    server_copy: Option<&TemplateDataIn>,
+) -> AppResult<()> {
+    let state: Option<String> = conn
+        .query_row(
+            "SELECT sync_state FROM templates WHERE server_id = ?1",
+            [server_id],
+            |r| r.get(0),
+        )
+        .ok();
+    if state.as_deref() != Some("conflict") {
+        return Err(AppError::Validation(format!(
+            "template {server_id} is not conflicted"
+        )));
+    }
+    match resolution {
+        ConflictResolution::Mine => {
+            conn.execute(
+                "UPDATE templates SET sync_state = 'dirty' WHERE server_id = ?1",
+                [server_id],
+            )?;
+            Ok(())
+        }
+        ConflictResolution::Theirs => {
+            let data = server_copy.ok_or_else(|| {
+                AppError::Validation("resolving to theirs needs the server copy".to_string())
+            })?;
+            let mut report = ApplyReport {
+                applied_upserts: 0,
+                applied_deletes: 0,
+                skipped_dirty: 0,
+            };
+            let tx = conn.unchecked_transaction()?;
+            // Bypass the dirty check: resolving *is* the user's decision to
+            // drop the local edits, so the row is synced first.
+            tx.execute(
+                "UPDATE templates SET sync_state = 'synced' WHERE server_id = ?1",
+                [server_id],
+            )?;
+            apply_upsert(&tx, data, &mut report)?;
+            tx.commit()?;
+            Ok(())
+        }
+    }
+}
+
+/// Queues printed copies for the sync engine: it adds `delta` to the
+/// row's count (creating it), and a zero or negative total removes the
+/// row. Returns the new queued total.
+pub fn queue_use(conn: &Connection, server_id: &str, delta: i64) -> AppResult<i64> {
+    let current: Option<i64> = conn
+        .query_row(
+            "SELECT count FROM queued_uses WHERE server_template_id = ?1",
+            [server_id],
+            |r| r.get(0),
+        )
+        .ok();
+    let total = current.unwrap_or(0) + delta;
+    if total <= 0 {
+        conn.execute(
+            "DELETE FROM queued_uses WHERE server_template_id = ?1",
+            [server_id],
+        )?;
+        return Ok(0);
+    }
+    conn.execute(
+        "INSERT INTO queued_uses (server_template_id, count, updated_at)
+         VALUES (?1, ?2, datetime('now'))
+         ON CONFLICT(server_template_id) DO UPDATE SET count = ?2, updated_at = datetime('now')",
+        rusqlite::params![server_id, total],
+    )?;
+    Ok(total)
+}
+
+/// Everything the engine still owes the server, oldest first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct QueuedUse {
+    pub server_template_id: String,
+    pub count: i64,
+}
+
+pub fn list_queued_uses(conn: &Connection) -> AppResult<Vec<QueuedUse>> {
+    let mut stmt = conn.prepare(
+        "SELECT server_template_id, count FROM queued_uses ORDER BY updated_at, server_template_id",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(QueuedUse {
+            server_template_id: r.get(0)?,
+            count: r.get(1)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// Wipes the account cache: every template and version, the sync state
+/// and the queued uses. Device-local tables (printers, jobs, settings)
+/// are untouched. The caller warns first when dirty rows would be lost.
+pub fn clear_account(conn: &Connection) -> AppResult<usize> {
+    let templates: i64 = conn.query_row("SELECT COUNT(*) FROM templates", [], |r| r.get(0))?;
+    conn.execute_batch(
+        "DELETE FROM template_versions; DELETE FROM templates; DELETE FROM sync_state; DELETE FROM queued_uses;",
+    )?;
+    Ok(templates as usize)
+}
+
 // ── Tauri wrappers: lock, delegate, no logic ─────────────────────────
 
 #[tauri::command]
@@ -409,4 +547,54 @@ pub fn cache_mark_pushed(
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
     mark_pushed(guard.connection(), &server_id, revision)
+}
+
+#[tauri::command]
+pub fn cache_mark_conflicted(db: State<'_, DbState>, server_id: String) -> AppResult<()> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    mark_conflicted(guard.connection(), &server_id)
+}
+
+#[tauri::command]
+pub fn cache_resolve_conflict(
+    db: State<'_, DbState>,
+    server_id: String,
+    resolution: ConflictResolution,
+    server_copy: Option<TemplateDataIn>,
+) -> AppResult<()> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    resolve_conflict(
+        guard.connection(),
+        &server_id,
+        resolution,
+        server_copy.as_ref(),
+    )
+}
+
+#[tauri::command]
+pub fn cache_queue_use(db: State<'_, DbState>, server_id: String, delta: i64) -> AppResult<i64> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    queue_use(guard.connection(), &server_id, delta)
+}
+
+#[tauri::command]
+pub fn cache_list_queued_uses(db: State<'_, DbState>) -> AppResult<Vec<QueuedUse>> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    list_queued_uses(guard.connection())
+}
+
+#[tauri::command]
+pub fn cache_clear_account(db: State<'_, DbState>) -> AppResult<usize> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    clear_account(guard.connection())
 }
