@@ -78,6 +78,9 @@ export interface TemplateWrite {
 	body: string;
 	css: string;
 	readme: string;
+	/** Import-only: preserved file timestamps. Absent means now. */
+	createdAt?: Date;
+	updatedAt?: Date;
 }
 
 export interface VersionWrite {

@@ -89,6 +89,7 @@ Prerequisites: Node 22, Rust stable, pnpm 10; for Android: Java 17, Android SDK/
 | `pnpm build` | `tsc -b && vite build` |
 | `pnpm lint` / `pnpm format` | Biome (app `src/`, `server/src`, `server/test/`, `e2e/`) |
 | `pnpm test` | Vitest (jsdom) |
+| `pnpm gen:api` | regenerate `src/lib/api/schema.d.ts` from the committed OpenAPI document (CI fails on drift) |
 | `pnpm e2e` | Playwright smoke (app in Chromium vs the harness stack) |
 | `pnpm --filter server dev` | v2 service with reload (`tsx`, needs `DATABASE_URL` — see below) |
 | `pnpm --filter server test` / `test:unit` / `test:int` | unit + integration / unit only / integration only (Testcontainers PostgreSQL) |

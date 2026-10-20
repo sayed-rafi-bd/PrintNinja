@@ -11,7 +11,8 @@
       "server/test/**/*.ts",
       "e2e/**/*.ts",
       "!server/src/infra/prisma/generated/**",
-      "!server/dist/**"
+      "!server/dist/**",
+      "!src/lib/api/schema.d.ts"
     ]
   },
   "formatter": { "enabled": false },

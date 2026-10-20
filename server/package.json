@@ -15,7 +15,8 @@
     "openapi:generate": "tsx scripts/openapi-generate.ts",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
-    "db:validate": "prisma validate"
+    "db:validate": "prisma validate",
+    "db:import": "tsx scripts/import-v1.ts"
   },
   "dependencies": {
     "@fastify/cors": "11.3.1",

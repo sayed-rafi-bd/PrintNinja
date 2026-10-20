@@ -55,6 +55,8 @@ export function createTemplateRepository(db: DbClient): TemplateRepository {
 							body: input.body,
 							css: input.css,
 							readme: input.readme,
+							createdAt: input.createdAt ?? new Date(),
+							updatedAt: input.updatedAt ?? new Date(),
 							changeSeq: seq,
 						},
 						include: { owner: { select: { handle: true } }, _count: { select: { versions: true } } },

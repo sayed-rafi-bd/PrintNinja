@@ -43,6 +43,13 @@ jobs:
           if-no-files-found: error
           retention-days: 1
       - run: pnpm test
+      # The app's typed API client is generated from the committed
+      # OpenAPI document; a stale schema.d.ts fails the job, and the
+      # build above already type-checked the app against the fresh one.
+      - name: Client type drift check
+        run: |
+          pnpm gen:api
+          git diff --exit-code -- src/lib/api/schema.d.ts
 
   rust-check:
     runs-on: ubuntu-latest
