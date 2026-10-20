@@ -5,6 +5,12 @@ All notable changes to PrintNinja are documented here. The format is based on Ke
 ## [Unreleased] — Online-only server migration
 
 ### Added
+- **Designer polish (layout plan, phase 3).** On desktop: a layout toggle in the header (side by side, stacked, canvas only); the editor/canvas split and the open accordion sections are remembered between launches; clicking a helper such as `{{currency}}` inserts it at the editor cursor; below 1440 px the controls column shrinks to a 48 px icon rail (click an icon to open that section, or use Expand/Collapse); and a red banner on the canvas says what is wrong while the template is half-typed (an unclosed `{{#each}}`, say).
+
+### Changed
+- **The only bundled starter template is now Shipping Label 4x6** (was Receipt 120mm). It is what a fresh install seeds and what the Designer falls back to. Existing installs keep the templates they already have.
+
+### Added
 - **Per-template Tailwind CSS.** Each template version now carries a stylesheet compiled from the classes it actually uses, so any Tailwind class works, including arbitrary values such as `w-[37mm]`, `bg-rose-500` and `grid-cols-5`. Before, only the Designer's fixed palette had rules and anything else silently did nothing. Compilation runs in the app (Tailwind v4 `compile()`, installed as the `tailwind4` alias) when a template is saved, seeded, refreshed or downloaded; the result is stored as `compiled_css`/`compiled_key` on `template_versions`, and previews and the Rust print path inline the same CSS.
 - To style from data, write each full class in every branch (`{{#if urgent}}bg-red-600{{else}}bg-green-600{{/if}}`) or use a CSS variable. Class names built at render time (`bg-{{color}}-500`) cannot be compiled, and the Designer warns about them.
 - **Save to server** (migration phase 1). The Designer and every Templates row push the local copy to the server, HTML and CSS together. A first Save stores the template private; Publish makes it visible in Community as before. `remote_id` comes back and links the two copies.
@@ -16,9 +22,13 @@ All notable changes to PrintNinja are documented here. The format is based on Ke
 - Sign-in gate (migration phase 2): the app opens on a sign-in and register screen until the server accepts a session. The screen includes the server address, so a new PC can be set up without visiting Settings first.
 
 ### Removed
+- **Designer: Visual tab, Preview tab and Properties card.** The Visual tab (GrapesJS) rewrote templates through the browser's HTML parser, which moves Handlebars loops out of tables, and it loaded its code from `unpkg.com` at run time. The Preview tab duplicated Canvas but ignored the chosen sample data and zoom. Properties repeated Page Setup and the zoom buttons. Saved templates are unaffected.
 - The shared, safelisted print bundle: `tailwind.templates.config.ts`, `scripts/build-template-css.mjs`, `src/styles/templates.src.css`, `src/lib/templates/templates.generated.ts`, `src-tauri/assets/template-print.css`, and the `build:templates:css` / `prebuild` scripts. Only the small base layer (reset, page-break helpers, barcode) remains.
 
 ### Changed
+- **Designer: new desktop workspace** (phase 2 of `docs/DESIGNER_LAYOUT_PLAN.md`). From `lg` (1024 px) up, the controls accordion (Templates, Page Setup, Sample data, Versions, Helpers; several open at once, only Page Setup open at first), the editor (HTML, CSS and README tabs) and the canvas sit side by side, with a draggable split between editor and canvas. The page no longer scrolls; each pane does. Typing in either editor updates the canvas without switching tabs. Below `lg` the tabs remain (Canvas, Code, README, Sample data), with Templates, Page Setup and Versions in a collapsed accordion above them. The old Variables tab is now **Sample data**, and Quick Helpers moved into the accordion.
+- Designer: the canvas toolbar now holds the zoom controls, with a new **Fit** option (the default) that sizes the page to the width available, never above 100%. Zoom now scales the page rather than resizing it, so a zoomed page no longer reflows its content.
+- Designer: the sync bar (Draft/Published, Save, Refresh, Publish) now sits under the page title instead of above the canvas, and **Save & Preview** returns to the Canvas tab. The page is split into `ControlsAccordion`, `EditorPane` and `CanvasPane` under `src/components/designer/` (`DesignerSidebar` is now `ControlsAccordion`). First step of `docs/DESIGNER_LAYOUT_PLAN.md`.
 - Template CSS is stored on the server and returned with the HTML. Until now a published template lost its CSS on the way to another PC.
 - The Designer's publish strip is now a sync bar: Draft or Published, then **Save to server**, **Refresh from server** and **Publish to Community** / **Unpublish**. Each button says while it is working.
 - **Saved (community) copies are read-only.** They show Print, Refresh and Remove; there is no Edit, Save or Publish, and the Designer explains that they cannot be changed. Saving a copy now brings its CSS and README across too.

@@ -216,11 +216,11 @@ describe("starter templates", () => {
     }
   });
 
-  it("receipt resolves the mock order data", () => {
-    const receipt = STARTER_TEMPLATES[0];
+  it("the label resolves the mock order data", () => {
+    const label = STARTER_TEMPLATES[0];
     const out = renderTemplate(
-      receipt.html,
-      receipt.css,
+      label.html,
+      label.css,
       DEFAULT_MOCK_DATA as any,
     );
     expect(out).toContain(DEFAULT_MOCK_DATA.store.name);

@@ -1,6 +1,6 @@
 # PrintNinja: Designer Layout Plan
 
-Branch: `develop` · Status: Final, ready to implement (not started) · Date: 2026-10-20
+Branch: `develop` · Status: Final · Phases 1–3 done, phase 4 not started · Date: 2026-10-20
 
 Goal: make the Designer a code-first workspace where you can type and watch the page change at the same time. Controls move into a left accordion, the editor and the canvas sit side by side, and the unused Visual tab is removed. Mobile keeps today's single-column layout.
 
@@ -95,7 +95,7 @@ Effort figures are rough estimates.
 
 Commit the existing uncommitted work (single starter template; mobile fixes) so this refactor is a clean diff. Committing needs a git author identity.
 
-### Phase 1: Prep and removal (about ½ day)
+### Phase 1: Prep and removal (about ½ day) — done
 
 - Delete `VisualDesigner.tsx`, the Visual tab and its import.
 - Delete the Preview tab and the Properties card.
@@ -103,7 +103,15 @@ Commit the existing uncommitted work (single starter template; mobile fixes) so 
 - Update the README (lines mentioning the visual canvas and the five tabs) and `docs/UI_GUIDE.md` (the `/` and `/template/:id` row).
 - Done when: the Designer looks almost the same as now minus the removed items, and `tsc`, Biome and all tests pass.
 
-### Phase 2: New desktop shell (about 1 day)
+What Phase 1 did differently from the list above:
+
+- `ControlsAccordion` is `DesignerSidebar` renamed. It is still plain cards; the Radix accordion arrives in Phase 2.
+- `EditorPane` covers the Code tab (HTML and CSS) only. README stays a separate tab until Phase 2 folds it into the editor pane.
+- `TemplateSyncBar` moved out of the canvas column to a full-width row directly under the title. Its notices ("not on the server yet", "private copy") need the width, so putting it inline next to the title is left to the Phase 2 shell.
+- Quick Helpers and the Variables tab are untouched; they move in Phase 2.
+- Not in the original list: the **Save & Preview** button switched to the Preview tab, so it now switches to Canvas. The `designer.preview` i18n key and the unused `canvasRef` were removed with the tab.
+
+### Phase 2: New desktop shell (about 1 day) — done
 
 - Add `@radix-ui/react-accordion` and a `src/components/ui/accordion.tsx` wrapper, plus a `resizable.tsx` wrapper around `react-resizable-panels`.
 - Build the three-region workspace at `lg` and up: controls accordion, editor pane (HTML | CSS | README), canvas pane.
@@ -111,7 +119,21 @@ Commit the existing uncommitted work (single starter template; mobile fixes) so 
 - Below `lg`, fall back to the existing tabs, with the accordion collapsed by default.
 - Done when: typing in the HTML or CSS editor visibly updates the canvas without changing tabs, on desktop and on a phone-sized viewport.
 
-### Phase 3: Polish (about ½ day)
+What Phase 2 did differently from the list above:
+
+- **Zoom now scales the page.** The old canvas resized the iframe, so a smaller zoom made the template reflow into a narrower page instead of shrinking. That would have made Fit show a layout the printer never produces. The page is now laid out at its true size (mm × 3.7795) and scaled with a CSS transform. Fit is capped at 100%: a narrow roll is not enlarged. The zoom picker offers Fit, 50% and 100%; − and + step through 25–300%.
+- **Zoom state lives in `CanvasWorkspace`** (new: toolbar plus `CanvasPane`), not in `Designer.tsx`. On a phone it resets to Fit when you leave the Canvas tab.
+- **Sample data and Helpers** moved into the accordion on desktop. On a phone Sample data stays a tab (renamed from Variables, i18n key `designer.sampleData`) and the helpers sit inside it, so the collapsed accordion holds only Templates, Page Setup and Versions as section 3 says.
+- **`EditorPane` is now the desktop pane** (HTML | CSS | README tabs, both editors stay mounted so cursor and undo history survive a tab switch). The stacked HTML/CSS cards the phone's Code tab uses are `CodeEditors` in the same file. New small components: `ReadmePanel`, `SampleDataPanel`, `HelpersPanel`, `DesignerActions`.
+- **`Layout.tsx` knows the Designer routes** (`/` and `/template/:id`): at `lg` and up it stops scrolling `main` and lets the page fill the height. Other pages are unchanged.
+- **The sync bar stays a full-width row under the title.** Its notices need the width, so inline placement next to the title is still open.
+- **Barcode, Font and Save Version** sit under the editor on desktop. **Save & Preview** is gone there, since the canvas is always visible; it stays on a phone.
+- Class-name warnings show under the editor tabs on desktop, and only above the Canvas and Code tabs on a phone (they used to show above Sample data too).
+- Not done, because they are Phase 3: remembering pane sizes and open sections, the layout toggle, the icon rail, click-to-insert, the error banner.
+- Accordion headers render as `<h2>`, not Radix's default `<h3>`, to keep heading order under the page `<h1>` (the existing axe test caught this).
+- Checked so far by unit tests only (jsdom): typing in the HTML or CSS editor updates the canvas without a tab change, on desktop. Real-browser checks of fill-height, pane sizing and Fit are still to do in Phase 4.
+
+### Phase 3: Polish (about ½ day) — done
 
 - Layout toggle (side by side, stacked, canvas only).
 - Remember pane sizes and open accordion sections.
@@ -119,7 +141,19 @@ Commit the existing uncommitted work (single starter template; mobile fixes) so 
 - Collapse the controls column to an icon rail below about 1440 px.
 - Mid-typing error banner on the canvas.
 
+What Phase 3 did, and where it differs from the list above:
+
+- **Layout toggle** (`LayoutToggle`) sits in the page header, desktop only. The choice is stored in localStorage (`printninja.designer.layout`). Stacked puts the editor above the canvas. In canvas-only the editor is unmounted, so its undo history is lost on the way back; the text itself is kept in page state. Barcode, Font and Save Version live under the editor, so they are hidden in canvas-only (Save version is still in the Versions section).
+- **Remembered sizes and sections.** The split uses `react-resizable-panels`' `autoSaveId`, one per direction, so a side-by-side size does not leak into stacked. The accordion is now controlled by the page (`openSections`, stored under `printninja.designer.openSections`); default is still Page Setup only. A phone keeps the uncontrolled, collapsed accordion. Persistence goes through the new `usePersistentState` hook, which ignores stored values that fail validation.
+- **Click-to-insert.** The correction to section 4: helpers were not copied to the clipboard before; they were plain badges. They are now buttons that insert `{{name }}` at the cursor, with the cursor left before the closing braces so the argument can be typed straight away. Insertion goes through `EditorPane`'s `insertAtCursor` handle and switches to the HTML tab first. In canvas-only it brings the editor back and inserts once CodeMirror has created its view (the insert waits for that). On a phone the helpers stay a reference list, since the editor is not on screen in the Sample data tab.
+- **Icon rail** (`ControlsRail`) replaces the 280 px column below 1440 px (`WIDE_QUERY`). One icon per section opens the column with that section open; Expand and Collapse buttons toggle it by hand. Crossing 1440 px in either direction resets it to the automatic state. Whether it is expanded is not remembered, since it follows the window width.
+- **Error banner.** `getTemplateError` (in `renderTemplate.ts`) compiles and renders the template and returns one line (the first and last lines of Handlebars' message), or null. `CanvasWorkspace` shows it as a `role="alert"` bar above the page. The page itself still shows the raw source as `renderTemplate` always did, so printing is unchanged. Closes the "not yet verified" item in section 4.
+- **Starter template.** The single bundled starter is now Shipping Label 4x6 (it was Receipt 120mm). Existing installs keep what they have.
+- Checked by unit tests only (jsdom). Real-browser checks of the rail breakpoint, split sizes and stacked layout are Phase 4.
+
 ### Phase 4: Verify
+
+Progress: the `designer.test.tsx` item is done (component-level tests for the accordion, the editor tabs and the removed tabs and Properties section being absent; page-level checks are in `designerPage.test.tsx`). Screenshots and the real-browser checks are not done.
 
 - Update `src/test/designer.test.tsx` (139 lines; it does not reference tab names, so little should change). Add tests for the accordion, the editor tabs, and the removed tabs being absent.
 - Capture screenshots at 1920, 1440, 1366 and 390 px using the headless-browser approach from the mobile check. Confirm no horizontal overflow and tap targets of at least 44 px on touch.
