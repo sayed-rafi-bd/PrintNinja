@@ -5,11 +5,11 @@ name: printninja
 
 services:
   db:
-    image: postgres:16
+    image: postgres:16-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: printninja
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (see env.example)}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: printninja
     volumes:
       # Deliberately NOT the legacy volume: printninja_printninja-data
@@ -33,7 +33,7 @@ services:
     environment:
       # Same variable name as the legacy service, different meaning:
       # the v2 service wants a PostgreSQL URL, not a SQLite path.
-      DATABASE_URL: postgresql://printninja:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (see env.example)}@db:5432/printninja
+      DATABASE_URL: postgresql://printninja:${POSTGRES_PASSWORD}@db:5432/printninja
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:1420}
       HOST: 0.0.0.0
       PORT: 3001
