@@ -1,4 +1,5 @@
 import { getSetting, setSetting } from "./store.js";
+import { createFakeCache, type SyncChangeIn } from "./cache.js";
 
 // In-memory implementation of the IPC commands. Phase 1 implements the
 // commands the sign-in and shell screens need; every other command the
@@ -6,8 +7,14 @@ import { getSetting, setSetting } from "./store.js";
 // null) so the agent contract test pins the full surface and drift is
 // visible. Real behavior lands here with the screen that calls it,
 // never ahead of it — the F-series specs prove each phase's behavior.
+//
+// The sync cache is the exception: one module holds the whole behavior
+// so the shared cache_cases.json runs identically here and in Rust.
 
 type Handler = (args: Record<string, unknown>) => unknown;
+
+// One cache per browser context (module scope = the injected page).
+const cache = createFakeCache();
 
 const implemented: Record<string, Handler> = {
 	get_setting: (args) => getSetting(String(args.key ?? "")),
@@ -17,6 +24,17 @@ const implemented: Record<string, Handler> = {
 		return null;
 	},
 	ping: () => null,
+	cache_apply_changes: (args) =>
+		cache.applyChanges(
+			(args["changes"] as SyncChangeIn[] | undefined) ?? [],
+			String(args["new_cursor"] ?? ""),
+		),
+	cache_get_sync_state: () => cache.getSyncState(),
+	cache_list_dirty: () => cache.listDirty(),
+	cache_mark_pushed: (args) => {
+		cache.markPushed(String(args["server_id"] ?? ""), Number(args["revision"] ?? 0));
+		return null;
+	},
 };
 
 /** Every Rust command without real behavior yet (src-tauri/src/lib.rs).
@@ -44,12 +62,6 @@ const acknowledgedStubs: string[] = [
 	"delete_job",
 	"get_trusted_sources",
 	"set_trusted_sources",
-	// Phase 3 cache commands: acknowledged so the agent contract holds;
-	// real in-memory behavior lands with the fake-agent parity work.
-	"cache_apply_changes",
-	"cache_get_sync_state",
-	"cache_list_dirty",
-	"cache_mark_pushed",
 	"print_html",
 	"enumerate_system_printers",
 	"spike_test_print",
