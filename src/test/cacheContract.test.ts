@@ -237,4 +237,46 @@ describe("cache ops parity", () => {
 		expect(cache._store.templates.size).toBe(0);
 		expect(cache.getSyncState()).toMatchObject({ cursor: "", account_handle: null });
 	});
+
+	it("lists tombstoned/synced rows and forgets tombstones", () => {
+		const { cache, seed } = seeded();
+		seed("srv-keep", {});
+		seed("srv-gone", { sync_state: "deleted_pending" });
+
+		expect([...cache.listTombstoned()].sort()).toEqual(["srv-gone"]);
+		expect(cache.listSynced()).toEqual(["srv-keep"]);
+
+		expect(cache.forgetTemplate("srv-gone")).toBe(true);
+		expect(cache.forgetTemplate("srv-gone")).toBe(false);
+		expect(cache.listTombstoned()).toEqual([]);
+	});
+
+	it("skips pulls for conflicted and tombstoned rows", () => {
+		const { cache, seed } = seeded();
+		seed("srv-k", {});
+		for (const state of ["conflict", "deleted_pending"] as const) {
+			cache._store.templates.get(1)!.sync_state = state;
+			const report = cache.applyChanges(
+				[
+					{
+						seq: 1,
+						entity: "template",
+						op: "upsert",
+						data: {
+							id: "srv-k",
+							name: "K",
+							page_w_mm: 210,
+							page_h_mm: 297,
+							body: "<p>x</p>",
+							revision: 2,
+							updated_at: "2026-10-20T00:00:00Z",
+						},
+					},
+				],
+				"MQ==",
+			);
+			expect(report, `state ${state}`).toEqual({ applied_upserts: 0, applied_deletes: 0, skipped_dirty: 1 });
+			expect(cache._store.templates.get(1)?.sync_state).toBe(state);
+		}
+	});
 });

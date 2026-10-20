@@ -56,6 +56,11 @@ const implemented: Record<string, Handler> = {
 	},
 	cache_list_queued_uses: () => cache.listQueuedUses(),
 	cache_clear_account: () => cache.clearAccount(),
+	cache_list_tombstoned: () => cache.listTombstoned(),
+	cache_list_synced: () => cache.listSynced(),
+	cache_forget_template: (args) => {
+		return cache.forgetTemplate(String(args["server_id"] ?? ""));
+	},
 };
 
 /** Every Rust command without real behavior yet (src-tauri/src/lib.rs).

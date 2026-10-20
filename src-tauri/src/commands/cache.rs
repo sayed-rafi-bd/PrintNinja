@@ -58,9 +58,10 @@ pub struct ApplyReport {
 
 /// Applies one sync page atomically: upserts, deletions and the new
 /// cursor commit together, so a crash in the middle repeats the page
-/// instead of skipping it. Dirty rows survive untouched (a push that was
-/// applied but whose response was lost converges through the server's
-/// replay); deletes of dirty rows are skipped for the same reason.
+/// instead of skipping it. Only synced rows take server state — dirty
+/// rows keep local edits (a push that was applied but whose response was
+/// lost converges through the server's replay), conflicted rows wait for
+/// the user's decision, and tombstones wait for the server's confirmation.
 /// Unknown entities and ops are rejected, never silently skipped.
 pub fn apply_changes(
     conn: &Connection,
@@ -126,8 +127,11 @@ fn apply_upsert(
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .ok();
+    // Only synced rows take server state: dirty rows keep local edits,
+    // conflicted rows wait for the user's decision, and tombstones wait
+    // for the server's confirmation. All three count as skipped.
     match existing {
-        Some((_, state)) if state == "dirty" => {
+        Some((_, state)) if state != "synced" => {
             report.skipped_dirty += 1;
             Ok(())
         }
@@ -241,8 +245,10 @@ fn apply_delete(
     match existing {
         // Already gone (or never arrived): deletes are idempotent.
         None => Ok(()),
-        // A dirty row survives: pushing it later recreates the server copy.
-        Some(_) if local_is_dirty(tx, id)? => {
+        // Non-synced rows survive: dirty ones can be pushed, conflicted
+        // ones wait for the user, tombstones wait for the server.
+        // Pushing a recreated local copy is how a deleted row returns.
+        Some(_) if !local_is_synced(tx, id)? => {
             report.skipped_dirty += 1;
             Ok(())
         }
@@ -254,13 +260,13 @@ fn apply_delete(
     }
 }
 
-fn local_is_dirty(tx: &rusqlite::Transaction, server_id: &str) -> rusqlite::Result<bool> {
+fn local_is_synced(tx: &rusqlite::Transaction, server_id: &str) -> rusqlite::Result<bool> {
     let state: String = tx.query_row(
         "SELECT sync_state FROM templates WHERE server_id = ?1",
         [server_id],
         |r| r.get(0),
     )?;
-    Ok(state == "dirty")
+    Ok(state == "synced")
 }
 
 /// The local versions table is a read cache: keep the newest 20 per
@@ -367,6 +373,30 @@ pub fn mark_pushed(conn: &Connection, server_id: &str, revision: i64) -> AppResu
         )));
     }
     Ok(())
+}
+
+/// Tombstoned rows waiting for the server to confirm their deletion.
+pub fn list_tombstoned(conn: &Connection) -> AppResult<Vec<String>> {
+    let mut stmt =
+        conn.prepare("SELECT server_id FROM templates WHERE sync_state = 'deleted_pending'")?;
+    let rows = stmt.query_map([], |r| r.get(0))?;
+    Ok(rows.collect::<Result<Vec<String>, _>>()?)
+}
+
+/// Synced rows, for the reset pass: the engine drops every synced row
+/// the full pass did not contain.
+pub fn list_synced(conn: &Connection) -> AppResult<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT server_id FROM templates WHERE sync_state = 'synced'")?;
+    let rows = stmt.query_map([], |r| r.get(0))?;
+    Ok(rows.collect::<Result<Vec<String>, _>>()?)
+}
+
+/// Forgets a local copy outright: hard-deletes the row (versions cascade).
+/// Used after the server confirms a delete and when a reset pass proves
+/// a synced row is gone. Idempotent.
+pub fn forget_template(conn: &Connection, server_id: &str) -> AppResult<bool> {
+    let changed = conn.execute("DELETE FROM templates WHERE server_id = ?1", [server_id])?;
+    Ok(changed > 0)
 }
 
 /// Marks a row conflicted after the server refused its push with 409.
@@ -597,4 +627,28 @@ pub fn cache_clear_account(db: State<'_, DbState>) -> AppResult<usize> {
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
     clear_account(guard.connection())
+}
+
+#[tauri::command]
+pub fn cache_list_tombstoned(db: State<'_, DbState>) -> AppResult<Vec<String>> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    list_tombstoned(guard.connection())
+}
+
+#[tauri::command]
+pub fn cache_list_synced(db: State<'_, DbState>) -> AppResult<Vec<String>> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    list_synced(guard.connection())
+}
+
+#[tauri::command]
+pub fn cache_forget_template(db: State<'_, DbState>, server_id: String) -> AppResult<bool> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    forget_template(guard.connection(), &server_id)
 }

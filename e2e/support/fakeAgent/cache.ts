@@ -106,7 +106,9 @@ export function createFakeCache() {
 	function applyUpsert(data: Record<string, unknown>, report: ApplyReport): void {
 		const serverId = data["id"] as string;
 		const existing = findByServerId(serverId);
-		if (existing && existing.sync_state === "dirty") {
+		// Mirror Rust: only synced rows take server state. Dirty keeps local
+		// edits, conflict waits for the user, tombstone waits for confirm.
+		if (existing && existing.sync_state !== "synced") {
 			report.skipped_dirty += 1;
 			return;
 		}
@@ -162,7 +164,7 @@ export function createFakeCache() {
 		if (!existing) {
 			return;
 		}
-		if (existing.sync_state === "dirty") {
+		if (existing.sync_state !== "synced") {
 			report.skipped_dirty += 1;
 			return;
 		}
@@ -216,11 +218,7 @@ export function createFakeCache() {
 			row.sync_state = "conflict";
 		},
 
-		resolveConflict(
-			serverId: string,
-			resolution: "theirs" | "mine",
-			serverCopy?: Record<string, unknown>,
-		): void {
+		resolveConflict(serverId: string, resolution: "theirs" | "mine", serverCopy?: Record<string, unknown>): void {
 			const row = findByServerId(serverId);
 			if (!row || row.sync_state !== "conflict") {
 				throw new Error(`template ${serverId} is not conflicted`);
@@ -232,14 +230,12 @@ export function createFakeCache() {
 			if (!serverCopy) {
 				throw new Error("resolving to theirs needs the server copy");
 			}
-			// Overwrite with the server copy and mark clean, mirroring the
-			// Rust resolve path (which reuses the upsert logic).
 			row.name = String(serverCopy["name"] ?? row.name);
-			row.summary = typeof serverCopy["summary"] === "string" ? (serverCopy["summary"] as string) : row.summary;
+			row.summary = typeof serverCopy["summary"] === "string" ? serverCopy["summary"] : row.summary;
 			row.page_w = Math.round(Number(serverCopy["page_w_mm"] ?? row.page_w));
 			row.page_h = Math.round(Number(serverCopy["page_h_mm"] ?? row.page_h));
 			row.orientation = row.page_w > row.page_h ? "landscape" : "portrait";
-			row.readme = typeof serverCopy["readme"] === "string" ? (serverCopy["readme"] as string) : row.readme;
+			row.readme = typeof serverCopy["readme"] === "string" ? serverCopy["readme"] : row.readme;
 			row.published_at = (serverCopy["published_at"] as string | null) ?? null;
 			row.updated_at = String(serverCopy["updated_at"] ?? nowIso());
 			const rev = Number(serverCopy["revision"] ?? row.server_revision ?? 1);
@@ -247,9 +243,32 @@ export function createFakeCache() {
 			row.base_revision = rev;
 			const html = String(serverCopy["body"] ?? "");
 			const css = String(serverCopy["css"] ?? "");
-			row.versions.push({ version_no: row.versions.reduce((m, v) => Math.max(m, v.version_no), 0) + 1, html, css, created_by: "sync" });
+			const maxNo = row.versions.reduce((m, v) => Math.max(m, v.version_no), 0);
+			row.versions.push({ version_no: maxNo + 1, html, css, created_by: "sync" });
 			pruneVersions(row);
 			row.sync_state = "synced";
+		},
+
+		listTombstoned(): string[] {
+			return [...templates.values()]
+				.filter((t) => t.sync_state === "deleted_pending")
+				.map((t) => t.server_id as string);
+		},
+
+		listSynced(): string[] {
+			return [...templates.values()]
+				.filter((t) => t.sync_state === "synced")
+				.map((t) => t.server_id as string);
+		},
+
+		forgetTemplate(serverId: string): boolean {
+			for (const [id, t] of templates) {
+				if (t.server_id === serverId) {
+					templates.delete(id);
+					return true;
+				}
+			}
+			return false;
 		},
 
 		queueUse(serverId: string, delta: number): number {

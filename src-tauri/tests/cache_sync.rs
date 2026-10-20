@@ -313,3 +313,52 @@ fn queued_uses_accumulate_drain_and_clear() {
         .unwrap();
     assert_eq!(remaining, 0);
 }
+
+#[test]
+fn tombstoned_synced_lists_and_forget() {
+    use printninja_lib::commands::cache::{forget_template, list_synced, list_tombstoned};
+    let conn = Connection::open_in_memory().unwrap();
+    printninja_lib::db::init(&conn).unwrap();
+    seed_synced(&conn, "srv-keep", 1);
+    seed_synced(&conn, "srv-gone", 1);
+    conn.execute(
+        "UPDATE templates SET sync_state = 'deleted_pending' WHERE server_id = 'srv-gone'",
+        [],
+    )
+    .unwrap();
+
+    let mut tomb = list_tombstoned(&conn).unwrap();
+    tomb.sort();
+    assert_eq!(tomb, vec!["srv-gone".to_string()]);
+    assert_eq!(list_synced(&conn).unwrap(), vec!["srv-keep".to_string()]);
+
+    // Forgetting a tombstone removes it; forgetting again is a no-op.
+    assert!(forget_template(&conn, "srv-gone").unwrap());
+    assert!(!forget_template(&conn, "srv-gone").unwrap());
+    assert!(list_tombstoned(&conn).unwrap().is_empty());
+}
+
+#[test]
+fn non_synced_rows_skip_pulls() {
+    use printninja_lib::commands::cache::{apply_changes, SyncChangeIn};
+    let conn = Connection::open_in_memory().unwrap();
+    printninja_lib::db::init(&conn).unwrap();
+    seed_synced(&conn, "srv-k", 1);
+    for state in ["conflict", "deleted_pending"] {
+        conn.execute(
+            "UPDATE templates SET sync_state = ?1 WHERE server_id = 'srv-k'",
+            [state],
+        )
+        .unwrap();
+        let changes: Vec<SyncChangeIn> = serde_json::from_value(serde_json::json!([{
+            "seq": 1, "entity": "template", "op": "upsert",
+            "data": { "id": "srv-k", "name": "K", "page_w_mm": 210.0, "page_h_mm": 297.0,
+                      "body": "<p>x</p>", "revision": 2, "updated_at": "2026-10-20T00:00:00Z" }
+        }]))
+        .unwrap();
+        let report = apply_changes(&conn, &changes, "MQ==").unwrap();
+        assert_eq!(report.skipped_dirty, 1, "state {state} must skip");
+        assert_eq!(report.applied_upserts, 0, "state {state} must not apply");
+        assert_eq!(sync_state_of(&conn, "srv-k"), state);
+    }
+}
