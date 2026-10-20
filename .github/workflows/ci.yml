@@ -85,6 +85,103 @@ jobs:
           workspaces: server-legacy
       - run: cargo test --manifest-path server-legacy/Cargo.toml
 
+  # Phase 1: the TypeScript service. Integration tests need Docker for
+  # Testcontainers (present on ubuntu-latest). The drift check regenerates
+  # the OpenAPI document and fails on any difference, so the committed
+  # file cannot go stale.
+  server-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter server typecheck
+      - run: pnpm --filter server arch
+      - run: pnpm --filter server test
+      - name: OpenAPI drift check
+        run: |
+          DATABASE_URL=postgresql://user:pass@localhost:5432/printninja \
+          CORS_ORIGINS=http://localhost:1420 \
+          pnpm --filter server openapi:generate
+          git diff --exit-code -- server/openapi/openapi.json
+
+  # The Dockerfile must stay green independently of the compose stack.
+  server-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the service image
+        run: docker build -f server/Dockerfile -t printninja-server:ci .
+
+  # E1 and E8 over HTTP against the composed stack (built image, real
+  # PostgreSQL, real network port).
+  server-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Start the stack
+        run: |
+          printf 'POSTGRES_PASSWORD=e2e-test-password\nCORS_ORIGINS=http://localhost:1420\n' > .env
+          docker compose up -d --build --wait --wait-timeout 180
+      - name: E1 and E8 against the running stack
+        run: E2E_BASE_URL=http://localhost:3001 pnpm --filter server test:e2e
+      - name: Stack logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: Tear the stack down
+        if: always()
+        run: docker compose down -v
+
+  # The Playwright smoke spec: the app in Chromium against the harness
+  # stack (own PostgreSQL, built service, fake desktop agent).
+  app-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build the service for the harness
+        run: pnpm --filter server build
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('pnpm-lock.yaml') }}
+      - name: Install Chromium with system dependencies
+        run: pnpm --filter e2e exec playwright install --with-deps chromium
+      - run: pnpm e2e
+      - name: Upload the HTML report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/playwright-report
+          retention-days: 7
+
   # 5. Windows is the shipped desktop target, so run the Rust tests there on
   # every PR/push instead of only discovering breakage during the tag build.
   rust-test-windows:
