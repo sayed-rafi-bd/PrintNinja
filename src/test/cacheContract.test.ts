@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createFakeCache } from "../../e2e/support/fakeAgent/cache.js";
+import { getSetting, setSetting } from "../../e2e/support/fakeAgent/store.js";
 
 // The other half of the sync-cache contract (REFACTORING.md section 11,
 // Phase 3): the same tests/fixtures/cache_cases.json that the Rust suite
@@ -13,6 +14,11 @@ import { createFakeCache } from "../../e2e/support/fakeAgent/cache.js";
 // gets a fresh cache, so the persisted state is cleared first.
 beforeEach(() => {
 	localStorage.removeItem("fake-agent:templates");
+	localStorage.removeItem("fake-agent:datasets");
+	localStorage.removeItem("fake-agent:profiles");
+	localStorage.removeItem("fake-agent:fonts");
+	localStorage.removeItem("fake-agent:printers");
+	localStorage.removeItem("fake-agent:dirty-settings");
 	localStorage.removeItem("fake-agent:seed");
 });
 
@@ -36,14 +42,60 @@ interface FixtureChange {
 	id?: string;
 }
 
+interface FixtureDataset {
+	server_id: string;
+	name?: string;
+	data_json?: string;
+	sync_state?: string;
+	server_revision?: number;
+}
+
+interface FixtureProfile {
+	server_id: string;
+	template_server_id?: string;
+	printer_name?: string;
+	settings_json?: string;
+	sync_state?: string;
+	server_revision?: number;
+}
+
+interface FixtureSetting {
+	key: string;
+	value?: string;
+	dirty?: "dirty" | "deleted_pending";
+}
+
+interface FixtureFont {
+	server_id: string;
+	family?: string;
+	sha256?: string;
+	sync_state?: string;
+	server_revision?: number;
+}
+
 interface FixtureCase {
 	name: string;
-	given: { templates: FixtureTemplate[]; sync_state: { cursor?: string } };
+	given: {
+		templates: FixtureTemplate[];
+		datasets?: FixtureDataset[];
+		profiles?: FixtureProfile[];
+		settings?: FixtureSetting[];
+		fonts?: FixtureFont[];
+		sync_state: { cursor?: string };
+	};
 	changes: FixtureChange[];
 	new_cursor: string;
 	expect: {
 		templates: Record<string, unknown>[];
+		datasets?: Record<string, unknown>[];
+		profiles?: Record<string, unknown>[];
+		settings?: Record<string, unknown>[];
+		fonts?: Record<string, unknown>[];
 		gone: string[];
+		gone_datasets?: string[];
+		gone_profiles?: string[];
+		gone_settings?: string[];
+		gone_fonts?: string[];
 		sync_cursor: string;
 		report: { applied_upserts: number; applied_deletes: number; skipped_dirty: number } | null;
 		error?: boolean;
@@ -92,6 +144,55 @@ describe("cache cases match the fake agent", () => {
 					versions: [{ version_no: 1, html: t.html ?? "<p></p>", css: t.css ?? "", created_by: "manual" }],
 				});
 			}
+			for (const d of kase.given.datasets ?? []) {
+				const id = cache.library._store.nextDatasetId();
+				cache.library._store.datasets.set(id, {
+					id,
+					server_id: d.server_id,
+					name: d.name ?? "D",
+					data_json: d.data_json ?? "{}",
+					server_revision: d.server_revision ?? 1,
+					base_revision: (d.sync_state ?? "synced") === "synced" ? (d.server_revision ?? 1) : null,
+					sync_state: (d.sync_state ?? "synced") as "synced" | "dirty" | "deleted_pending" | "conflict",
+					updated_at: new Date().toISOString(),
+				});
+			}
+			for (const p of kase.given.profiles ?? []) {
+				const id = cache.library._store.nextProfileId();
+				cache.library._store.profiles.set(id, {
+					id,
+					server_id: p.server_id,
+					template_server_id: p.template_server_id ?? "tpl-1",
+					printer_name: p.printer_name ?? "e2e",
+					settings_json: p.settings_json ?? "{}",
+					server_revision: p.server_revision ?? 1,
+					base_revision: (p.sync_state ?? "synced") === "synced" ? (p.server_revision ?? 1) : null,
+					sync_state: (p.sync_state ?? "synced") as "synced" | "dirty" | "deleted_pending" | "conflict",
+					updated_at: new Date().toISOString(),
+				});
+			}
+			for (const s of kase.given.settings ?? []) {
+				setSetting(s.key, s.value ?? "");
+				if (s.dirty) {
+					cache.library._store.dirtySettings.set(s.key, s.dirty);
+				}
+			}
+			for (const f of kase.given.fonts ?? []) {
+				const id = cache.library._store.nextFontId();
+				cache.library._store.fonts.set(id, {
+					id,
+					server_id: f.server_id,
+					family: f.family ?? "Body",
+					format: "ttf",
+					sha256: f.sha256 ?? "",
+					size_bytes: 0,
+					server_revision: f.server_revision ?? 1,
+					base_revision: (f.sync_state ?? "synced") === "synced" ? (f.server_revision ?? 1) : null,
+					sync_state: (f.sync_state ?? "synced") as "synced" | "dirty" | "deleted_pending" | "conflict",
+					updated_at: new Date().toISOString(),
+					bytes: null,
+				});
+			}
 			if (kase.given.sync_state.cursor) {
 				cache._store.sync.cursor = kase.given.sync_state.cursor;
 			}
@@ -118,6 +219,20 @@ describe("cache cases match the fake agent", () => {
 				expect(cache.getSyncState().cursor).toBe(kase.given.sync_state.cursor ?? "");
 				for (const gone of kase.expect.gone) {
 					expect(rowByServerId(cache, gone), `case '${kase.name}': ${gone} written despite error`).toBeUndefined();
+				}
+				const libGone = (rows: Array<{ server_id: string }>, key: string) =>
+					expect(rows.find((r) => r.server_id === key), `case '${kase.name}': ${key} written despite error`).toBeUndefined();
+				for (const key of kase.expect.gone_datasets ?? []) {
+					libGone([...cache.library._store.datasets.values()], key);
+				}
+				for (const key of kase.expect.gone_profiles ?? []) {
+					libGone([...cache.library._store.profiles.values()], key);
+				}
+				for (const key of kase.expect.gone_fonts ?? []) {
+					libGone([...cache.library._store.fonts.values()], key);
+				}
+				for (const key of kase.expect.gone_settings ?? []) {
+					expect(getSetting(key), `case '${kase.name}': setting ${key} written despite error`).toBeNull();
 				}
 				return;
 			}
@@ -147,6 +262,57 @@ describe("cache cases match the fake agent", () => {
 			}
 			for (const gone of kase.expect.gone) {
 				expect(rowByServerId(cache, gone), `case '${kase.name}': ${gone} still present`).toBeUndefined();
+			}
+			for (const wanted of kase.expect.datasets ?? []) {
+				const serverId = wanted["server_id"] as string;
+				const actual = cache.library._store.datasets
+					? [...cache.library._store.datasets.values()].find((r) => r.server_id === serverId)
+					: undefined;
+				expect(actual, `case '${kase.name}': missing dataset ${serverId}`).toBeDefined();
+				for (const [key, value] of Object.entries(wanted)) {
+					if (key === "server_id") continue;
+					expect(actual?.[key as keyof typeof actual], `case '${kase.name}' dataset field ${key} of ${serverId}`).toEqual(value);
+				}
+			}
+			for (const wanted of kase.expect.profiles ?? []) {
+				const serverId = wanted["server_id"] as string;
+				const actual = [...cache.library._store.profiles.values()].find((r) => r.server_id === serverId);
+				expect(actual, `case '${kase.name}': missing profile ${serverId}`).toBeDefined();
+				for (const [key, value] of Object.entries(wanted)) {
+					if (key === "server_id") continue;
+					expect(actual?.[key as keyof typeof actual], `case '${kase.name}' profile field ${key} of ${serverId}`).toEqual(value);
+				}
+			}
+			for (const wanted of kase.expect.settings ?? []) {
+				const key = wanted["key"] as string;
+				const actual = getSetting(key);
+				expect(actual, `case '${kase.name}': missing setting ${key}`).not.toBeNull();
+				if (wanted["value"] !== undefined) {
+					expect(actual, `case '${kase.name}' setting ${key}`).toEqual(wanted["value"]);
+				}
+			}
+			for (const wanted of kase.expect.fonts ?? []) {
+				const serverId = wanted["server_id"] as string;
+				const actual = [...cache.library._store.fonts.values()].find((r) => r.server_id === serverId);
+				expect(actual, `case '${kase.name}': missing font ${serverId}`).toBeDefined();
+				for (const [key, value] of Object.entries(wanted)) {
+					if (key === "server_id") continue;
+					expect(actual?.[key as keyof typeof actual], `case '${kase.name}' font field ${key} of ${serverId}`).toEqual(value);
+				}
+			}
+			const goneBy = (rows: Array<{ server_id: string }>, key: string) =>
+				expect(rows.find((r) => r.server_id === key), `case '${kase.name}': ${key} still present`).toBeUndefined();
+			for (const key of kase.expect.gone_datasets ?? []) {
+				goneBy([...cache.library._store.datasets.values()], key);
+			}
+			for (const key of kase.expect.gone_profiles ?? []) {
+				goneBy([...cache.library._store.profiles.values()], key);
+			}
+			for (const key of kase.expect.gone_fonts ?? []) {
+				goneBy([...cache.library._store.fonts.values()], key);
+			}
+			for (const key of kase.expect.gone_settings ?? []) {
+				expect(getSetting(key), `case '${kase.name}': setting ${key} still present`).toBeNull();
 			}
 			expect(cache.getSyncState().cursor).toBe(kase.expect.sync_cursor);
 		});

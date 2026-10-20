@@ -14,6 +14,7 @@ import {
 	uploadRemoteFontFile,
 } from "@/lib/share/client";
 import type {
+	DirtyRow,
 	EngineApi,
 	EngineCache,
 	LibraryApi,
@@ -100,7 +101,7 @@ export function productionLibraryCache(): LibraryCache {
 }
 
 /** The production library network side: the typed v2 API through callApi. */
-export function productionLibraryApi(deps: ApiDeps = apiDeps()): LibraryApi {
+export function productionLibraryApi(): LibraryApi {
 	return {
 		putDataset: (id, body) => putRemoteDataset({ id, ...body }),
 		deleteDataset: (id) => deleteRemoteDataset(id),

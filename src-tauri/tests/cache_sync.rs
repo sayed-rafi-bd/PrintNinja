@@ -120,6 +120,42 @@ fn cache_cases_match_rust_behavior() {
                 .collect();
             seed_template(&conn, &fields);
         }
+        for dataset in case
+            .get("given")
+            .and_then(|g| g.get("datasets"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            seed_dataset(&conn, &dataset);
+        }
+        for profile in case
+            .get("given")
+            .and_then(|g| g.get("profiles"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            seed_profile(&conn, &profile);
+        }
+        for setting in case
+            .get("given")
+            .and_then(|g| g.get("settings"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            seed_setting(&conn, &setting);
+        }
+        for font in case
+            .get("given")
+            .and_then(|g| g.get("fonts"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            seed_font(&conn, &font);
+        }
         if let Some(cursor) = case["given"]["sync_state"]["cursor"].as_str() {
             if !cursor.is_empty() {
                 conn.execute(
@@ -157,6 +193,33 @@ fn cache_cases_match_rust_behavior() {
                     "case '{name}': {id} was written despite the error"
                 );
             }
+            for (key, check) in [
+                (
+                    "gone_datasets",
+                    row_by_dataset as fn(&Connection, &str) -> Option<HashMap<String, Value>>,
+                ),
+                (
+                    "gone_profiles",
+                    row_by_profile as fn(&Connection, &str) -> Option<HashMap<String, Value>>,
+                ),
+                (
+                    "gone_fonts",
+                    row_by_font as fn(&Connection, &str) -> Option<HashMap<String, Value>>,
+                ),
+            ] {
+                for gone in expect
+                    .get(key)
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default()
+                {
+                    let id = gone.as_str().unwrap();
+                    assert!(
+                        check(&conn, id).is_none(),
+                        "case '{name}': {key} {id} was written despite the error"
+                    );
+                }
+            }
             continue;
         }
 
@@ -189,11 +252,120 @@ fn cache_cases_match_rust_behavior() {
                 assert_eq!(&actual[key], value, "case '{name}' field {key} of {id}");
             }
         }
+        for wanted in expect
+            .get("datasets")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            let id = wanted["server_id"].as_str().unwrap();
+            let actual = row_by_dataset(&conn, id)
+                .unwrap_or_else(|| panic!("case '{name}': missing dataset {id}"));
+            for (key, value) in wanted.as_object().unwrap() {
+                if key == "server_id" {
+                    continue;
+                }
+                assert_eq!(
+                    &actual[key], value,
+                    "case '{name}' dataset field {key} of {id}"
+                );
+            }
+        }
+        for wanted in expect
+            .get("profiles")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            let id = wanted["server_id"].as_str().unwrap();
+            let actual = row_by_profile(&conn, id)
+                .unwrap_or_else(|| panic!("case '{name}': missing profile {id}"));
+            for (key, value) in wanted.as_object().unwrap() {
+                if key == "server_id" {
+                    continue;
+                }
+                assert_eq!(
+                    &actual[key], value,
+                    "case '{name}' profile field {key} of {id}"
+                );
+            }
+        }
+        for wanted in expect
+            .get("settings")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            let key = wanted["key"].as_str().unwrap();
+            let actual = value_of_setting(&conn, key)
+                .unwrap_or_else(|| panic!("case '{name}': missing setting {key}"));
+            if let Some(value) = wanted.get("value") {
+                assert_eq!(&actual, value, "case '{name}' setting {key}");
+            }
+        }
+        for wanted in expect
+            .get("fonts")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            let id = wanted["server_id"].as_str().unwrap();
+            let actual = row_by_font(&conn, id)
+                .unwrap_or_else(|| panic!("case '{name}': missing font {id}"));
+            for (key, value) in wanted.as_object().unwrap() {
+                if key == "server_id" {
+                    continue;
+                }
+                assert_eq!(
+                    &actual[key], value,
+                    "case '{name}' font field {key} of {id}"
+                );
+            }
+        }
         for gone in expect["gone"].as_array().unwrap() {
             let id = gone.as_str().unwrap();
             assert!(
                 row_by_server_id(&conn, id).is_none(),
                 "case '{name}': {id} still present"
+            );
+        }
+        for (key, check) in [
+            (
+                "gone_datasets",
+                row_by_dataset as fn(&Connection, &str) -> Option<HashMap<String, Value>>,
+            ),
+            (
+                "gone_profiles",
+                row_by_profile as fn(&Connection, &str) -> Option<HashMap<String, Value>>,
+            ),
+            (
+                "gone_fonts",
+                row_by_font as fn(&Connection, &str) -> Option<HashMap<String, Value>>,
+            ),
+        ] {
+            for gone in expect
+                .get(key)
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+            {
+                let id = gone.as_str().unwrap();
+                assert!(
+                    check(&conn, id).is_none(),
+                    "case '{name}': {key} {id} still present"
+                );
+            }
+        }
+        for gone in expect
+            .get("gone_settings")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            let key = gone.as_str().unwrap();
+            assert!(
+                value_of_setting(&conn, key).is_none(),
+                "case '{name}': setting {key} still present"
             );
         }
         let cursor = get_sync_state(&conn).unwrap().cursor;
@@ -203,6 +375,196 @@ fn cache_cases_match_rust_behavior() {
             "case '{name}' cursor"
         );
     }
+}
+
+fn seed_dataset(conn: &Connection, fields: &Value) {
+    let server_id = fields["server_id"]
+        .as_str()
+        .expect("fixture dataset needs server_id");
+    let name = fields.get("name").and_then(Value::as_str).unwrap_or("D");
+    let data_json = fields
+        .get("data_json")
+        .and_then(Value::as_str)
+        .unwrap_or("{}");
+    let sync_state = fields
+        .get("sync_state")
+        .and_then(Value::as_str)
+        .unwrap_or("synced");
+    let revision = fields
+        .get("server_revision")
+        .and_then(Value::as_i64)
+        .unwrap_or(1);
+    conn.execute(
+        "INSERT INTO synced_datasets (server_id, name, data_json, server_revision, base_revision, sync_state)
+         VALUES (?1, ?2, ?3, ?4, ?4, ?5)",
+        rusqlite::params![server_id, name, data_json, revision, sync_state],
+    )
+    .unwrap();
+}
+
+fn seed_profile(conn: &Connection, fields: &Value) {
+    let server_id = fields["server_id"]
+        .as_str()
+        .expect("fixture profile needs server_id");
+    let template_server_id = fields
+        .get("template_server_id")
+        .and_then(Value::as_str)
+        .unwrap_or("tpl-1");
+    let printer_name = fields
+        .get("printer_name")
+        .and_then(Value::as_str)
+        .unwrap_or("e2e");
+    let settings_json = fields
+        .get("settings_json")
+        .and_then(Value::as_str)
+        .unwrap_or("{}");
+    let sync_state = fields
+        .get("sync_state")
+        .and_then(Value::as_str)
+        .unwrap_or("synced");
+    let revision = fields
+        .get("server_revision")
+        .and_then(Value::as_i64)
+        .unwrap_or(1);
+    conn.execute(
+        "INSERT INTO synced_profiles (server_id, template_server_id, printer_name, settings_json,
+                server_revision, base_revision, sync_state)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)",
+        rusqlite::params![
+            server_id,
+            template_server_id,
+            printer_name,
+            settings_json,
+            revision,
+            sync_state
+        ],
+    )
+    .unwrap();
+}
+
+fn seed_setting(conn: &Connection, fields: &Value) {
+    let key = fields["key"].as_str().expect("fixture setting needs key");
+    let value = fields.get("value").and_then(Value::as_str).unwrap_or("");
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        rusqlite::params![key, value],
+    )
+    .unwrap();
+    if let Some(dirty) = fields.get("dirty").and_then(Value::as_str) {
+        conn.execute(
+            "UPDATE settings SET sync_state = ?1 WHERE key = ?2",
+            rusqlite::params![dirty, key],
+        )
+        .unwrap();
+    }
+}
+
+fn seed_font(conn: &Connection, fields: &Value) {
+    let server_id = fields["server_id"]
+        .as_str()
+        .expect("fixture font needs server_id");
+    let family = fields
+        .get("family")
+        .and_then(Value::as_str)
+        .unwrap_or("Body");
+    let sha256 = fields.get("sha256").and_then(Value::as_str).unwrap_or("");
+    let sync_state = fields
+        .get("sync_state")
+        .and_then(Value::as_str)
+        .unwrap_or("synced");
+    let revision = fields
+        .get("server_revision")
+        .and_then(Value::as_i64)
+        .unwrap_or(1);
+    conn.execute(
+        "INSERT INTO fonts (family, style, weight, file_path, format, server_id,
+                server_revision, base_revision, sync_state, sha256, size_bytes)
+         VALUES (?1, 'normal', '400', '', 'ttf', ?2, ?3, ?3, ?4, ?5, 0)",
+        rusqlite::params![family, server_id, revision, sync_state, sha256],
+    )
+    .unwrap();
+}
+
+fn row_by_dataset(conn: &Connection, server_id: &str) -> Option<HashMap<String, Value>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT name, sync_state, server_revision, data_json
+             FROM synced_datasets WHERE server_id = ?1",
+        )
+        .unwrap();
+    let mut rows = stmt.query([server_id]).unwrap();
+    rows.next().unwrap().map(|row| {
+        let mut map = HashMap::new();
+        let name: String = row.get(0).unwrap();
+        let state: String = row.get(1).unwrap();
+        let revision: Option<i64> = row.get(2).unwrap();
+        let data_json: String = row.get(3).unwrap();
+        map.insert("name".to_string(), Value::String(name));
+        map.insert("sync_state".to_string(), Value::String(state));
+        if let Some(r) = revision {
+            map.insert("server_revision".to_string(), Value::from(r));
+        }
+        map.insert("data_json".to_string(), Value::String(data_json));
+        map
+    })
+}
+
+fn row_by_profile(conn: &Connection, server_id: &str) -> Option<HashMap<String, Value>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT printer_name, sync_state, server_revision, settings_json
+             FROM synced_profiles WHERE server_id = ?1",
+        )
+        .unwrap();
+    let mut rows = stmt.query([server_id]).unwrap();
+    rows.next().unwrap().map(|row| {
+        let mut map = HashMap::new();
+        let printer_name: String = row.get(0).unwrap();
+        let state: String = row.get(1).unwrap();
+        let revision: Option<i64> = row.get(2).unwrap();
+        let settings_json: String = row.get(3).unwrap();
+        map.insert("printer_name".to_string(), Value::String(printer_name));
+        map.insert("sync_state".to_string(), Value::String(state));
+        if let Some(r) = revision {
+            map.insert("server_revision".to_string(), Value::from(r));
+        }
+        map.insert("settings_json".to_string(), Value::String(settings_json));
+        map
+    })
+}
+
+fn value_of_setting(conn: &Connection, key: &str) -> Option<Value> {
+    let value: Option<String> = conn
+        .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+            r.get(0)
+        })
+        .ok();
+    value.map(Value::String)
+}
+
+fn row_by_font(conn: &Connection, server_id: &str) -> Option<HashMap<String, Value>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT family, sync_state, server_revision, sha256
+             FROM fonts WHERE server_id = ?1",
+        )
+        .unwrap();
+    let mut rows = stmt.query([server_id]).unwrap();
+    rows.next().unwrap().map(|row| {
+        let mut map = HashMap::new();
+        let family: String = row.get(0).unwrap();
+        let state: String = row.get(1).unwrap();
+        let revision: Option<i64> = row.get(2).unwrap();
+        let sha256: String = row.get(3).unwrap();
+        map.insert("family".to_string(), Value::String(family));
+        map.insert("sync_state".to_string(), Value::String(state));
+        if let Some(r) = revision {
+            map.insert("server_revision".to_string(), Value::from(r));
+        }
+        map.insert("sha256".to_string(), Value::String(sha256));
+        map
+    })
 }
 
 fn seed_synced(conn: &Connection, server_id: &str, revision: i64) {

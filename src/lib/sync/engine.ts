@@ -529,7 +529,7 @@ export async function pushLibraryDirty(cache: LibraryCache, api: LibraryApi): Pr
 		pushed += 1;
 	}
 	for (const row of fonts) {
-		const revision = await pushVersioned(
+		await pushVersioned(
 			(ifRevision) =>
 				api.putFont(row.server_id, {
 					name: row.name,

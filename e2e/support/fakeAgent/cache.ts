@@ -92,6 +92,7 @@ export interface SeedTemplate {
 }
 
 import { seedTemplates } from "./store.js";
+import { createFakeLibrary, type FakeLibrary } from "./library.js";
 
 const PERSIST_KEY = "fake-agent:templates";
 
@@ -186,6 +187,10 @@ export function createFakeCache() {
 		return undefined;
 	};
 
+	// The library shares the template rows for profile linkage and wipes
+	// with the account; the templates map above stays the source of truth.
+	const library: FakeLibrary = createFakeLibrary({ templates });
+
 	const findRow = (id: number): FakeTemplateRow => {
 		const row = templates.get(id);
 		if (!row || row.sync_state === "deleted_pending") {
@@ -201,7 +206,7 @@ export function createFakeCache() {
 			if (change.op !== "upsert" && change.op !== "delete") {
 				throw new Error(`unsupported sync op '${change.op}'`);
 			}
-			if (change.entity !== "template") {
+			if (!["template", "dataset", "profile", "setting", "font"].includes(change.entity)) {
 				throw new Error(`unsupported sync entity '${change.entity}'`);
 			}
 			if (change.op === "upsert" && (change.data === undefined || change.data === null)) {
@@ -308,10 +313,21 @@ export function createFakeCache() {
 		/** Test seam: the raw store plus an id allocator. */
 		_store: { templates, sync, nextId: () => nextId++ },
 
+		/** The library rows, for the IPC commands in commands.ts. */
+		library,
+
 		applyChanges(changes: SyncChangeIn[], newCursor: string): ApplyReport {
 			validate(changes);
 			const report: ApplyReport = { applied_upserts: 0, applied_deletes: 0, skipped_dirty: 0 };
 			for (const change of changes) {
+				if (change.entity !== "template") {
+					if (change.op === "upsert") {
+						library.applyLibraryUpsert(change.entity, change.data as Record<string, unknown>, report);
+					} else {
+						library.applyLibraryDelete(change.entity, change.id as string, report);
+					}
+					continue;
+				}
 				if (change.op === "upsert") {
 					applyUpsert(change.data as Record<string, unknown>, report);
 				} else {
@@ -650,6 +666,7 @@ export function createFakeCache() {
 			for (const key of [...queued.keys()]) {
 				queued.delete(key);
 			}
+			library.clearLibrary();
 			sync.account_handle = null;
 			sync.server_url = null;
 			sync.cursor = "";

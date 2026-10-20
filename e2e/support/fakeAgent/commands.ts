@@ -24,7 +24,11 @@ const implemented: Record<string, Handler> = {
 	get_setting: (args) => getSetting(String(args.key ?? "")),
 	set_setting: (args) => {
 		const value = args.value;
-		setSetting(String(args.key ?? ""), typeof value === "string" ? value : null);
+		const key = String(args.key ?? "");
+		setSetting(key, typeof value === "string" ? value : null);
+		// Mirror Rust: account keys go dirty (or tombstoned when reset);
+		// device keys never leave the PC.
+		cache.library.markSettingDirty(key, typeof value === "string" ? value : "");
 		return null;
 	},
 	ping: () => null,
@@ -109,16 +113,126 @@ const implemented: Record<string, Handler> = {
 		cache.updateTemplateOrigin(Number(req["id"] ?? 0), req);
 		return cache.listTemplates().find((t) => t["id"] === Number(req["id"] ?? 0));
 	},
+	// Printers are device-local rows (never synced); profiles resolve
+	// them by current name, so renames and deletes leave dormancy.
+	list_printers: () => cache.library.listPrinters(),
+	add_printer: (args) => {
+		const req = (args["req"] ?? args) as Record<string, unknown>;
+		return cache.library.addPrinter(String(req["name"] ?? "Printer"));
+	},
+	delete_printer: (args) => {
+		cache.library.deletePrinter(Number(args["id"] ?? 0));
+		return null;
+	},
+	get_printer: (args) => {
+		const row = cache.library.listPrinters().find((p) => p.id === Number(args["id"] ?? 0));
+		if (!row) throw new Error(`Printer ${String(args["id"])} not found`);
+		return row;
+	},
+	// Sample datasets: the Designer's panel persists through these.
+	list_datasets: () =>
+		cache.library.listDatasets().map((r) => ({ ...r, created_at: r.updated_at })),
+	save_dataset: (args) => {
+		const req = (args["req"] ?? args) as Record<string, unknown>;
+		const row = cache.library.saveDataset({
+			id: req["id"] === undefined || req["id"] === null ? null : Number(req["id"]),
+			name: String(req["name"] ?? ""),
+			data_json: String(req["data_json"] ?? "{}"),
+		});
+		return { ...row, created_at: row.updated_at };
+	},
+	delete_dataset: (args) => {
+		cache.library.deleteDataset(Number(args["id"] ?? 0));
+		return null;
+	},
+	cache_list_dirty_datasets: () => cache.library.listDirtyDatasets(),
+	cache_mark_dataset_pushed: (args) => {
+		cache.library.markDatasetPushed(String(args["server_id"] ?? ""), Number(args["revision"] ?? 0));
+		return null;
+	},
+	cache_list_tombstoned_datasets: () => cache.library.listTombstonedDatasets(),
+	cache_list_synced_datasets: () => cache.library.listSyncedDatasets(),
+	cache_forget_dataset: (args) => cache.library.forgetDataset(String(args["server_id"] ?? "")),
+	// Printer profiles, keyed by template and printer name on the wire.
+	list_profiles: (args) =>
+		cache.library
+			.listProfiles({
+				printer_id: args["printer_id"] === undefined || args["printer_id"] === null ? null : Number(args["printer_id"]),
+				template_id: args["template_id"] === undefined || args["template_id"] === null ? null : Number(args["template_id"]),
+			})
+			.map((r) => ({ ...r, created_at: r.updated_at })),
+	save_profile: (args) => {
+		const req = (args["req"] ?? args) as Record<string, unknown>;
+		const row = cache.library.saveProfile({
+			printer_id: Number(req["printer_id"] ?? 0),
+			template_id: Number(req["template_id"] ?? 0),
+			settings_json: String(req["settings_json"] ?? "{}"),
+		});
+		return { ...row, created_at: row.updated_at };
+	},
+	delete_profile: (args) => {
+		cache.library.deleteProfile(Number(args["id"] ?? 0));
+		return null;
+	},
+	cache_list_dirty_profiles: () => cache.library.listDirtyProfiles(),
+	cache_mark_profile_pushed: (args) => {
+		cache.library.markProfilePushed(String(args["server_id"] ?? ""), Number(args["revision"] ?? 0));
+		return null;
+	},
+	cache_list_tombstoned_profiles: () => cache.library.listTombstonedProfiles(),
+	cache_list_synced_profiles: () => cache.library.listSyncedProfiles(),
+	cache_forget_profile: (args) => cache.library.forgetProfile(String(args["server_id"] ?? "")),
+	// Fonts: metadata plus in-memory bytes (test files are tiny).
+	list_fonts: () =>
+		cache.library.listFonts().map((r) => ({
+			id: r.id,
+			family: r.family,
+			style: "normal",
+			weight: "400",
+			file_path: "",
+			format: r.format,
+			created_at: r.updated_at,
+			server_id: r.server_id,
+			sync_state: r.sync_state,
+			sha256: r.sha256,
+			size_bytes: r.size_bytes,
+			state: r.state,
+		})),
+	upload_font: (args) =>
+		cache.library.uploadFont({
+			file_name: String(args["file_name"] ?? ""),
+			file_data: (args["file_data"] as number[] | undefined) ?? [],
+			family: (args["family"] as string | null | undefined) ?? null,
+		}),
+	delete_font: (args) => {
+		cache.library.deleteFont(Number(args["id"] ?? 0));
+		return null;
+	},
+	cache_list_dirty_fonts: () => cache.library.listDirtyFonts(),
+	cache_mark_font_pushed: (args) => {
+		cache.library.markFontPushed(String(args["server_id"] ?? ""), Number(args["revision"] ?? 0));
+		return null;
+	},
+	cache_list_tombstoned_fonts: () => cache.library.listTombstonedFonts(),
+	cache_list_synced_fonts: () => cache.library.listSyncedFonts(),
+	cache_forget_font: (args) => cache.library.forgetFont(String(args["server_id"] ?? "")),
+	cache_read_font_file: (args) => cache.library.readFontFile(String(args["server_id"] ?? "")),
+	cache_download_pending_fonts: () => cache.library.downloadPendingFonts(),
+	// Account preferences: the allow-list syncs, device keys never do.
+	cache_list_dirty_settings: () => cache.library.listDirtySettings(),
+	cache_mark_setting_pushed: (args) => {
+		cache.library.markSettingPushed(String(args["key"] ?? ""));
+		return null;
+	},
+	cache_list_tombstoned_settings: () => cache.library.listTombstonedSettings(),
+	cache_list_synced_settings: () => cache.library.listSyncedSettings(),
+	cache_forget_setting: (args) => cache.library.forgetSetting(String(args["key"] ?? "")),
 };
 
 /** Every Rust command without real behavior yet (src-tauri/src/lib.rs).
  * Keep this list in sync with generate_handler! — the contract test
  * fails when a Rust command is neither implemented nor acknowledged. */
 const acknowledgedStubs: string[] = [
-	"list_printers",
-	"add_printer",
-	"delete_printer",
-	"get_printer",
 	"test_printer",
 	"set_publish_info",
 	"clear_publish_info",
@@ -134,12 +248,6 @@ const acknowledgedStubs: string[] = [
 	"delete_version",
 	"restore_version",
 	"diff_versions",
-	"list_fonts",
-	"upload_font",
-	"delete_font",
-	"list_profiles",
-	"save_profile",
-	"delete_profile",
 	"create_batch",
 	"list_batches",
 	"get_batch",
