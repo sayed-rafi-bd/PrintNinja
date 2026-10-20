@@ -36,6 +36,10 @@ sha2 = "0.10"
 urlencoding = "2"
 hex = "0.4"
 rand = "0.8"
+# Screenshot decode for the raster print path (P4). Only referenced from
+# cfg(windows) code — Edge's PNG output is decoded there; Linux/CI compile
+# it but the call site lives behind the Windows cfg.
+png = "0.17"
 
 [features]
 # Optional hardware backends gated in the Windows transports — declared so

@@ -80,6 +80,26 @@ pub trait JobRenderer: Send + Sync {
         h_mm: f64,
         orientation: &str,
     ) -> anyhow::Result<Vec<u8>>;
+
+    /// Rasterize `final_html` at exactly `w_px` × `h_px` dots (P4), for
+    /// printers that speak a command language instead of taking a PDF.
+    ///
+    /// The default refuses: a renderer that cannot rasterize must fail the
+    /// job loudly, never fall back to PDF bytes on a printer that would drop
+    /// them. [`PdfRenderer`] overrides this with the browser-backed
+    /// screenshot path; integration tests can substitute their own.
+    async fn rasterize(
+        &self,
+        final_html: &str,
+        w_px: usize,
+        h_px: usize,
+    ) -> anyhow::Result<crate::render::raster::RasterImage> {
+        let _ = (final_html, w_px, h_px);
+        Err(anyhow::anyhow!(
+            "this renderer cannot rasterize HTML to dots; command-language printers \
+             need the browser-backed renderer"
+        ))
+    }
 }
 
 #[async_trait::async_trait]
@@ -92,6 +112,15 @@ impl JobRenderer for PdfRenderer {
         orientation: &str,
     ) -> anyhow::Result<Vec<u8>> {
         self.html_to_pdf(final_html, w_mm, h_mm, orientation).await
+    }
+
+    async fn rasterize(
+        &self,
+        final_html: &str,
+        w_px: usize,
+        h_px: usize,
+    ) -> anyhow::Result<crate::render::raster::RasterImage> {
+        self.html_to_raster(final_html, w_px, h_px).await
     }
 }
 
@@ -559,19 +588,58 @@ async fn run_stages(
     // ── 3. Layout ───────────────────────────────────────────────────
     let final_html = apply_layout(&html, &css, w_mm, h_mm, &req);
 
-    // ── 4. PDF ──────────────────────────────────────────────────────
+    // ── 4. Render ────────────────────────────────────────────────────
+    // What the printer takes is a property of its stored row: a PDF printer
+    // gets document bytes, a command-language printer (escpos/tspl/zpl/
+    // cpcl/raster) gets a raster rasterized at its head's own resolution
+    // and encoded for its dialect (P4). Look the row up *before* rendering:
+    // the language decides which renderer call is even made. A printer that
+    // is not in the DB still prints — language falls back to Pdf, exactly
+    // the pre-dispatch behaviour.
     std::fs::create_dir_all(cache_dir)
         .map_err(|e| AppError::Internal(format!("Cannot create {}: {e}", cache_dir.display())))?;
-    let pdf_bytes = match renderer
-        .render(
-            &final_html,
-            w_mm,
-            h_mm,
-            req.orientation.as_deref().unwrap_or("portrait"),
-        )
-        .await
-    {
-        Ok(b) => b,
+    let printer = lookup_printer(db, &req.printer_name);
+    let language = printer
+        .as_ref()
+        .map_or(crate::transport::PrinterLanguage::Pdf, |p| {
+            crate::transport::parse_printer_language(&p.language)
+        });
+    // `printers.dpi` defaults to 203 (the common thermal head); the clamp
+    // only bites on a hand-edited row.
+    let dpi = printer
+        .as_ref()
+        .and_then(|p| p.dpi)
+        .unwrap_or(203)
+        .clamp(1, 1200) as u32;
+
+    let rendered: anyhow::Result<(Vec<u8>, &'static str)> = match language {
+        crate::transport::PrinterLanguage::Pdf => renderer
+            .render(
+                &final_html,
+                w_mm,
+                h_mm,
+                req.orientation.as_deref().unwrap_or("portrait"),
+            )
+            .await
+            .map(|b| (b, "application/pdf")),
+        ref lang => {
+            // 1 CSS px = 1 printer dot: ask for exactly the label's dots so
+            // nothing is resampled on the way to the head.
+            let (w_px, h_px) = (
+                crate::render::raster::dots_for_mm(w_mm, dpi),
+                crate::render::raster::dots_for_mm(h_mm, dpi),
+            );
+            renderer
+                .rasterize(&final_html, w_px, h_px)
+                .await
+                .and_then(|raster| {
+                    crate::transport::encode_for_language(lang, &raster, w_mm, h_mm, dpi)
+                        .map_err(|e| anyhow::anyhow!(e))
+                })
+        }
+    };
+    let (payload, mime_type) = match rendered {
+        Ok(v) => v,
         Err(e) => {
             let msg = e.to_string();
             finish_job(
@@ -593,18 +661,18 @@ async fn run_stages(
     };
 
     // ── 5. Send ─────────────────────────────────────────────────────
-    // Resolve the stored printer row so the right transport is used and so
-    // the queue can serialise on a stable key. A printer that is not in the
-    // DB still prints, via the platform default.
-    let printer = lookup_printer(db, &req.printer_name);
-
-    let printer_type =
-        crate::transport::parse_printer_type(printer.as_ref().map_or("", |p| p.0.as_str()));
-    let address = printer.as_ref().map_or("", |p| p.1.as_str());
+    // The row resolved above also picks the transport and the queue key.
+    let printer_type = crate::transport::parse_printer_type(
+        printer.as_ref().map_or("", |p| p.printer_type.as_str()),
+    );
+    let address = printer.as_ref().map_or("", |p| p.address.as_str());
     tracing::info!(
         printer = %req.printer_name,
         ?printer_type,
+        ?language,
         %address,
+        dpi,
+        paper_width_mm = ?printer.as_ref().and_then(|p| p.paper_width_mm),
         found = printer.is_some(),
         "sending print job"
     );
@@ -625,8 +693,8 @@ async fn run_stages(
                     crate::transport::RenderedJob {
                         job_id: format!("{}-{}", req.printer_name, copy + 1),
                         printer_id: req.printer_name.clone(),
-                        data: pdf_bytes.clone(),
-                        mime_type: "application/pdf".to_string(),
+                        data: payload.clone(),
+                        mime_type: mime_type.to_string(),
                         copies: 1,
                     },
                 )
@@ -671,17 +739,42 @@ async fn run_stages(
     })
 }
 
-/// Look up a printer's stored `(printer_type, address)` by name.
+/// The printer columns the print pipeline needs after render (P4).
+///
+/// `lookup_printer` used to return `(type, address)`; dispatch needs the
+/// language and the head resolution too (the send log also wants the media
+/// width), and every stage must consult the *same* row.
+#[derive(Debug, Clone)]
+pub struct StoredPrinter {
+    pub printer_type: String,
+    pub address: String,
+    pub language: String,
+    pub paper_width_mm: Option<i64>,
+    pub dpi: Option<i64>,
+}
+
+/// Look up a printer's stored row by name.
 ///
 /// Returns `None` when the printer is not in the DB, which is legal: the
-/// caller falls back to the platform default transport.
-pub fn lookup_printer(db: &DbState, name: &str) -> Option<(String, String)> {
+/// caller falls back to the platform default — type `system`, language
+/// `pdf` — exactly as before dispatch existed.
+pub fn lookup_printer(db: &DbState, name: &str) -> Option<StoredPrinter> {
     let guard = db.lock().ok()?;
     let conn = guard.connection();
     conn.query_row(
-        "SELECT type, COALESCE(address, '') FROM printers WHERE name = ?1 COLLATE NOCASE",
+        "SELECT type, COALESCE(address, ''), COALESCE(language, 'pdf'), \
+                paper_width_mm, dpi \
+         FROM printers WHERE name = ?1 COLLATE NOCASE",
         [name],
-        |r| Ok((r.get(0)?, r.get(1)?)),
+        |r| {
+            Ok(StoredPrinter {
+                printer_type: r.get(0)?,
+                address: r.get(1)?,
+                language: r.get(2)?,
+                paper_width_mm: r.get(3)?,
+                dpi: r.get(4)?,
+            })
+        },
     )
     .ok()
 }

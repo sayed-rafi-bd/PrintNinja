@@ -67,6 +67,14 @@ pub fn run() {
             // the queue, the worker is the consumer, and `queue.kick()`
             // wakes it the moment rows appear.
             let cache_dir = app.path().app_cache_dir()?;
+            // Profiles left in the cache dir by earlier runs (a render killed
+            // mid-flight) carry certificate material that looked like the app
+            // wrote a `.pem` file. Nothing is in flight yet — the worker
+            // spawns below — so stale ones can go now.
+            render::sweep_leftover_edge_profiles(
+                &cache_dir,
+                std::time::Duration::from_secs(60 * 30),
+            );
             worker::spawn(db_state, queue, cache_dir);
             Ok(())
         })

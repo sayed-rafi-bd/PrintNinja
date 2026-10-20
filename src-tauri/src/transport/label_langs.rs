@@ -10,31 +10,33 @@ pub mod tspl {
         String::new()
     }
 
+    /// Canonical TSPL2: setup commands, then `BITMAP x,y,width-bytes,
+    ///height,mode` followed by the **raw packed bytes** (not their hex —
+    /// TSPL's BITMAP takes binary data), then `PRINT`.
+    ///
+    /// Commands are `\r\n`-terminated like the real dialect. The image's own
+    /// row packing (`width.div_ceil(8)` bytes per row) is what BITMAP's
+    /// width-bytes argument counts.
     pub fn print_bitmap(
         image: &RasterImage,
         label_w_mm: f64,
         label_h_mm: f64,
         gap_mm: f64,
         _dpi: u32,
-    ) -> String {
+    ) -> Vec<u8> {
         let bytes_per_row = image.width.div_ceil(8);
 
-        let mut cmd = String::new();
-        cmd.push_str(&format!("SIZE {} mm, {} mm\n", label_w_mm, label_h_mm));
-        cmd.push_str(&format!("GAP {} mm, 0 mm\n", gap_mm));
-        cmd.push_str("DIRECTION 0,0\n");
-        cmd.push_str("REFERENCE 0,0\n");
-        cmd.push_str("SET TEAR ON\n");
-        cmd.push_str(&format!("BITMAP 0,0,{},{}\n", bytes_per_row, image.height));
-
-        // Append bitmap data as hex-like bytes (TSPL expects raw bytes after BITMAP command with \r\n terminator)
-        for row in image.dots.chunks(bytes_per_row) {
-            for byte in row {
-                cmd.push_str(&format!("{:02X}", byte));
-            }
-            cmd.push('\n');
-        }
-        cmd.push_str("\nPRINT 1\n");
+        let mut cmd = Vec::new();
+        cmd.extend_from_slice(format!("SIZE {} mm,{} mm\r\n", label_w_mm, label_h_mm).as_bytes());
+        cmd.extend_from_slice(format!("GAP {} mm,0 mm\r\n", gap_mm).as_bytes());
+        cmd.extend_from_slice(b"DIRECTION 1\r\n");
+        cmd.extend_from_slice(b"REFERENCE 0,0\r\n");
+        cmd.extend_from_slice(b"CLS\r\n");
+        cmd.extend_from_slice(
+            format!("BITMAP 0,0,{},{},0\r\n", bytes_per_row, image.height).as_bytes(),
+        );
+        cmd.extend_from_slice(&image.dots);
+        cmd.extend_from_slice(b"\r\nPRINT 1\r\n");
         cmd
     }
 }
@@ -127,8 +129,7 @@ impl LabelPrinterTransport {
                 self.label_h_mm,
                 self.gap_mm,
                 self.dpi,
-            )
-            .into_bytes(),
+            ),
             "zpl" => {
                 zpl::print_bitmap(image, self.label_w_mm, self.label_h_mm, self.dpi).into_bytes()
             }
