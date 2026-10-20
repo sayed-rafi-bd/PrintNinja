@@ -13,6 +13,7 @@ import type { HistoryJob } from "@/lib/store/historyStore";
 import { NAV_GROUPS, NAV_ITEMS, isActivePath } from "@/lib/shell/nav";
 import { useGlobalShortcuts } from "@/lib/shell/useGlobalShortcuts";
 import { useShareStatus } from "@/lib/shell/useShareStatus";
+import { useSyncStatus } from "@/lib/sync/useSyncStatus";
 import { usePrefs } from "@/lib/prefs/PrefsProvider";
 import { tauriInvoke } from "@/lib/tauriGuard";
 import { cn } from "@/lib/utils";
@@ -20,11 +21,43 @@ import { cn } from "@/lib/utils";
 function ShareIndicator() {
   const { t } = useTranslation();
   const status = useShareStatus();
+  const sync = useSyncStatus();
   if (status.state === "unconfigured") return null;
   if (status.state === "online") {
+    if (sync.state === "conflict") {
+      return (
+        <Link to="/templates" title={t("shell.sync_conflict")} data-testid="sync-chip">
+          <StatusBadge status="conflict" />
+        </Link>
+      );
+    }
+    if (sync.state === "syncing") {
+      return (
+        <span title={t("shell.sync_syncing")} data-testid="sync-chip">
+          <StatusBadge status="syncing" />
+        </span>
+      );
+    }
+    if (sync.state === "pending" || sync.pending > 0) {
+      return (
+        <span title={t("shell.sync_pending", { count: sync.pending })} data-testid="sync-chip">
+          <StatusBadge status="pending" label={t("shell.sync_pending", { count: sync.pending })} />
+        </span>
+      );
+    }
+    if (sync.state === "offline") {
+      return (
+        <Link to="/settings" title={t("shell.share_offline")} data-testid="sync-chip">
+          <StatusBadge status="offline" />
+        </Link>
+      );
+    }
     return (
-      <span title={t("shell.share_online", { handle: status.handle })}>
-        <StatusBadge status="online" label={status.handle || t("status.online")} />
+      <span
+        title={sync.lastPullAt ? t("shell.sync_synced", { time: sync.lastPullAt }) : t("shell.share_online", { handle: status.handle })}
+        data-testid="sync-chip"
+      >
+        <StatusBadge status="synced" label={status.handle || t("status.online")} />
       </span>
     );
   }

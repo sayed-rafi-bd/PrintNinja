@@ -1,0 +1,41 @@
+import { useEffect, useRef, useState } from "react";
+import { createSyncScheduler, type SyncStatus } from "@/lib/sync/scheduler";
+import { productionApi, productionCache } from "@/lib/sync/wiring";
+import type { EngineApi, EngineCache } from "@/lib/sync/engine";
+
+const INITIAL: SyncStatus = { state: "syncing", pending: 0, conflicts: 0, lastPullAt: null, lastError: null };
+
+let current: { schedulePushSoon: () => void } | null = null;
+
+/** Tell the running scheduler a local edit needs pushing (3 s debounce). No-op before start. */
+export function notifyLocalEdit(): void {
+	current?.schedulePushSoon();
+}
+
+export function useSyncStatus(deps?: { cache?: EngineCache; api?: EngineApi }): SyncStatus {
+	const [status, setStatus] = useState<SyncStatus>(INITIAL);
+	const schedulerRef = useRef<ReturnType<typeof createSyncScheduler> | null>(null);
+
+	useEffect(() => {
+		const scheduler = createSyncScheduler({
+			cache: deps?.cache ?? productionCache(),
+			api: deps?.api ?? productionApi(),
+			onStatus: setStatus,
+		});
+		schedulerRef.current = scheduler;
+		current = scheduler;
+		scheduler.start();
+		return () => {
+			scheduler.stop();
+			if (current === scheduler) {
+				current = null;
+			}
+			schedulerRef.current = null;
+		};
+		// The scheduler owns its deps for its lifetime; a new cache/api
+		// object means a remount in tests.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+
+	return status;
+}

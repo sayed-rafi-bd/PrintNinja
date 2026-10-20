@@ -101,6 +101,10 @@ const resources = {
         share_online: "Share service connected as {{handle}}",
         share_offline: "Share service unreachable",
         share_signed_out: "Share service: not signed in",
+        sync_conflict: "Sync conflict — review in Templates",
+        sync_pending: "{{count}} change(s) waiting to send",
+        sync_synced: "Last synced {{time}}",
+        sync_syncing: "Syncing…",
       },
       designer: {
         title: "Designer",
