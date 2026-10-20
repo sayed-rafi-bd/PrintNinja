@@ -189,6 +189,13 @@ pub fn ensure_v2_schema(conn: &Connection) -> rusqlite::Result<()> {
         [],
     )?;
 
+    // Section 3 dead code: `sample_datasets` and `presets` were created
+    // by the schema but no Rust code ever read or wrote them, so they
+    // were always empty. New databases no longer create them; existing
+    // ones are tidied here.
+    conn.execute("DROP TABLE IF EXISTS sample_datasets", [])?;
+    conn.execute("DROP TABLE IF EXISTS presets", [])?;
+
     ensure_created_by_allows_sync(conn)?;
 
     Ok(())

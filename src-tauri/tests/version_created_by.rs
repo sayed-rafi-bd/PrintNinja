@@ -255,3 +255,50 @@ fn duplicate_idempotency_keys_are_deduplicated_for_the_unique_index() {
         .unwrap();
     assert_eq!(kept.as_deref(), Some("dup"));
 }
+
+/// Section 3 dead code: `sample_datasets` and `presets` were created by
+/// the schema but no Rust code ever read or wrote them — they were always
+/// empty. Fresh databases no longer create them, and the migration drops
+/// them from existing ones.
+#[test]
+fn the_unused_tables_are_not_created_and_are_dropped() {
+    // Fresh: init never creates them.
+    let conn = Connection::open_in_memory().unwrap();
+    init(&conn).expect("apply schema");
+    for table in ["sample_datasets", "presets"] {
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 0, "{table} must not be created for new databases");
+    }
+
+    // Existing: a database that still carries them comes out clean.
+    let conn = Connection::open_in_memory().unwrap();
+    v1_tables(&conn);
+    conn.execute_batch(
+        "CREATE TABLE sample_datasets (
+             id INTEGER PRIMARY KEY, template_id INTEGER, data_json TEXT
+         );
+         CREATE TABLE presets (
+             id INTEGER PRIMARY KEY, name TEXT
+         );",
+    )
+    .unwrap();
+
+    ensure_v2_schema(&conn).expect("migration must run");
+
+    for table in ["sample_datasets", "presets"] {
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 0, "{table} must be dropped from an existing database");
+    }
+}
