@@ -22,6 +22,10 @@ model User {
   sessions     Session[]
   templates    Template[]
   saved        SavedTemplate[]
+  datasets     SampleDataset[]
+  profiles     PrinterProfile[]
+  settings     UserSetting[]
+  fonts        Font[]
   sync         UserSync?
 
   @@map("users")
@@ -62,9 +66,83 @@ model Tombstone {
   @@map("tombstones")
 }
 
+// Phase 4, deliverable 1: account-owned library records (section 8).
+// Every row carries the owner's change sequence so the delta sync can
+// merge it; deletes leave tombstones with the matching entity name.
+model SampleDataset {
+  id        String   @id @db.Uuid // client-generated, like templates (offline create)
+  ownerId   String   @map("owner_id") @db.Uuid
+  name      String
+  dataJson  String   @default("{}") @map("data_json") @db.Text // sample data JSON, 256 KiB cap checked in the domain
+  revision  Int      @default(1) // +1 on every content change; checked on update
+  changeSeq BigInt   @map("change_seq")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId, changeSeq])
+  @@map("sample_datasets")
+}
+
+model PrinterProfile {
+  id          String   @id @db.Uuid // client-generated, like templates (offline create)
+  ownerId     String   @map("owner_id") @db.Uuid
+  templateId  String   @map("template_id") @db.Uuid
+  printerName String   @map("printer_name") // lowercased on write (question 20)
+  settingsJson String  @default("{}") @map("settings_json") @db.Text
+  revision    Int      @default(1)
+  changeSeq   BigInt   @map("change_seq")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, templateId, printerName])
+  @@index([ownerId, changeSeq])
+  @@map("printer_profiles")
+}
+
+model UserSetting {
+  userId    String   @map("user_id") @db.Uuid
+  key       String
+  value     String   @db.Text
+  revision  Int      @default(1)
+  changeSeq BigInt   @map("change_seq")
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, key])
+  @@index([userId, changeSeq])
+  @@map("user_settings")
+}
+
+model Font {
+  id          String   @id @db.Uuid // client-generated, like templates (offline create)
+  ownerId     String   @map("owner_id") @db.Uuid
+  name        String
+  format      String // ttf | otf | woff2, checked against magic bytes
+  sizeBytes   Int      @map("size_bytes")
+  sha256      String // of the stored bytes; the download ETag
+  revision    Int      @default(1)
+  changeSeq   BigInt   @map("change_seq")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  file        FontFile?
+
+  @@index([ownerId, changeSeq])
+  @@map("fonts")
+}
+
+model FontFile {
+  fontId    String   @id @map("font_id") @db.Uuid
+  bytes     Bytes
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  font      Font     @relation(fields: [fontId], references: [id], onDelete: Cascade)
+
+  @@map("font_files")
+}
+
 // Phase 2, deliverable 1: the template library (section 7). Datasets,
-// profiles, settings and fonts arrive in later slices with their own
-// migrations, which is when their Template relation fields land here too.
 model Template {
   id          String          @id @db.Uuid // client-generated, kept from v1
   ownerId     String          @map("owner_id") @db.Uuid

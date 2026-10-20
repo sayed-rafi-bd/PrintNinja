@@ -9,6 +9,7 @@ import {
 	createFakeUsers,
 } from "./fakes/index.js";
 import { createFakeTemplateRepos } from "./fakes/templates.js";
+import { createFakeLibraryRepos } from "./fakes/library.js";
 
 /**
  * Builds a valid Config for tests without touching process.env. Env
@@ -47,6 +48,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
 export function fakeDeps(overrides: Partial<AppDeps> = {}): AppDeps {
 	const users = createFakeUsers();
 	const library = createFakeTemplateRepos(users);
+	const account = createFakeLibraryRepos();
 	return {
 		users,
 		sessions: createFakeSessions(users),
@@ -58,6 +60,8 @@ export function fakeDeps(overrides: Partial<AppDeps> = {}): AppDeps {
 		templates: library.templates,
 		saved: library.saved,
 		sync: library.sync,
+		datasets: account.datasets,
+		profiles: account.profiles,
 		...overrides,
 	};
 }

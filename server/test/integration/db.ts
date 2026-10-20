@@ -8,6 +8,8 @@ import { createSavedRepository } from "../../src/infra/prisma/saved.js";
 import { createSessionRepository } from "../../src/infra/prisma/sessions.js";
 import { createSyncRepository } from "../../src/infra/prisma/sync.js";
 import { createTemplateRepository } from "../../src/infra/prisma/templates.js";
+import { createDatasetRepository } from "../../src/infra/prisma/datasets.js";
+import { createProfileRepository } from "../../src/infra/prisma/profiles.js";
 import { createUserRepository } from "../../src/infra/prisma/users.js";
 import { createPasswordHasher } from "../../src/infra/security/passwordHasher.js";
 import { createTokenService } from "../../src/infra/security/tokens.js";
@@ -68,6 +70,8 @@ export function realDeps(db: DbClient): AppDeps {
 		ids: { newId: () => crypto.randomUUID() },
 		sessionTtlDays: config.sessionTtlDays,
 		templates: createTemplateRepository(db),
+		datasets: createDatasetRepository(db),
+		profiles: createProfileRepository(db),
 		saved: createSavedRepository(db),
 		sync: createSyncRepository(db),
 	};

@@ -1399,6 +1399,586 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v2/datasets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** @description Create or update a sample dataset by client UUID. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name: string;
+                        dataJson?: string;
+                        if_revision?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            name: string;
+                            data_json: string;
+                            revision: number;
+                            /** Format: date-time */
+                            created_at: string;
+                            /** Format: date-time */
+                            updated_at: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            name: string;
+                            data_json: string;
+                            revision: number;
+                            /** Format: date-time */
+                            created_at: string;
+                            /** Format: date-time */
+                            updated_at: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                428: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** @description Delete a sample dataset. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": unknown;
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v2/profiles/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** @description Create or update a printer profile by client UUID, keyed by template and printer name. */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        template_id: string;
+                        printer_name: string;
+                        settings_json?: string;
+                        if_revision?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            template_id: string;
+                            printer_name: string;
+                            settings_json: string;
+                            revision: number;
+                            /** Format: date-time */
+                            created_at: string;
+                            /** Format: date-time */
+                            updated_at: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            template_id: string;
+                            printer_name: string;
+                            settings_json: string;
+                            revision: number;
+                            /** Format: date-time */
+                            created_at: string;
+                            /** Format: date-time */
+                            updated_at: string;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                428: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** @description Delete a printer profile. */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": unknown;
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v2/saved": {
         parameters: {
             query?: never;

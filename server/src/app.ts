@@ -15,6 +15,7 @@ import type { AppDeps } from "./domain/ports.js";
 import { registerErrorHandling } from "./http/plugins/errorHandler.js";
 import { authRoutes } from "./http/routes/auth.js";
 import { communityRoutes } from "./http/routes/community.js";
+import { libraryRoutes } from "./http/routes/library.js";
 import { healthRoutes } from "./http/routes/health.js";
 import { savedRoutes } from "./http/routes/saved.js";
 import { syncRoutes } from "./http/routes/sync.js";
@@ -131,6 +132,7 @@ export async function buildApp(args: {
 	});
 	await app.register(templateRoutes, { deps });
 	await app.register(communityRoutes, { deps });
+	await app.register(libraryRoutes, { deps });
 	await app.register(savedRoutes, { deps });
 	await app.register(versionRoutes, { deps });
 	await app.register(syncRoutes, { deps, byteBudget: config.syncPageBytes });

@@ -5,6 +5,8 @@ import { purgeExpiredSessions } from "./domain/auth/index.js";
 import { purgeOldTombstones } from "./domain/sync/index.js";
 import type { AppDeps } from "./domain/ports.js";
 import { createDbClient } from "./infra/prisma/client.js";
+import { createDatasetRepository } from "./infra/prisma/datasets.js";
+import { createProfileRepository } from "./infra/prisma/profiles.js";
 import { createSavedRepository } from "./infra/prisma/saved.js";
 import { createSessionRepository } from "./infra/prisma/sessions.js";
 import { createSyncRepository } from "./infra/prisma/sync.js";
@@ -33,6 +35,8 @@ const deps: AppDeps = {
 	ids: { newId: () => randomUUID() },
 	sessionTtlDays: config.sessionTtlDays,
 	templates: createTemplateRepository(db),
+	datasets: createDatasetRepository(db),
+	profiles: createProfileRepository(db),
 	saved: createSavedRepository(db),
 	sync: createSyncRepository(db),
 };
