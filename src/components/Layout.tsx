@@ -14,6 +14,7 @@ import { NAV_GROUPS, NAV_ITEMS, isActivePath } from "@/lib/shell/nav";
 import { useGlobalShortcuts } from "@/lib/shell/useGlobalShortcuts";
 import { useShareStatus } from "@/lib/shell/useShareStatus";
 import { useSyncStatus } from "@/lib/sync/useSyncStatus";
+import { useAdoption } from "@/lib/sync/useAdoption";
 import { usePrefs } from "@/lib/prefs/PrefsProvider";
 import { tauriInvoke } from "@/lib/tauriGuard";
 import { cn } from "@/lib/utils";
@@ -79,6 +80,56 @@ function OfflineBanner() {
     <p data-testid="offline-banner" role="status" className="border-b border-warning/30 bg-warning-soft px-3 py-1.5 text-center text-xs text-warning">
       {t("shell.offline_banner")}
     </p>
+  );
+}
+
+/**
+ * First sync on a migrated install (question 18): local-only templates
+ * wait for one decision instead of uploading silently. Confirming pushes
+ * them private; declining leaves them for the normal schedule.
+ */
+function AdoptionDialog() {
+  const { pending, rows, busy, confirm, decline } = useAdoption();
+  const [open, setOpen] = useState(pending);
+  useEffect(() => {
+    if (pending) setOpen(true);
+  }, [pending]);
+  if (!pending) return null;
+  const names = rows.map((r) => r.name);
+  return (
+    <ConfirmDialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) {
+          void decline();
+        }
+        setOpen(o);
+      }}
+      title={`Back up ${rows.length === 1 ? "1 template" : `${rows.length} templates`} to the server?`}
+      description={
+        <>
+          <p>These templates live only on this PC. Backing them up stores a private copy on the server.</p>
+          <ul className="mt-2 list-disc pl-5">
+            {names.slice(0, 8).map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+          {names.length > 8 && <p>…and {names.length - 8} more.</p>}
+        </>
+      }
+      confirmLabel={busy ? "Backing up…" : "Back up"}
+      cancelLabel="Not now"
+      busy={busy}
+      onConfirm={async () => {
+        // On success the hook clears pending and the dialog unmounts;
+        // on failure it stays open with a toast.
+        try {
+          await confirm();
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : String(e));
+        }
+      }}
+    />
   );
 }
 
@@ -186,6 +237,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </header>
 
       <OfflineBanner />
+      <AdoptionDialog />
 
       <div className="flex min-h-0 flex-1">
         {/* Sidebar: grouped by job */}

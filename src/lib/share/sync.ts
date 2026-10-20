@@ -300,3 +300,35 @@ export async function downloadToLocal(
   }
   return { id: created.id, created: true };
 }
+/**
+ * Push local-only rows after the adoption dialog confirms (question 18):
+ * private creates under their own server ids, then marked pushed so the
+ * engine takes over from there.
+ */
+export async function adoptLocalTemplates(
+  rows: Array<
+    Pick<SyncTemplate, "id" | "name" | "summary" | "page_w_mm" | "page_h_mm" | "readme" | "server_id"> & {
+      html: string;
+      css: string;
+    }
+  >,
+): Promise<{ pushed: number }> {
+  let pushed = 0;
+  for (const row of rows) {
+    const serverId = row.server_id ?? crypto.randomUUID();
+    const remote = await putRemoteTemplate({
+      id: serverId,
+      name: row.name,
+      summary: row.summary ?? "",
+      page_w_mm: row.page_w_mm,
+      page_h_mm: row.page_h_mm,
+      language: "html",
+      body: row.html,
+      css: row.css,
+      readme: row.readme ?? "",
+    });
+    await invoke("cache_mark_pushed", { server_id: remote.id, revision: remote.revision });
+    pushed += 1;
+  }
+  return { pushed };
+}

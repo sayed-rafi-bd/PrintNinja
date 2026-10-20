@@ -46,6 +46,12 @@ export interface EngineCache {
 	forgetTemplate(serverId: string): Promise<boolean>;
 	listQueuedUses(): Promise<QueuedUse[]>;
 	drainUse(serverId: string, count: number): Promise<void>;
+	/**
+	 * True while the first-sync adoption dialog is unanswered: rows that
+	 * were never pushed (no base revision) wait for the person's decision
+	 * instead of uploading silently. Absent means push everything.
+	 */
+	isAdoptionPending?: () => Promise<boolean>;
 }
 
 /** Network side of the engine. Production wires these to `callApi`. */
@@ -143,7 +149,14 @@ export async function pushDirty(cache: EngineCache, api: EngineApi): Promise<{ p
 	const rows = await cache.listDirty();
 	let pushed = 0;
 	const conflicts: string[] = [];
+	const holdUnadopted = (await cache.isAdoptionPending?.()) ?? false;
 	for (const row of rows) {
+		// Local-only rows wait for the adoption dialog while it is
+		// unanswered. Anything with a base revision was confirmed before
+		// (or adopted already) and pushes normally.
+		if (holdUnadopted && row.base_revision == null) {
+			continue;
+		}
 		const serverId = row.server_id ?? freshServerId();
 		const body = {
 			name: row.name,

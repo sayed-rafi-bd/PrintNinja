@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createSyncScheduler, type SyncStatus } from "@/lib/sync/scheduler";
-import { productionApi, productionCache } from "@/lib/sync/wiring";
+import { ensureAdoptionChecked, productionApi, productionCache } from "@/lib/sync/wiring";
 import type { EngineApi, EngineCache } from "@/lib/sync/engine";
 
 const INITIAL: SyncStatus = { state: "syncing", pending: 0, conflicts: 0, lastPullAt: null, lastError: null };
@@ -29,8 +29,18 @@ export function useSyncStatus(deps?: { cache?: EngineCache; api?: EngineApi }): 
 		});
 		schedulerRef.current = scheduler;
 		current = scheduler;
-		scheduler.start();
+		// The adoption check is local IPC; awaiting it first closes the
+		// race where the first push uploads rows the dialog should hold.
+		// A failure leaves the hold off (push everything) rather than
+		// blocking sync.
+		let cancelled = false;
+		void ensureAdoptionChecked()
+			.catch(() => {})
+			.then(() => {
+				if (!cancelled) scheduler.start();
+			});
 		return () => {
+			cancelled = true;
 			scheduler.stop();
 			if (current === scheduler) {
 				current = null;

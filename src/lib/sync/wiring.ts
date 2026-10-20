@@ -1,7 +1,8 @@
 import { callApi, type ApiDeps } from "@/lib/api/client";
 import { invoke } from "@/lib/invoke";
 import { endSession, getServiceUrl, getSessionToken } from "@/lib/share/client";
-import type { EngineApi, EngineCache, SyncChange } from "./engine";
+import { adoptLocalTemplates } from "@/lib/share/sync";
+import type { DirtyRow, EngineApi, EngineCache, SyncChange } from "./engine";
 
 function apiDeps(): ApiDeps {
 	return {
@@ -37,6 +38,7 @@ export function productionCache(): EngineCache {
 		drainUse: async (serverId, count) => {
 			await invoke("cache_queue_use", { server_id: serverId, delta: -count });
 		},
+		isAdoptionPending: async () => adoption.hold,
 	};
 }
 
@@ -55,4 +57,76 @@ export function productionApi(deps: ApiDeps = apiDeps()): EngineApi {
 		postUse: (id, count) =>
 			callApi<void>(deps, { method: "POST", path: `/v2/templates/${id}/use`, body: { count } }),
 	};
+}
+
+export interface HeldRow {
+	id: number;
+	server_id: string | null;
+	name: string;
+}
+
+/**
+ * First-sync adoption (REFACTORING.md question 18): on a migrated
+ * install, local-only rows wait for the person's one-time decision
+ * instead of uploading silently. `hold` gates engine pushes of
+ * never-pushed rows; the dialog confirms (push private now) or declines
+ * (push on the normal schedule).
+ */
+const adoption = {
+	checked: false,
+	hold: false,
+	rows: [] as DirtyRow[],
+};
+
+/** Test seam: the adoption module checks once per app start. */
+export function resetAdoptionForTests(): void {
+	adoption.checked = false;
+	adoption.hold = false;
+	adoption.rows = [];
+}
+
+export function getAdoptionState(): { hold: boolean; rows: HeldRow[] } {
+	return {
+		hold: adoption.hold,
+		rows: adoption.rows.map(({ id, server_id, name }) => ({ id, server_id, name })),
+	};
+}
+
+/** Run once at startup: decide whether the adoption dialog must appear. */
+export async function ensureAdoptionChecked(): Promise<void> {
+	if (adoption.checked) {
+		return;
+	}
+	adoption.checked = true;
+	try {
+		const [adopted, migrated, dirty] = await Promise.all([
+			invoke<string | null>("get_setting", { key: "sync_adopted" }),
+			invoke<string | null>("get_setting", { key: "install_migrated" }),
+			invoke<DirtyRow[]>("cache_list_dirty"),
+		]);
+		const unpushed = dirty.filter((r) => r.base_revision == null);
+		if (adopted == null && migrated != null && unpushed.length > 0) {
+			adoption.hold = true;
+			adoption.rows = unpushed;
+		}
+	} catch {
+		adoption.hold = false;
+		adoption.rows = [];
+	}
+}
+
+/** Push the held rows private and remember the answer. A failure keeps
+ * the dialog pending so the person can retry once back online. */
+export async function confirmAdoption(): Promise<void> {
+	await adoptLocalTemplates(adoption.rows);
+	adoption.hold = false;
+	adoption.rows = [];
+	await invoke("set_setting", { key: "sync_adopted", value: "yes" }).catch(() => {});
+}
+
+/** Dismiss without pushing; the rows upload on the normal schedule. */
+export async function declineAdoption(): Promise<void> {
+	adoption.hold = false;
+	adoption.rows = [];
+	await invoke("set_setting", { key: "sync_adopted", value: "no" }).catch(() => {});
 }

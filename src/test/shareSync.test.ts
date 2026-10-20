@@ -243,6 +243,24 @@ describe("refreshFromServer", () => {
   });
 });
 
+describe("adoptLocalTemplates", () => {
+  it("pushes each row private and marks it pushed", async () => {
+    client.putRemoteTemplate
+      .mockResolvedValueOnce({ ...REMOTE, id: "s1", published_at: null, revision: 1 })
+      .mockResolvedValueOnce({ ...REMOTE, id: "s2", published_at: null, revision: 1 });
+    const { adoptLocalTemplates } = await import("@/lib/share/sync");
+    const res = await adoptLocalTemplates([
+      { id: 1, name: "A", summary: "", page_w_mm: 210, page_h_mm: 297, readme: "", server_id: "s1", html: "<p>a</p>", css: "" },
+      { id: 2, name: "B", summary: "", page_w_mm: 210, page_h_mm: 297, readme: "", server_id: null, html: "<p>b</p>", css: "" },
+    ]);
+    expect(res).toEqual({ pushed: 2 });
+    expect(client.putRemoteTemplate).toHaveBeenCalledTimes(2);
+    expect(client.putRemoteTemplate.mock.calls[0][0]).toMatchObject({ id: "s1", body: "<p>a</p>" });
+    expect(client.putRemoteTemplate.mock.calls[1][0]).toMatchObject({ body: "<p>b</p>" });
+    expect(calls("cache_mark_pushed")).toHaveLength(2);
+  });
+});
+
 describe("downloadToLocal", () => {
   it("adds the template with its CSS, README and server link", async () => {
     client.fetchRemoteTemplate.mockResolvedValue(REMOTE);

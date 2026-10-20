@@ -151,6 +151,34 @@ describe("pushDirty", () => {
 		expect(bodies[0]).not.toHaveProperty("if_revision");
 	});
 
+	it("holds unpushed rows while adoption is pending", async () => {
+		const puts: unknown[] = [];
+		const cacheWithHold = (hold: boolean) =>
+			cache({
+				listDirty: async () => [
+					row({ server_id: "a", base_revision: null }),
+					row({ server_id: "b", id: 8, base_revision: 1 }),
+				],
+				isAdoptionPending: async () => hold,
+			});
+		const api: EngineApi = {
+			fetchChanges: async () => ({ changes: [], next_cursor: "", has_more: false, reset: false }),
+			fetchTemplate: async () => ({ revision: 1 }),
+			putTemplate: async (id, body) => {
+				puts.push([id, body]);
+				return { revision: 2 };
+			},
+			deleteTemplate: async () => {},
+			postUse: async () => {},
+		};
+		const held = await pushDirty(cacheWithHold(true), api);
+		expect(held).toEqual({ pushed: 1, conflicts: [] });
+		expect(puts).toEqual([["b", expect.objectContaining({ if_revision: 1 })]]);
+
+		const released = await pushDirty(cacheWithHold(false), api);
+		expect(released).toEqual({ pushed: 2, conflicts: [] });
+	});
+
 	it("retries a 428 as an update against the stored revision", async () => {
 		const puts: unknown[] = [];
 		const marks: unknown[] = [];
