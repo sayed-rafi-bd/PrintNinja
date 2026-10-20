@@ -1,0 +1,46 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "PrintNinja API",
+    "version": "0.5.0"
+  },
+  "components": {
+    "schemas": {}
+  },
+  "paths": {
+    "/v2/health": {
+      "get": {
+        "description": "Liveness and version.",
+        "responses": {
+          "200": {
+            "description": "Liveness and version of the service.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    },
+                    "version": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "version"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Liveness and version of the service."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

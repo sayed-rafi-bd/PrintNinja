@@ -34,6 +34,10 @@ yarn-error.log*
 src-tauri/target
 src-tauri/gen/schemas
 
+# Server (TypeScript service, REFACTORING.md Phase 1)
+server/dist
+server/src/infra/prisma/generated
+
 # Test reports
 playwright-report
 test-results

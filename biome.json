@@ -3,7 +3,16 @@
   "vcs": { "enabled": false },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["src/**/*.{ts,tsx}", "index.html", "vite.config.ts"]
+    "includes": [
+      "src/**/*.{ts,tsx}",
+      "index.html",
+      "vite.config.ts",
+      "server/src/**/*.ts",
+      "server/test/**/*.ts",
+      "e2e/**/*.ts",
+      "!server/src/infra/prisma/generated/**",
+      "!server/dist/**"
+    ]
   },
   "formatter": { "enabled": false },
   "linter": {
