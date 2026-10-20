@@ -102,7 +102,7 @@ The hosted counterpart to the app's local cache. Auth: register `201`, login `20
 
 ```bash
 cd server
-cp ../env.example .env   # edit POSTGRES_PASSWORD and CORS_ORIGINS at minimum
+cp .env.sample .env   # usable defaults; edit POSTGRES_PASSWORD for anything shared
 docker compose up -d     # postgres:16 + service, migrates on boot
 curl localhost:3001/v2/health
 ```

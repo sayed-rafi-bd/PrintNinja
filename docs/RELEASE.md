@@ -176,7 +176,7 @@ From `server/` (the stack lives next to the service):
 
 ```bash
 cd server
-cp ../env.example .env   # set POSTGRES_PASSWORD (required) and CORS_ORIGINS
+cp .env.sample .env   # usable defaults; edit POSTGRES_PASSWORD for anything shared
 docker compose up -d --build
 ```
 
