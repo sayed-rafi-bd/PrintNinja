@@ -535,3 +535,169 @@ fn sync_state_table_holds_one_row() {
     );
     assert!(second.is_err(), "sync_state must stay a single row");
 }
+
+// ───────────────────────────────────────────────────────────────
+// sync dirty writes and local tombstones (Phase 3)
+// ───────────────────────────────────────────────────────────────
+
+use printninja_lib::commands::template::{
+    write_delete_template, write_template, write_template_meta, CreateTemplateRequest,
+    UpdateTemplateMetaRequest,
+};
+use printninja_lib::commands::version::create_version_conn;
+use printninja_lib::commands::version::CreateVersionRequest;
+
+fn new_template(name: &str) -> CreateTemplateRequest {
+    CreateTemplateRequest {
+        name: name.to_string(),
+        page_w_mm: Some(210),
+        page_h_mm: Some(297),
+        orientation: None,
+        html: Some("<p>x</p>".to_string()),
+        css: None,
+        compiled_css: None,
+        compiled_key: None,
+        readme: None,
+        summary: None,
+        server_id: None,
+        sync_state: None,
+        kind: None,
+        owner_handle: None,
+        server_revision: None,
+        base_revision: None,
+    }
+}
+
+fn sync_row(conn: &Connection, id: i64) -> (Option<String>, String, Option<i64>, String) {
+    conn.query_row(
+        "SELECT server_id, sync_state, server_revision, kind FROM templates WHERE id = ?1",
+        [id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    )
+    .unwrap()
+}
+
+#[test]
+fn create_marks_new_rows_dirty_with_a_fresh_server_id() {
+    let (_state, conn) = test_db();
+    let tpl = write_template(&conn, &new_template("Fresh")).unwrap();
+
+    let (server_id, state, revision, kind) = sync_row(&conn, tpl.id);
+    let server_id = server_id.expect("new rows get a server id");
+    assert!(
+        uuid::Uuid::parse_str(&server_id).is_ok(),
+        "v4 uuid, got {server_id}"
+    );
+    assert_eq!(state, "dirty");
+    assert_eq!(revision, None);
+    assert_eq!(kind, "own");
+}
+
+#[test]
+fn create_accepts_a_synced_server_copy() {
+    let (_state, conn) = test_db();
+    let tpl = write_template(
+        &conn,
+        &CreateTemplateRequest {
+            server_id: Some("srv-1".to_string()),
+            sync_state: Some("synced".to_string()),
+            kind: Some("saved".to_string()),
+            owner_handle: Some("ana".to_string()),
+            server_revision: Some(4),
+            base_revision: Some(4),
+            ..new_template("Downloaded")
+        },
+    )
+    .unwrap();
+
+    let (server_id, state, revision, kind) = sync_row(&conn, tpl.id);
+    assert_eq!(server_id.as_deref(), Some("srv-1"));
+    assert_eq!(state, "synced");
+    assert_eq!(revision, Some(4));
+    assert_eq!(kind, "saved");
+}
+
+#[test]
+fn edits_mark_the_row_dirty_but_never_undelete_it() {
+    let (_state, conn) = test_db();
+    // Start synced (as if just pulled), so the dirty transition is visible.
+    let tpl = write_template(
+        &conn,
+        &CreateTemplateRequest {
+            server_id: Some("srv-2".to_string()),
+            sync_state: Some("synced".to_string()),
+            ..new_template("Editable")
+        },
+    )
+    .unwrap();
+    write_template_meta(
+        &conn,
+        &UpdateTemplateMetaRequest {
+            id: tpl.id,
+            name: "Editable".to_string(),
+            page_w_mm: 210,
+            page_h_mm: 297,
+            summary: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(sync_row(&conn, tpl.id).1, "dirty");
+
+    create_version_conn(
+        &conn,
+        CreateVersionRequest {
+            template_id: tpl.id,
+            html: "<p>v2</p>".to_string(),
+            css: String::new(),
+            label: None,
+            note: None,
+            created_by: None,
+            compiled_css: None,
+            compiled_key: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(sync_row(&conn, tpl.id).1, "dirty");
+}
+
+#[test]
+fn delete_tombstones_and_hides_the_row_while_keeping_history() {
+    let (_state, conn) = test_db();
+    let tpl = write_template(&conn, &new_template("Doomed")).unwrap();
+    let versions_before: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM template_versions WHERE template_id = ?1",
+            [tpl.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(versions_before, 1);
+
+    write_delete_template(&conn, tpl.id).unwrap();
+    assert_eq!(sync_row(&conn, tpl.id).1, "deleted_pending");
+
+    // Lists and direct reads skip tombstones.
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM templates WHERE sync_state <> 'deleted_pending'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 0);
+
+    // Deleting twice is still "not found", and the name is reusable.
+    assert!(write_delete_template(&conn, tpl.id).is_err());
+    let tpl2 = write_template(&conn, &new_template("Doomed")).unwrap();
+    assert_ne!(tpl2.id, tpl.id);
+
+    // The version history survives for restore and diff.
+    let versions_after: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM template_versions WHERE template_id = ?1",
+            [tpl.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(versions_after, 1);
+}

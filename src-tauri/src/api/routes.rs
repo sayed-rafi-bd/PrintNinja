@@ -290,7 +290,7 @@ async fn list_templates(State(state): State<ApiState>) -> Result<Json<Value>, Ap
         .prepare(
             "SELECT t.id, t.name, t.page_w_mm, t.page_h_mm, t.orientation,
                     (SELECT COUNT(*) FROM template_versions v WHERE v.template_id = t.id)
-             FROM templates t ORDER BY t.name",
+             FROM templates t WHERE t.sync_state <> 'deleted_pending' ORDER BY t.name",
         )
         .map_err(ApiRejection::from)?;
 
@@ -369,7 +369,7 @@ async fn print_job(
         let template_id: Option<i64> = match &req.template {
             Some(name) if !name.is_empty() => Some(
                 conn.query_row(
-                    "SELECT id FROM templates WHERE name = ?1 COLLATE NOCASE",
+                    "SELECT id FROM templates WHERE name = ?1 COLLATE NOCASE AND sync_state <> 'deleted_pending'",
                     [name],
                     |r| r.get(0),
                 )
@@ -523,7 +523,7 @@ async fn batch_print(
     let template_id: i64 = match &req.template {
         Some(n) if !n.is_empty() => tx
             .query_row(
-                "SELECT id FROM templates WHERE name = ?1 COLLATE NOCASE",
+                "SELECT id FROM templates WHERE name = ?1 COLLATE NOCASE AND sync_state <> 'deleted_pending'",
                 [n],
                 |r| r.get(0),
             )

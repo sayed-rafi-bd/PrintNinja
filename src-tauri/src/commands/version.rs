@@ -147,7 +147,8 @@ pub fn create_version_conn(
     let version_id = tx.last_insert_rowid();
 
     tx.execute(
-        "UPDATE templates SET current_version_id = ?1, updated_at = datetime('now')
+        "UPDATE templates SET current_version_id = ?1, updated_at = datetime('now'),
+                sync_state = CASE WHEN sync_state = 'deleted_pending' THEN 'deleted_pending' ELSE 'dirty' END
          WHERE id = ?2",
         rusqlite::params![version_id, req.template_id],
     )?;
