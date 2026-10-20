@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ChevronRight, CircleHelp, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -24,40 +24,35 @@ function ShareIndicator() {
   const sync = useSyncStatus();
   if (status.state === "unconfigured") return null;
   if (status.state === "online") {
+    // One wrapper carries the test id (registry: exactly once in src/);
+    // the badge inside reflects the sync state.
+    let title: string;
+    let badge: ReactNode;
+    let to: string | null = null;
     if (sync.state === "conflict") {
-      return (
-        <Link to="/templates" title={t("shell.sync_conflict")} data-testid="sync-chip">
-          <StatusBadge status="conflict" />
-        </Link>
-      );
+      title = t("shell.sync_conflict");
+      badge = <StatusBadge status="conflict" />;
+      to = "/templates";
+    } else if (sync.state === "syncing") {
+      title = t("shell.sync_syncing");
+      badge = <StatusBadge status="syncing" />;
+    } else if (sync.state === "pending" || sync.pending > 0) {
+      title = t("shell.sync_pending", { count: sync.pending });
+      badge = <StatusBadge status="pending" label={t("shell.sync_pending", { count: sync.pending })} />;
+    } else if (sync.state === "offline") {
+      title = t("shell.share_offline");
+      badge = <StatusBadge status="offline" />;
+      to = "/settings";
+    } else {
+      title = sync.lastPullAt
+        ? t("shell.sync_synced", { time: sync.lastPullAt })
+        : t("shell.share_online", { handle: status.handle });
+      badge = <StatusBadge status="synced" label={status.handle || t("status.online")} />;
     }
-    if (sync.state === "syncing") {
-      return (
-        <span title={t("shell.sync_syncing")} data-testid="sync-chip">
-          <StatusBadge status="syncing" />
-        </span>
-      );
-    }
-    if (sync.state === "pending" || sync.pending > 0) {
-      return (
-        <span title={t("shell.sync_pending", { count: sync.pending })} data-testid="sync-chip">
-          <StatusBadge status="pending" label={t("shell.sync_pending", { count: sync.pending })} />
-        </span>
-      );
-    }
-    if (sync.state === "offline") {
-      return (
-        <Link to="/settings" title={t("shell.share_offline")} data-testid="sync-chip">
-          <StatusBadge status="offline" />
-        </Link>
-      );
-    }
+    const inner = <span title={title}>{badge}</span>;
     return (
-      <span
-        title={sync.lastPullAt ? t("shell.sync_synced", { time: sync.lastPullAt }) : t("shell.share_online", { handle: status.handle })}
-        data-testid="sync-chip"
-      >
-        <StatusBadge status="synced" label={status.handle || t("status.online")} />
+      <span data-testid="sync-chip">
+        {to ? <Link to={to}>{inner}</Link> : inner}
       </span>
     );
   }
@@ -72,6 +67,18 @@ function ShareIndicator() {
     <Link to="/settings" className="text-xs text-muted-foreground underline-offset-2 hover:underline">
       {t("shell.share_signed_out")}
     </Link>
+  );
+}
+
+/** Banner over the content while the gate is open but the server is down. */
+function OfflineBanner() {
+  const { t } = useTranslation();
+  const status = useShareStatus();
+  if (status.state !== "offline") return null;
+  return (
+    <p data-testid="offline-banner" role="status" className="border-b border-warning/30 bg-warning-soft px-3 py-1.5 text-center text-xs text-warning">
+      {t("shell.offline_banner")}
+    </p>
   );
 }
 
@@ -177,6 +184,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </Button>
         </div>
       </header>
+
+      <OfflineBanner />
 
       <div className="flex min-h-0 flex-1">
         {/* Sidebar: grouped by job */}
