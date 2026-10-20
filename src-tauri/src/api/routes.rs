@@ -102,11 +102,12 @@ async fn auth_middleware_inner(
 
     match decision {
         AuthDecision::Allow => next.run(request).await,
-        AuthDecision::Duplicate => (
+        AuthDecision::Duplicate(job_id) => (
             StatusCode::OK,
             Json(json!({
                 "status": "duplicate",
-                "message": "idempotency key already used; job not created"
+                "message": "idempotency key already used; job not created",
+                "job_id": job_id.to_string()
             })),
         )
             .into_response(),
@@ -126,7 +127,8 @@ async fn auth_middleware_inner(
 /// Outcome of the auth check.
 enum AuthDecision {
     Allow,
-    Duplicate,
+    /// Key already taken; carries the job that owns it.
+    Duplicate(i64),
     Unauthorized,
     Unavailable,
 }
@@ -143,17 +145,21 @@ fn check_auth(
     };
     let conn = guard.connection();
 
-    // Idempotency replay must not print twice (PLANNING.md 7.1).
+    // Idempotency replay must not print twice (PLANNING.md 7.1). This is a
+    // fast path only — two requests can still both pass it before either
+    // inserts. The atomic reservation is the unique index on
+    // `idempotency_key` hit at begin_job (P12); that constraint is what
+    // makes the race print once.
     if let Some(key) = idempotency.and_then(|v| v.to_str().ok()) {
-        let existing: i64 = conn
+        let existing: Option<i64> = conn
             .query_row(
-                "SELECT COUNT(*) FROM print_jobs WHERE idempotency_key = ?1",
+                "SELECT id FROM print_jobs WHERE idempotency_key = ?1",
                 [key],
                 |r| r.get(0),
             )
-            .unwrap_or(0);
-        if existing > 0 {
-            return AuthDecision::Duplicate;
+            .ok();
+        if let Some(id) = existing {
+            return AuthDecision::Duplicate(id);
         }
     }
 
@@ -355,8 +361,8 @@ async fn print_job(
         data_url: req.data_url.clone(),
         test: req.test,
         source: Some("api".into()),
-        // Persisted by `record_job`; the replay guard in `check_auth`
-        // looks for an existing row with this key.
+        // Recorded by the begin_job INSERT under a unique index; `check_auth`
+        // only fast-paths an existing row with this key.
         idempotency_key,
     };
 
@@ -377,6 +383,18 @@ async fn print_job(
             let err = res.error.unwrap_or_else(|| "print failed".into());
             Err(ApiRejection::from(crate::error::AppError::Internal(err)))
         }
+        // Lost the insert race for this key: the unique index recorded the
+        // winner's row before either request printed, so report that job
+        // instead of printing again (P12). Same body as the middleware's
+        // fast-path replay above.
+        Err(crate::error::AppError::DuplicateJob(id)) => Ok((
+            StatusCode::OK,
+            Json(json!({
+                "status": "duplicate",
+                "message": "idempotency key already used; job not created",
+                "job_id": id.to_string()
+            })),
+        )),
         Err(e) => Err(ApiRejection::from(e)),
     }
 }

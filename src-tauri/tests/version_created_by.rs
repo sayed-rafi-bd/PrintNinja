@@ -88,15 +88,10 @@ fn v1_authors_still_work() {
     }
 }
 
-/// A database created by the original v1 schema — CHECK without 'sync', no
-/// compiled_* columns — must come out of `ensure_v2_schema` with its rows
-/// intact, the compiled columns added, and 'sync' accepted.
-#[test]
-fn old_database_is_rebuilt_and_keeps_every_row() {
-    let conn = Connection::open_in_memory().unwrap();
-    // The v1-era DDL, verbatim: no compiled_* columns, and a CHECK that
-    // rejects 'sync'. Stated here (not read from schema.sql) because
-    // schema.sql now carries the current definition.
+/// The v1-era DDL, verbatim: no compiled_* columns, and a CHECK that
+/// rejects 'sync'. Stated here (not read from schema.sql) because
+/// schema.sql now carries the current definition.
+fn v1_tables(conn: &Connection) {
     conn.execute_batch(
         "CREATE TABLE templates (
              id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -130,8 +125,20 @@ fn old_database_is_rebuilt_and_keeps_every_row() {
              allowed_ips TEXT,
              created_at TEXT NOT NULL DEFAULT (datetime('now')),
              last_used_at TEXT
-         );
-         INSERT INTO templates (name) VALUES ('Old');
+         );",
+    )
+    .unwrap();
+}
+
+/// A database created by the original v1 schema — CHECK without 'sync', no
+/// compiled_* columns — must come out of `ensure_v2_schema` with its rows
+/// intact, the compiled columns added, and 'sync' accepted.
+#[test]
+fn old_database_is_rebuilt_and_keeps_every_row() {
+    let conn = Connection::open_in_memory().unwrap();
+    v1_tables(&conn);
+    conn.execute_batch(
+        "INSERT INTO templates (name) VALUES ('Old');
          INSERT INTO template_versions (template_id, version_no, html, css, created_by)
          VALUES (1, 1, '<p>first</p>', '.a{}', 'manual'),
                (1, 2, '<p>second</p>', '.b{}', 'restore');",
@@ -182,4 +189,69 @@ fn old_database_is_rebuilt_and_keeps_every_row() {
         .query_row("SELECT COUNT(*) FROM template_versions", [], |r| r.get(0))
         .unwrap();
     assert_eq!(count, 3);
+}
+
+/// P12: `print_jobs.idempotency_key` must end up unique so two simultaneous
+/// `POST /v1/print` requests with one key print once. Old rows can share a
+/// key, so the migration keeps the newest per key, clears the rest, and only
+/// then creates the index — without failing on an existing database.
+#[test]
+fn duplicate_idempotency_keys_are_deduplicated_for_the_unique_index() {
+    let conn = Connection::open_in_memory().unwrap();
+    v1_tables(&conn);
+    conn.execute_batch(
+        "CREATE TABLE print_jobs (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             idempotency_key TEXT
+         );
+         INSERT INTO print_jobs (idempotency_key) VALUES ('dup'), ('dup'), ('solo');",
+    )
+    .unwrap();
+
+    ensure_v2_schema(&conn).expect("migration must run on an old database");
+
+    // The older duplicate was cleared; the newest row keeps the key.
+    let keys: Vec<Option<String>> = conn
+        .prepare("SELECT idempotency_key FROM print_jobs ORDER BY id")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        keys,
+        vec![None, Some("dup".into()), Some("solo".into())],
+        "keep the newest row per key, clear the rest"
+    );
+
+    // The index exists and really is unique …
+    let dup = conn.execute(
+        "INSERT INTO print_jobs (idempotency_key) VALUES ('dup')",
+        [],
+    );
+    assert!(dup.is_err(), "one key must name one row: {dup:?}");
+
+    // … while new keys still insert, and NULL keys (UI/IPC prints) are not
+    // constrained — SQLite unique indexes allow any number of NULLs.
+    conn.execute(
+        "INSERT INTO print_jobs (idempotency_key) VALUES ('fresh')",
+        [],
+    )
+    .expect("a fresh key must be accepted");
+    conn.execute(
+        "INSERT INTO print_jobs (idempotency_key) VALUES (NULL), (NULL)",
+        [],
+    )
+    .expect("NULL keys are unconstrained");
+
+    // Idempotent: a second run neither fails nor re-clears.
+    ensure_v2_schema(&conn).expect("second run must not fail");
+    let kept: Option<String> = conn
+        .query_row(
+            "SELECT idempotency_key FROM print_jobs WHERE id = 2",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(kept.as_deref(), Some("dup"));
 }

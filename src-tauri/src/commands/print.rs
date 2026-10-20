@@ -743,6 +743,11 @@ fn redact_with_secrets(html: &str, secrets: &[String]) -> String {
 /// reported by a failure is the row's own id. The row used to be written
 /// only *after* printing ended, with `started_at` equal to `finished_at`
 /// (both stamped at the same moment) and a running job invisible.
+///
+/// Also the atomic reservation of the request's idempotency key (P12): the
+/// unique index on `idempotency_key` makes this INSERT the point where the
+/// key is taken — before render and before send — so two simultaneous
+/// requests with one key insert once and print once.
 fn begin_job(
     db: &DbState,
     req: &PrintRequest,
@@ -783,7 +788,7 @@ fn begin_job(
         .as_ref()
         .and_then(|d| serde_json::to_string(d).ok());
 
-    conn.execute(
+    match conn.execute(
         "INSERT INTO print_jobs
            (template_id, template_version_id, printer_id, source, source_url,
             status, copies, settings_json, rendered_html, is_test,
@@ -802,9 +807,35 @@ fn begin_job(
             req.idempotency_key,
             data_json,
         ],
-    )?;
-
-    Ok(conn.last_insert_rowid())
+    ) {
+        Ok(_) => Ok(conn.last_insert_rowid()),
+        // The unique index on `idempotency_key` makes this insert the atomic
+        // reservation of the key (P12): two simultaneous requests with one
+        // key insert once, so they print once — and both record the key
+        // before any send. Only the key can collide (the id is
+        // autoincrement), and the loser gets the winner's job id to report
+        // as the duplicate response.
+        Err(rusqlite::Error::SqliteFailure(e, _))
+            if e.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
+                || e.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY =>
+        {
+            let existing: Option<i64> = req.idempotency_key.as_ref().and_then(|key| {
+                conn.query_row(
+                    "SELECT id FROM print_jobs WHERE idempotency_key = ?1",
+                    [key],
+                    |r| r.get(0),
+                )
+                .ok()
+            });
+            match existing {
+                Some(id) => Err(AppError::DuplicateJob(id)),
+                None => Err(AppError::Database(
+                    "job insert hit an unexpected unique constraint".into(),
+                )),
+            }
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Close a job opened by [`begin_job`]: terminal status, error, the

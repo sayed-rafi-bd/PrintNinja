@@ -151,6 +151,32 @@ pub fn ensure_v2_schema(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute("ALTER TABLE print_jobs ADD COLUMN data_json TEXT", [])?;
     }
 
+    // `POST /v1/print` replays are atomic only if an idempotency key names
+    // one job (P12): the job-row insert records the key before the send, and
+    // this unique index is what makes two simultaneous requests with one key
+    // print once — the loser hits the constraint and gets the duplicate
+    // response instead of a second physical print. Old rows can hold
+    // duplicates, so keep the newest per key and clear the rest first, or
+    // index creation fails on an existing database.
+    if has_print_jobs > 0 {
+        if !column_exists(conn, "print_jobs", "idempotency_key")? {
+            conn.execute("ALTER TABLE print_jobs ADD COLUMN idempotency_key TEXT", [])?;
+        }
+        conn.execute(
+            "UPDATE print_jobs SET idempotency_key = NULL
+             WHERE idempotency_key IS NOT NULL
+               AND id NOT IN (SELECT MAX(id) FROM print_jobs
+                              WHERE idempotency_key IS NOT NULL
+                              GROUP BY idempotency_key)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_print_jobs_idempotency
+             ON print_jobs(idempotency_key)",
+            [],
+        )?;
+    }
+
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_templates_remote ON templates(remote_id)",
         [],

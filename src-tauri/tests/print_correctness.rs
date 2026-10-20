@@ -388,6 +388,73 @@ async fn a_job_without_data_still_gets_its_template_rendered() {
 }
 
 // ───────────────────────────────────────────────────────────────
+// P12
+// ───────────────────────────────────────────────────────────────
+
+/// Fails the test by panicking: a duplicate must end before the render
+/// stage, so this renderer is never called.
+struct PanicRenderer;
+
+#[async_trait::async_trait]
+impl JobRenderer for PanicRenderer {
+    async fn render(
+        &self,
+        _final_html: &str,
+        _w_mm: f64,
+        _h_mm: f64,
+        _orientation: &str,
+    ) -> anyhow::Result<Vec<u8>> {
+        panic!("a duplicate must never reach the render step");
+    }
+}
+
+/// P12: the idempotency key is reserved by the `begin_job` INSERT under a
+/// unique index — recorded before render and before send. The request that
+/// loses that insert race gets `DuplicateJob` carrying the winner's id, and
+/// no second pipeline run happens at all.
+#[tokio::test]
+async fn losing_the_insert_race_reports_the_existing_job_and_prints_nothing() {
+    let db = test_db();
+    seed_printer(&db, "Mock", "127.0.0.1:1");
+
+    // The winner's row, exactly what the loser's INSERT collides with.
+    let winner = {
+        let guard = db.lock().unwrap();
+        let conn = guard.connection();
+        conn.execute(
+            "INSERT INTO print_jobs (source, status, idempotency_key)
+             VALUES ('api', 'printing', 'race-key')",
+            [],
+        )
+        .expect("seed the winner row");
+        conn.last_insert_rowid()
+    };
+
+    let queue = PrintQueue::new();
+    let mut req = print_request("Mock");
+    req.idempotency_key = Some("race-key".to_string());
+
+    let err = run_print_with(&cache_dir(), &db, &queue, req, &PanicRenderer)
+        .await
+        .expect_err("the key is already taken");
+    let id = match err {
+        printninja_lib::AppError::DuplicateJob(id) => id,
+        other => panic!("expected DuplicateJob, got {other:?}"),
+    };
+    assert_eq!(id, winner, "the loser is told which job owns the key");
+
+    // One key, one row: nothing was recorded twice — and nothing rendered.
+    let n: i64 = {
+        let guard = db.lock().unwrap();
+        guard
+            .connection()
+            .query_row("SELECT COUNT(*) FROM print_jobs", [], |r| r.get(0))
+            .unwrap()
+    };
+    assert_eq!(n, 1, "one key must keep exactly one job row");
+}
+
+// ───────────────────────────────────────────────────────────────
 // P7
 // ───────────────────────────────────────────────────────────────
 

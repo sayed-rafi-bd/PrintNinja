@@ -283,6 +283,75 @@ async fn duplicate_idempotency_key_does_not_create_a_second_job() {
     assert_eq!(n, 1, "idempotent replay must not print twice");
 }
 
+/// P12: two simultaneous requests with one idempotency key print once.
+/// Both can pass the `check_auth` fast path before either inserts; the
+/// unique index on `idempotency_key` is what still records one job — the
+/// loser answers `200 duplicate` instead of running the pipeline again.
+#[tokio::test]
+async fn two_simultaneous_requests_with_one_key_print_once() {
+    let (db, key) = setup();
+    seed_printers_and_templates(&db);
+
+    let body = serde_json::json!({
+        "template": "Receipt",
+        "printer": "Desk",
+        "data": {"order": 2}
+    })
+    .to_string();
+
+    let send = |app: axum::Router, body: String, key: String| async move {
+        app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/print")
+                .header("authorization", format!("Bearer {}", key))
+                .header("content-type", "application/json")
+                .header("idempotency-key", "race-1")
+                .body(axum::body::Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    };
+
+    // Interleaved on one runtime, so each request gets past the replay
+    // fast-path check before the other's insert lands, worst case.
+    let (res_a, res_b) = tokio::join!(
+        send(router(&db), body.clone(), key.clone()),
+        send(router(&db), body, key),
+    );
+
+    // One of the two ran the pipeline (its status is the pipeline's own —
+    // success or failure), and the other is the 200 duplicate.
+    let duplicates = [res_a.status(), res_b.status()]
+        .iter()
+        .filter(|s| **s == StatusCode::OK)
+        .count();
+    assert!(
+        duplicates >= 1,
+        "the loser must answer 200 duplicate, got {:?} and {:?}",
+        res_a.status(),
+        res_b.status()
+    );
+
+    let guard = db.lock().unwrap();
+    let c = guard.connection();
+    let n: i64 = c
+        .query_row(
+            "SELECT COUNT(*) FROM print_jobs WHERE idempotency_key = 'race-1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        n,
+        1,
+        "one key must record exactly one job (statuses {:?}, {:?})",
+        res_a.status(),
+        res_b.status()
+    );
+}
+
 /// Build the router the way the real app does.
 ///
 /// The state carries a print queue and a cache dir so `POST /v1/print` runs

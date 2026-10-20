@@ -10,6 +10,10 @@ pub enum AppError {
     Validation(String),
     #[error("Internal error: {0}")]
     Internal(String),
+    /// The idempotency key was already taken by another job row — the loser
+    /// of a two-simultaneous-requests race gets the existing job id (P12).
+    #[error("Idempotency key already used by job {0}")]
+    DuplicateJob(i64),
 }
 
 impl From<rusqlite::Error> for AppError {

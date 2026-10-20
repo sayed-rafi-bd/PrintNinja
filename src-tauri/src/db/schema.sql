@@ -135,5 +135,9 @@ CREATE INDEX IF NOT EXISTS idx_jobs_printer ON print_jobs(printer_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_template ON print_jobs(template_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_batch ON print_jobs(batch_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_created ON print_jobs(created_at);
+-- One row per idempotency key: this index is the atomic reservation that
+-- makes two simultaneous POST /v1/print requests with one key print once
+-- (P12). Multiple NULL keys are fine — SQLite unique indexes allow NULLs.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_print_jobs_idempotency ON print_jobs(idempotency_key);
 CREATE INDEX IF NOT EXISTS idx_versions_template ON template_versions(template_id);
 CREATE INDEX IF NOT EXISTS idx_datasets_template ON sample_datasets(template_id);
