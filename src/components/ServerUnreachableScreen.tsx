@@ -16,7 +16,10 @@ export function ServerUnreachableScreen({ url, retrying, onRetry, onChangeServer
   const { t } = useTranslation();
   const { appName } = usePrefs();
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background p-4">
+    <main
+      data-testid="gate-unreachable"
+      className="flex min-h-screen items-center justify-center bg-background p-4"
+    >
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-3">
           <CloudOff className="h-10 w-10 text-muted-foreground" aria-hidden="true" />

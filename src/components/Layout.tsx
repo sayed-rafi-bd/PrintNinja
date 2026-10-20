@@ -108,7 +108,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const modKey = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl";
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background">
+    <div
+      data-testid="shell-app"
+      className="flex h-screen flex-col overflow-hidden bg-background"
+    >
       <a
         href="#main"
         className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-[60] focus:rounded-md focus:bg-primary focus:px-3 focus:py-2 focus:text-primary-foreground"

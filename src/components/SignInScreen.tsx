@@ -69,7 +69,10 @@ export function SignInScreen({ initialUrl, notice, onSignedIn }: SignInScreenPro
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background p-4">
+    <main
+      data-testid="signin-form"
+      className="flex min-h-screen items-center justify-center bg-background p-4"
+    >
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-3">
           <AppLogo src={logo} className="h-10 w-10" />
@@ -90,6 +93,7 @@ export function SignInScreen({ initialUrl, notice, onSignedIn }: SignInScreenPro
               <Label htmlFor="auth-url">{t("auth.server_address")}</Label>
               <Input
                 id="auth-url"
+                data-testid="auth-url"
                 type="url"
                 inputMode="url"
                 autoComplete="url"
@@ -109,6 +113,7 @@ export function SignInScreen({ initialUrl, notice, onSignedIn }: SignInScreenPro
               <Label htmlFor="auth-handle">{t("auth.handle")}</Label>
               <Input
                 id="auth-handle"
+                data-testid="auth-handle"
                 autoComplete="username"
                 autoCapitalize="none"
                 spellCheck={false}
@@ -123,6 +128,7 @@ export function SignInScreen({ initialUrl, notice, onSignedIn }: SignInScreenPro
               <Label htmlFor="auth-password">{t("auth.password")}</Label>
               <Input
                 id="auth-password"
+                data-testid="auth-password"
                 type="password"
                 autoComplete={registering ? "new-password" : "current-password"}
                 value={password}
