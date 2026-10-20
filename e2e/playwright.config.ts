@@ -1,13 +1,18 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Phase 1 spike, item 4: Vite serves the app at 1420 (the dev port, strict),
-// Chromium drives it, and support/fake-agent.mjs answers the Tauri IPC.
-// The Phase 1 e2e deliverable extends this with stack setup, fixtures and the
-// F-series specs.
+// The e2e stack (REFACTORING.md Phase 1): globalSetup starts PostgreSQL,
+// runs the committed migrations, starts the built service and bundles the
+// fake agent; every spec gets a fresh browser context through fixtures.
+// Vite serves the app at 1420; the API port is the setup's business.
 export default defineConfig({
   testDir: "./tests",
   testMatch: "**/*.e2e.ts",
+  fullyParallel: true,
   reporter: [["list"], ["html", { open: "never" }]],
+  retries: process.env.CI ? 1 : 0,
+  workers: process.env.CI ? 4 : undefined,
+  globalSetup: "./support/stack.ts",
+  globalTeardown: "./support/stack-teardown.ts",
   use: {
     baseURL: "http://localhost:1420",
     trace: "on-first-retry",
