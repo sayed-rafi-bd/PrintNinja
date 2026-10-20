@@ -100,6 +100,7 @@ export function SettingsPage() {
   const [newTrusted, setNewTrusted] = useState("");
 
   const [fonts, setFonts] = useState<FontRow[]>([]);
+  const [fontUploadError, setFontUploadError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [shareUrl, setShareUrl] = useState("");
@@ -255,7 +256,18 @@ export function SettingsPage() {
     }
   };
 
+  // A completed pull may bring another PC's fonts (or confirm a
+  // delete); reload so the list shows it with no manual step (F10).
+  useEffect(() => {
+    const onPulled = () => {
+      void loadFonts();
+    };
+    window.addEventListener("sync:pulled", onPulled);
+    return () => window.removeEventListener("sync:pulled", onPulled);
+  }, [loadFonts]);
+
   const uploadFont = async (file: File) => {
+    setFontUploadError("");
     try {
       const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
       await agent("upload_font", {
@@ -266,7 +278,9 @@ export function SettingsPage() {
       toast.success(`Uploaded ${file.name}`);
       await loadFonts();
     } catch (e) {
-      toast.error(`Upload failed: ${e}`);
+      // The wrong content (a non-font with a font extension) must read
+      // inline, not just in a toast (F10).
+      setFontUploadError(`Upload failed: ${e}`);
     }
   };
 
@@ -417,6 +431,7 @@ export function SettingsPage() {
                 fonts.map((f) => (
                   <div
                     key={f.id}
+                    data-testid={`font-row-${f.id}`}
                     className="flex items-center justify-between p-3 rounded-md border"
                   >
                     <div>
@@ -424,11 +439,19 @@ export function SettingsPage() {
                       <p className="text-xs text-muted-foreground uppercase">
                         {f.format}
                       </p>
+                      <p data-testid={`font-state-${f.id}`} className="text-xs text-muted-foreground">
+                        {f.state === "ready"
+                          ? "Ready"
+                          : f.state === "error"
+                            ? "Download failed — will retry"
+                            : "Downloading…"}
+                      </p>
                     </div>
                     <Button
                       variant="ghost"
                       size="sm"
                       aria-label={`Remove ${f.family}`}
+                      data-testid={`font-delete-${f.id}`}
                       onClick={async () => {
                         try {
                           await agent("delete_font", { id: f.id });
@@ -458,10 +481,13 @@ export function SettingsPage() {
                   e.target.value = "";
                 }}
               />
-              <Button variant="outline" onClick={() => fileRef.current?.click()}>
+              <Button variant="outline" data-testid="settings-font-upload" onClick={() => fileRef.current?.click()}>
                 <Upload className="h-4 w-4" />
                 Upload Font (TTF, OTF, WOFF2)
               </Button>
+              {fontUploadError && (
+                <p role="alert" className="text-sm text-danger">{fontUploadError}</p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -563,6 +589,7 @@ export function SettingsPage() {
                 <Label htmlFor="api-port">Port</Label>
                 <Input
                   id="api-port"
+                  data-testid="settings-api-port"
                   type="number"
                   min="1"
                   max="65535"

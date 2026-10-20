@@ -55,7 +55,7 @@ export function PrefsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const readAll = async () => {
       const [d, n, l] = await Promise.all([
         readSetting(SETTING_KEYS.density),
         readSetting(SETTING_KEYS.appName),
@@ -65,8 +65,16 @@ export function PrefsProvider({ children }: { children: React.ReactNode }) {
       setDensityState(parseDensity(d));
       setAppNameState(sanitizeAppName(n));
       setLogoState(isValidLogoDataUrl(l) ? l : null);
-    })();
-    return () => { cancelled = true; };
+    };
+    void readAll();
+    // A completed pull may bring another PC's preferences; re-read so
+    // the new values apply with no reload (F11).
+    const onPulled = () => void readAll();
+    window.addEventListener("sync:pulled", onPulled);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("sync:pulled", onPulled);
+    };
   }, []);
 
   useEffect(() => {

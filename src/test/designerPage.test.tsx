@@ -10,7 +10,8 @@ import { DesignerPage } from "@/pages/Designer";
 // install does (see smoke.test.tsx).
 const TEMPLATE_ROW = { id: 1, name: "Receipt", page_w_mm: 80, page_h_mm: 200, orientation: "portrait" };
 let templateId = 0;
-const EMPTY_LISTS = new Set(["list_templates", "list_versions", "list_fonts", "list_printers", "list_profiles"]);
+const EMPTY_LISTS = new Set(["list_templates", "list_versions", "list_fonts", "list_printers", "list_datasets",
+  "list_profiles"]);
 const invoke = vi.fn(async (cmd: string) => {
   if (EMPTY_LISTS.has(cmd)) return [];
   if (cmd === "create_template") return { ...TEMPLATE_ROW, id: ++templateId };

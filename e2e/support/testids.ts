@@ -52,4 +52,14 @@ export const testids = {
 	designerSaveVersion: "designer-save-version",
 	/** Designer sync bar: manual sync button. */
 	templateSyncNow: "template-sync-now",
+	/** Settings appearance: app name field. */
+	settingsBrandName: "settings-brand-name",
+	/** Settings appearance: density radio group. */
+	settingsDensity: "settings-density",
+	/** Settings appearance: logo upload button. */
+	settingsLogoUpload: "settings-logo-upload",
+	/** Settings local API: port field (device-local, never syncs). */
+	settingsApiPort: "settings-api-port",
+	/** Settings fonts: upload button. */
+	settingsFontUpload: "settings-font-upload",
 } as const;

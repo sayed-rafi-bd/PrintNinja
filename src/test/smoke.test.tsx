@@ -28,6 +28,7 @@ const EMPTY_LISTS = new Set([
   "list_fonts",
   "list_jobs",
   "list_printers",
+  "list_datasets",
   "list_profiles",
   "list_templates",
   "list_versions",

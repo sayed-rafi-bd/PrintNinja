@@ -61,7 +61,7 @@ export function AppearanceSettings() {
           <CardTitle className="text-base">Density</CardTitle>
         </CardHeader>
         <CardContent>
-          <div role="radiogroup" aria-label="Density" className="grid gap-2 sm:grid-cols-2">
+          <div role="radiogroup" aria-label="Density" data-testid="settings-density" className="grid gap-2 sm:grid-cols-2">
             {DENSITIES.map((d) => {
               const selected = density === d.value;
               return (
@@ -98,6 +98,7 @@ export function AppearanceSettings() {
             <Label htmlFor="brand-name">App name</Label>
             <Input
               id="brand-name"
+              data-testid="settings-brand-name"
               value={name}
               maxLength={MAX_APP_NAME_LENGTH}
               placeholder={DEFAULT_APP_NAME}
@@ -124,7 +125,7 @@ export function AppearanceSettings() {
                   e.target.value = "";
                 }}
               />
-              <Button variant="outline" onClick={() => fileRef.current?.click()}>
+              <Button variant="outline" data-testid="settings-logo-upload" onClick={() => fileRef.current?.click()}>
                 <Upload className="h-4 w-4" aria-hidden="true" />
                 Upload logo
               </Button>

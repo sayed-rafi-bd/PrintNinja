@@ -15,7 +15,7 @@ import { ClassWarnings } from "@/components/designer/ClassWarnings";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { DESKTOP_QUERY, WIDE_QUERY, useMediaQuery } from "@/lib/hooks/useMediaQuery";
 import { usePersistentState } from "@/lib/hooks/usePersistentState";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { agent } from "@/lib/agent/commands";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -162,14 +162,44 @@ export function DesignerPage() {
   const [_templatesLoading, setTemplatesLoading] = useState(true);
   void _templatesLoading;
 
-  // Sample datasets (variables)
-  const [datasets, setDatasets] = useState<Dataset[]>([
-    {
-      name: "Sample Order",
-      json: JSON.stringify(DEFAULT_MOCK_DATA, null, 2),
-      isDefault: true,
-    },
-  ]);
+  // Sample datasets (variables). Persisted through the agent and
+  // synced like templates; the built-in Sample Order is the fallback
+  // when the cache holds none yet.
+  const [datasets, setDatasets] = useState<Array<Dataset & { id?: number | null }>>([]);
+
+  const loadDatasets = useCallback(async () => {
+    try {
+      const rows = (await agent("list_datasets", {})) ?? [];
+      setDatasets(
+        rows.map((r) => ({ id: r.id, name: r.name, json: r.data_json, isDefault: false })),
+      );
+    } catch {
+      /* web mode or backend unavailable: the fallback below applies */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDatasets();
+  }, [loadDatasets]);
+
+  // A completed pull lands rows after mount; reload so the new content
+  // shows with no manual step.
+  useEffect(() => {
+    const onPulled = () => void loadDatasets();
+    window.addEventListener("sync:pulled", onPulled);
+    return () => window.removeEventListener("sync:pulled", onPulled);
+  }, [loadDatasets]);
+
+  const visibleDatasets: Dataset[] =
+    datasets.length > 0
+      ? datasets
+      : [
+          {
+            name: "Sample Order",
+            json: JSON.stringify(DEFAULT_MOCK_DATA, null, 2),
+            isDefault: true,
+          },
+        ];
 
   const loadTemplate = (tpl: {
     id: number;
@@ -836,12 +866,12 @@ export function DesignerPage() {
 
   const sampleData = useMemo<Record<string, unknown>>(() => {
     try {
-      const ds = datasets.find((d) => d.name === selectedDatasetName) ?? datasets[0];
+      const ds = visibleDatasets.find((d) => d.name === selectedDatasetName) ?? visibleDatasets[0];
       return JSON.parse(ds.json);
     } catch {
       return DEFAULT_MOCK_DATA as Record<string, unknown>;
     }
-  }, [datasets, selectedDatasetName]);
+  }, [visibleDatasets, selectedDatasetName]);
 
   const handleSaveReadme = async () => {
     if (!currentTemplateDbId) {
@@ -872,7 +902,7 @@ export function DesignerPage() {
 
   const sampleDataPanel = (
     <SampleDataPanel
-      datasets={datasets}
+      datasets={visibleDatasets}
       selectedName={selectedDatasetName}
       onSelect={setSelectedDatasetName}
       onAdd={() => {
@@ -886,11 +916,22 @@ export function DesignerPage() {
         setShowEditDataset(true);
       }}
       onDelete={(ds) => {
-        setDatasets((prev) => prev.filter((d) => d.name !== ds.name));
-        if (selectedDatasetName === ds.name) {
-          setSelectedDatasetName(datasets[0]?.name ?? "");
-        }
-        toast.success("Dataset deleted");
+        void (async () => {
+          try {
+            const row = datasets.find((d) => d.name === ds.name);
+            if (row?.id != null) {
+              await agent("delete_dataset", { id: row.id });
+              notifyLocalEdit();
+            }
+            await loadDatasets();
+            if (selectedDatasetName === ds.name) {
+              setSelectedDatasetName(visibleDatasets[0]?.name ?? "");
+            }
+            toast.success("Dataset deleted");
+          } catch (e) {
+            toast.error(`Delete failed: ${e}`);
+          }
+        })();
       }}
     />
   );
@@ -1251,9 +1292,17 @@ export function DesignerPage() {
                 toast.error("Invalid JSON");
                 return;
               }
-              setDatasets((prev) => [...prev, { name: datasetName, json: datasetJson, isDefault: false }]);
-              setShowDatasetDialog(false);
-              toast.success(`Dataset "${datasetName}" added`);
+              void (async () => {
+                try {
+                  await agent("save_dataset", { req: { name: datasetName, data_json: datasetJson } });
+                  await loadDatasets();
+                  notifyLocalEdit();
+                  setShowDatasetDialog(false);
+                  toast.success(`Dataset "${datasetName}" added`);
+                } catch (e) {
+                  toast.error(`Add failed: ${e}`);
+                }
+              })();
             }}>Add</Button>
           </DialogFooter>
         </DialogContent>
@@ -1286,9 +1335,20 @@ export function DesignerPage() {
                 toast.error("Invalid JSON");
                 return;
               }
-              setDatasets((prev) => prev.map((d) => d.name === editingDataset ? { ...d, json: editJson } : d));
-              setShowEditDataset(false);
-              toast.success("Dataset updated");
+              void (async () => {
+                try {
+                  const row = datasets.find((d) => d.name === editingDataset);
+                  await agent("save_dataset", {
+                    req: { id: row?.id ?? null, name: editingDataset ?? "", data_json: editJson },
+                  });
+                  await loadDatasets();
+                  notifyLocalEdit();
+                  setShowEditDataset(false);
+                  toast.success("Dataset updated");
+                } catch (e) {
+                  toast.error(`Save failed: ${e}`);
+                }
+              })();
             }}>Save</Button>
           </DialogFooter>
         </DialogContent>
