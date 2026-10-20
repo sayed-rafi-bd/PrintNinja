@@ -352,6 +352,100 @@ async fn two_simultaneous_requests_with_one_key_print_once() {
     );
 }
 
+/// P12: `callback_url` is accepted-and-ignored nowhere — there is no
+/// callback runner, so a caller that relied on one would never learn the
+/// outcome. Refused with 400 before any DB work: a request the server will
+/// not honour creates no job.
+#[tokio::test]
+async fn callback_url_is_refused_with_400_before_anything_runs() {
+    let (db, key) = setup();
+    seed_printers_and_templates(&db);
+
+    let body = serde_json::json!({
+        "template": "Receipt",
+        "printer": "Desk",
+        "callback_url": "https://example.com/done"
+    })
+    .to_string();
+
+    let app = router(&db);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/print")
+                .header("authorization", format!("Bearer {}", key))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::BAD_REQUEST,
+        "callback_url must be refused, not silently dropped"
+    );
+
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let msg = String::from_utf8_lossy(&bytes);
+    assert!(
+        msg.contains("callback_url"),
+        "the refusal names the field: {msg}"
+    );
+
+    let guard = db.lock().unwrap();
+    let n: i64 = guard
+        .connection()
+        .query_row("SELECT COUNT(*) FROM print_jobs", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0, "nothing runs for a refused request");
+}
+
+/// P12's `data` half: the handler treats `data` as optional, so a print
+/// without it must reach the pipeline — which records its row (P15) —
+/// instead of dying as a validation error.
+#[tokio::test]
+async fn a_print_without_data_is_not_a_validation_error() {
+    let (db, key) = setup();
+    seed_printers_and_templates(&db);
+
+    let body = serde_json::json!({
+        "template": "Receipt",
+        "printer": "Desk"
+    })
+    .to_string();
+
+    let app = router(&db);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/print")
+                .header("authorization", format!("Bearer {}", key))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(
+        res.status(),
+        StatusCode::BAD_REQUEST,
+        "missing `data` is not a validation error"
+    );
+
+    // Past validation means the pipeline ran and recorded its row.
+    let guard = db.lock().unwrap();
+    let n: i64 = guard
+        .connection()
+        .query_row("SELECT COUNT(*) FROM print_jobs", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 1, "the job was attempted, not rejected");
+}
+
 /// Build the router the way the real app does.
 ///
 /// The state carries a print queue and a cache dir so `POST /v1/print` runs
@@ -845,18 +939,112 @@ async fn openapi_documents_the_print_response_codes() {
         "must not document the old fake 'queued' 202"
     );
 
-    // The body is required and documented as such.
+    // The body is required; only `template` and `printer` are. The handler
+    // treats `data` as optional, so the contract must not claim otherwise
+    // (P12: "openapi.rs says data is required; the code treats it as
+    // optional").
     let required = spec["paths"]["/v1/print"]["post"]["requestBody"]["required"]
         .as_bool()
         .unwrap_or(false);
     assert!(required, "requestBody must be required");
-    for field in ["template", "printer", "data"] {
+    let fields: Vec<&str> = spec["paths"]["/v1/print"]["post"]["requestBody"]["content"]
+        ["application/json"]["schema"]["required"]
+        .as_array()
+        .expect("`required` must be an array")
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    assert!(
+        fields.contains(&"template") && fields.contains(&"printer"),
+        "template and printer are required: {fields:?}"
+    );
+    assert!(
+        !fields.contains(&"data"),
+        "`data` is optional in the handler, so it must not be documented as required: {fields:?}"
+    );
+}
+
+/// P12: the hand-written document must describe what the router really
+/// returns — batch queues rows for the worker and answers `202`, cancel
+/// answers `204` with no body, and the jobs endpoints answer `404`/`400`
+/// for missing or non-terminal jobs.
+#[tokio::test]
+async fn the_openapi_document_matches_the_router() {
+    let (db, key) = setup();
+    let app = router(&db);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/openapi.json")
+                .header("authorization", format!("Bearer {}", key))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let spec: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let paths = &spec["paths"];
+    let codes = |path: &str, method: &str| -> Vec<String> {
+        paths[path][method]["responses"]
+            .as_object()
+            .unwrap_or_else(|| panic!("documented responses for {method} {path}"))
+            .keys()
+            .cloned()
+            .collect()
+    };
+
+    // Batch really queues for the worker: 202, not a "created" 200.
+    let batch = codes("/v1/print/batch", "post");
+    for want in ["202", "400", "401", "404"] {
         assert!(
-            spec["paths"]["/v1/print"]["post"]["requestBody"]["content"]["application/json"]
-                ["schema"]["required"]
-                .as_array()
-                .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(field))),
-            "{field} must be documented as required"
+            batch.contains(&want.to_string()),
+            "batch must document {want}: {batch:?}"
         );
     }
+    assert!(
+        !batch.iter().any(|c| c == "200"),
+        "batch answers 202, not 200: {batch:?}"
+    );
+
+    // Cancel answers 204 with no body.
+    let delete = codes("/v1/jobs/{id}", "delete");
+    for want in ["204", "400", "401"] {
+        assert!(
+            delete.contains(&want.to_string()),
+            "cancel must document {want}: {delete:?}"
+        );
+    }
+    assert!(
+        !delete.iter().any(|c| c == "200"),
+        "cancel answers 204, not 200: {delete:?}"
+    );
+
+    // Get reports a missing job with 404; retry with 404 and a refused
+    // re-queue with 400.
+    let get = codes("/v1/jobs/{id}", "get");
+    for want in ["200", "401", "404"] {
+        assert!(
+            get.contains(&want.to_string()),
+            "get must document {want}: {get:?}"
+        );
+    }
+    let retry = codes("/v1/jobs/{id}/retry", "post");
+    for want in ["200", "400", "401", "404"] {
+        assert!(
+            retry.contains(&want.to_string()),
+            "retry must document {want}: {retry:?}"
+        );
+    }
+
+    // The document describes its own endpoint.
+    let spec_ep = codes("/v1/openapi.json", "get");
+    assert!(
+        spec_ep.iter().any(|c| c == "200"),
+        "the spec endpoint must document itself: {spec_ep:?}"
+    );
 }

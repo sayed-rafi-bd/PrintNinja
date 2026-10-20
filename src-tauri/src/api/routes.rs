@@ -255,8 +255,10 @@ struct PrintJobRequest {
     data_url: Option<String>,
     settings: Option<Value>,
     test: Option<bool>,
-    #[allow(dead_code)]
+    /// Refused with 400 in `print_job` — never silently accepted (P12).
     callback_url: Option<String>,
+    /// Body-level key, currently unread: the API takes the key from the
+    /// `Idempotency-Key` header. Kept for wire compatibility.
     #[allow(dead_code)]
     idempotency_key: Option<String>,
 }
@@ -271,6 +273,17 @@ async fn print_job(
         .get("idempotency-key")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
+
+    // `callback_url` was accepted and ignored (P12): there is no callback
+    // runner, so a caller that relied on one would never learn the outcome.
+    // Refused before any DB work — a request the server will not honour
+    // creates no job.
+    if let Some(callback) = &req.callback_url {
+        return Err(ApiRejection::BadRequest(format!(
+            "`callback_url` is not supported (got `{callback}`); \
+             poll `GET /v1/jobs/{{id}}` for the outcome"
+        )));
+    }
 
     let settings = req.settings.unwrap_or_else(|| json!({}));
     let copies = settings
