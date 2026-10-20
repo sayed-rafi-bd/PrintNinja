@@ -4,6 +4,7 @@ import {
 	RevisionRequiredError,
 } from "../../src/domain/errors.js";
 import { toPage } from "../../src/domain/pagination.js";
+import type { SyncEntity, SyncRepository } from "../../src/domain/syncPorts.js";
 import type {
 	CommunitySort,
 	PageQuery,
@@ -44,7 +45,7 @@ interface SavedRow {
 export interface FakeTemplateStore {
 	templates: Map<string, StoredTemplate>;
 	seqs: Map<string, bigint>;
-	tombstones: { userId: string; seq: bigint; entity: string; entityKey: string }[];
+	tombstones: { userId: string; seq: bigint; entity: string; entityKey: string; deletedAt: Date }[];
 	saved: Map<string, SavedRow[]>;
 	tick: number;
 }
@@ -56,6 +57,7 @@ export function createFakeTemplateRepos(users: {
 }): {
 	templates: TemplateRepository;
 	saved: SavedRepository;
+	sync: SyncRepository;
 	store: FakeTemplateStore;
 } {
 	const store: FakeTemplateStore = {
@@ -130,7 +132,22 @@ export function createFakeTemplateRepos(users: {
 	const sortFor = (sort: CommunitySort) =>
 		sort === "used" ? compareUsed : sort === "name" ? compareName : compareUpdated;
 
-	const paginate = (
+	function estimateSize(candidate: { kind: "upsert"; template: StoredTemplate } | { kind: "delete" }): number {
+	if (candidate.kind === "delete") {
+		return 100;
+	}
+	const t = candidate.template;
+	return (
+		Buffer.byteLength(t.body, "utf8") +
+		Buffer.byteLength(t.css, "utf8") +
+		Buffer.byteLength(t.readme, "utf8") +
+		Buffer.byteLength(t.name, "utf8") +
+		Buffer.byteLength(t.summary, "utf8") +
+		500
+	);
+}
+
+const paginate = (
 		rows: StoredTemplate[],
 		query: PageQuery,
 		map: (stored: StoredTemplate) => TemplateSummaryView = toSummary,
@@ -232,16 +249,14 @@ export function createFakeTemplateRepos(users: {
 				seq: bumpSeq(stored.ownerId),
 				entity: "template",
 				entityKey: id,
+				deletedAt: now(),
 			});
+			// Saved rows survive on purpose: the manifest reports them as
+			// deleted (E14). Only versions cascade with the template.
 			store.templates.delete(id);
-			for (const rows of store.saved.values()) {
-				const index = rows.findIndex((row) => row.templateId === id);
-				if (index >= 0) {
-					rows.splice(index, 1);
-				}
-			}
 			return { ownerId: stored.ownerId };
 		},
+
 
 		async listVersions(templateId, query) {
 			const stored = store.templates.get(templateId) ?? null;
@@ -370,9 +385,84 @@ export function createFakeTemplateRepos(users: {
 				rows.splice(index, 1);
 			}
 		},
+
+		async listManifest(userId) {
+			const rows = [...(store.saved.get(userId) ?? [])].sort(
+				(a, b) => b.addedAt.getTime() - a.addedAt.getTime() || (a.templateId < b.templateId ? -1 : 1),
+			);
+			return rows.map((row) => {
+				const template = store.templates.get(row.templateId) ?? null;
+				if (template) {
+					return { templateId: row.templateId, addedAt: row.addedAt, template: toView(template), deletedAt: null };
+				}
+				const tomb = store.tombstones.find(
+					(t) => t.userId === userId && t.entity === "template" && t.entityKey === row.templateId,
+				);
+				return { templateId: row.templateId, addedAt: row.addedAt, template: null, deletedAt: tomb?.deletedAt ?? null };
+			});
+		},
 	};
 
-	return { templates, saved, store };
+	const sync: SyncRepository = {
+		async tombstoneFloor(userId) {
+			const seqs = store.tombstones.filter((t) => t.userId === userId).map((t) => t.seq);
+			return seqs.length === 0 ? 0n : seqs.reduce((m, v) => (v < m ? v : m));
+		},
+		async readSince(userId, query, byteBudget) {
+			type Candidate =
+				| { seq: bigint; kind: "upsert"; template: StoredTemplate }
+				| { seq: bigint; kind: "delete"; entity: SyncEntity; entityKey: string };
+			const candidates: Candidate[] = [];
+			if (query.types.includes("template")) {
+				for (const t of store.templates.values()) {
+					if (t.ownerId === userId && t.changeSeq > query.cursor) {
+						candidates.push({ seq: t.changeSeq, kind: "upsert", template: t });
+					}
+				}
+			}
+			for (const t of store.tombstones) {
+				if (t.userId === userId && t.seq > query.cursor && query.types.includes(t.entity as SyncEntity)) {
+					candidates.push({ seq: t.seq, kind: "delete", entity: t.entity as SyncEntity, entityKey: t.entityKey });
+				}
+			}
+			candidates.sort((a, b) => (a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0));
+			const hasMoreProbe = candidates.length > query.limit;
+			const page = candidates.slice(0, query.limit);
+			let used = 0;
+			let kept = page.length;
+			for (let i = 0; i < page.length; i += 1) {
+				const size = estimateSize(page[i]);
+				if (used + size > byteBudget && i > 0) {
+					kept = i;
+					break;
+				}
+				used += size;
+			}
+			const trimmed = page.slice(0, kept);
+			return {
+				changes: trimmed.map((c) =>
+					c.kind === "delete"
+						? { seq: c.seq, entity: c.entity, entityKey: c.entityKey }
+						: {
+								seq: c.seq,
+								entity: "template",
+								data: toView(c.template),
+								headVersionNo: c.template.versions.reduce((m, v) => Math.max(m, v.versionNo), 0),
+							},
+				),
+				nextCursor: trimmed.length > 0 ? trimmed[trimmed.length - 1].seq : query.cursor,
+				hasMore: hasMoreProbe || kept < page.length,
+			};
+		},
+		async purgeTombstones(olderThan) {
+			const before = store.tombstones.length;
+			const cutoff = olderThan.getTime();
+			store.tombstones = store.tombstones.filter((t) => t.deletedAt.getTime() > cutoff);
+			return before - store.tombstones.length;
+		},
+	};
+
+	return { templates, saved, sync, store };
 }
 
 function recordOf(stored: StoredTemplate): TemplateRecord {

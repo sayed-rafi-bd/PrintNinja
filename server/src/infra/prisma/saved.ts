@@ -1,50 +1,43 @@
 import type {
+	ManifestSource,
 	PageQuery,
 	SavedRepository,
-	TemplateSummaryView,
 } from "../../domain/templatePorts.js";
 import { toPage } from "../../domain/pagination.js";
 import type { DbClient } from "./client.js";
+import { toTemplateSummaryView, toTemplateView } from "./views.js";
 
-type PrismaSavedRow = {
-	template: {
-		id: string;
-		ownerId: string;
-		owner: { handle: string };
-		name: string;
-		summary: string;
-		pageWMm: number;
-		pageHMm: number;
-		language: string;
-		useCount: number;
-		revision: number;
-		publishedAt: Date | null;
-		updatedAt: Date;
-		_count: { versions: number };
-	};
-};
-
+/**
+ * Saved rows survive template deletes (no FK to templates — E14 needs
+ * the manifest to report them as deleted), so joins are manual and
+ * bounded by the 1,000-row per-user quota.
+ */
 export function createSavedRepository(db: DbClient): SavedRepository {
 	return {
 		async list(userId: string, query: PageQuery) {
+			const saved = await db.savedTemplate.findMany({
+				where: { userId },
+				orderBy: [{ addedAt: "desc" }, { templateId: "asc" }],
+			});
+			const templates = await db.template.findMany({
+				where: {
+					id: { in: saved.map((row) => row.templateId) },
+					publishedAt: { not: null },
+				},
+				include: { owner: { select: { handle: true } }, _count: { select: { versions: true } } },
+			});
+			const byId = new Map(templates.map((t) => [t.id, t]));
 			// Unpublished templates are filtered out but their rows
 			// survive, so republishing restores the list as it was.
-			const where = { userId, template: { publishedAt: { not: null } } };
-			const [total, rows] = await Promise.all([
-				db.savedTemplate.count({ where }),
-				db.savedTemplate.findMany({
-					where,
-					include: {
-						template: {
-							include: { owner: { select: { handle: true } }, _count: { select: { versions: true } } },
-						},
-					},
-					orderBy: [{ addedAt: "desc" }, { templateId: "asc" }],
-					skip: (query.page - 1) * query.pageSize,
-					take: query.pageSize,
-				}),
-			]);
-			return toPage(rows.map((row) => toSummary(row.template)), total, query);
+			const items = saved.flatMap((row) => {
+				const template = byId.get(row.templateId);
+				return template ? [toTemplateSummaryView(template)] : [];
+			});
+			return toPage(
+				items.slice((query.page - 1) * query.pageSize, query.page * query.pageSize),
+				items.length,
+				query,
+			);
 		},
 
 		async countByUser(userId: string): Promise<number> {
@@ -62,23 +55,40 @@ export function createSavedRepository(db: DbClient): SavedRepository {
 		async unsave(userId: string, templateId: string): Promise<void> {
 			await db.savedTemplate.deleteMany({ where: { userId, templateId } });
 		},
-	};
-}
 
-function toSummary(template: PrismaSavedRow["template"]): TemplateSummaryView {
-	return {
-		id: template.id,
-		ownerId: template.ownerId,
-		ownerHandle: template.owner.handle,
-		name: template.name,
-		summary: template.summary,
-		pageWMm: template.pageWMm,
-		pageHMm: template.pageHMm,
-		language: template.language,
-		useCount: template.useCount,
-		revision: template.revision,
-		versionCount: template._count.versions,
-		publishedAt: template.publishedAt,
-		updatedAt: template.updatedAt,
+		async listManifest(userId: string): Promise<ManifestSource[]> {
+			const saved = await db.savedTemplate.findMany({
+				where: { userId },
+				orderBy: [{ addedAt: "desc" }, { templateId: "asc" }],
+			});
+			const templates = await db.template.findMany({
+				where: { id: { in: saved.map((row) => row.templateId) } },
+				include: { owner: { select: { handle: true } }, _count: { select: { versions: true } } },
+			});
+			const byId = new Map(templates.map((t) => [t.id, t]));
+			const out: ManifestSource[] = [];
+			for (const row of saved) {
+				const template = byId.get(row.templateId) ?? null;
+				if (template) {
+					out.push({
+						templateId: row.templateId,
+						addedAt: row.addedAt,
+						template: toTemplateView(template),
+						deletedAt: null,
+					});
+					continue;
+				}
+				const tomb = await db.tombstone.findFirst({
+					where: { userId, entity: "template", entityKey: row.templateId },
+				});
+				out.push({
+					templateId: row.templateId,
+					addedAt: row.addedAt,
+					template: null,
+					deletedAt: tomb?.deletedAt ?? null,
+				});
+			}
+			return out;
+		},
 	};
 }

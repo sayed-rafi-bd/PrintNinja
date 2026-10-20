@@ -27,7 +27,10 @@ interface Envelope {
 }
 
 async function post(path: string, body?: unknown, token?: string) {
-	const headers: Record<string, string> = {};
+	// No keep-alive: each request opens a fresh connection. A pooled
+	// socket goes stale across E10's service restart and would fail the
+	// next test with a socket error instead of an assertion.
+	const headers: Record<string, string> = { connection: "close" };
 	if (body !== undefined) {
 		headers["content-type"] = "application/json";
 	}

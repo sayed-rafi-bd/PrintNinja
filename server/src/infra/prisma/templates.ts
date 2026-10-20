@@ -7,38 +7,19 @@ import type {
 	PageQuery,
 	PublishedQuery,
 	TemplateRepository,
-	TemplateSummaryView,
 	TemplateView,
 	TemplateWrite,
-	VersionSummaryView,
-	VersionView,
 	VersionWrite,
 } from "../../domain/templatePorts.js";
 import { toPage } from "../../domain/pagination.js";
 import type { DbClient } from "./client.js";
 import type { Prisma } from "./generated/index.js";
-
-type PrismaTemplate = {
-	id: string;
-	ownerId: string;
-	name: string;
-	summary: string;
-	pageWMm: number;
-	pageHMm: number;
-	language: string;
-	body: string;
-	css: string;
-	readme: string;
-	useCount: number;
-	revision: number;
-	changeSeq: bigint;
-	publishedAt: Date | null;
-	firstPublishedAt: Date | null;
-	createdAt: Date;
-	updatedAt: Date;
-	owner: { handle: string };
-	_count: { versions: number };
-};
+import {
+	toTemplateSummaryView,
+	toTemplateView,
+	toVersionSummaryView,
+	toVersionView,
+} from "./views.js";
 
 /**
  * One repository per aggregate (REFACTORING.md section 5). Mutations run
@@ -340,84 +321,8 @@ function isUniqueViolation(error: unknown): boolean {
 	);
 }
 
-function toView(template: PrismaTemplate): TemplateView {
-	return {
-		...recordFields(template),
-		ownerHandle: template.owner.handle,
-		versionCount: template._count.versions,
-	};
-}
-
-type PrismaVersion = {
-	templateId: string;
-	versionNo: number;
-	body: string;
-	css: string;
-	createdBy: "manual" | "autosave" | "restore";
-	label: string | null;
-	note: string | null;
-	createdAt: Date;
-};
-
-function toVersion(row: PrismaVersion): VersionView {
-	return {
-		templateId: row.templateId,
-		versionNo: row.versionNo,
-		body: row.body,
-		css: row.css,
-		createdBy: row.createdBy,
-		label: row.label,
-		note: row.note,
-		createdAt: row.createdAt,
-	};
-}
-
-function toVersionSummary(row: PrismaVersion): VersionSummaryView {
-	return {
-		versionNo: row.versionNo,
-		createdBy: row.createdBy,
-		label: row.label,
-		note: row.note,
-		createdAt: row.createdAt,
-	};
-}
-
-function toSummary(template: PrismaTemplate): TemplateSummaryView {
-	return {
-		id: template.id,
-		ownerId: template.ownerId,
-		ownerHandle: template.owner.handle,
-		name: template.name,
-		summary: template.summary,
-		pageWMm: template.pageWMm,
-		pageHMm: template.pageHMm,
-		language: template.language,
-		useCount: template.useCount,
-		revision: template.revision,
-		versionCount: template._count.versions,
-		publishedAt: template.publishedAt,
-		updatedAt: template.updatedAt,
-	};
-}
-
-function recordFields(template: PrismaTemplate) {
-	return {
-		id: template.id,
-		ownerId: template.ownerId,
-		name: template.name,
-		summary: template.summary,
-		pageWMm: template.pageWMm,
-		pageHMm: template.pageHMm,
-		language: template.language,
-		body: template.body,
-		css: template.css,
-		readme: template.readme,
-		useCount: template.useCount,
-		revision: template.revision,
-		changeSeq: template.changeSeq,
-		publishedAt: template.publishedAt,
-		firstPublishedAt: template.firstPublishedAt,
-		createdAt: template.createdAt,
-		updatedAt: template.updatedAt,
-	};
-}
+// Row mapping lives in ./views.js (shared with saved and sync).
+const toView = toTemplateView;
+const toSummary = toTemplateSummaryView;
+const toVersion = toVersionView;
+const toVersionSummary = toVersionSummaryView;

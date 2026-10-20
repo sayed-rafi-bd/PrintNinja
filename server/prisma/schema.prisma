@@ -84,7 +84,6 @@ model Template {
   createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz
   owner       User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  savedBy     SavedTemplate[]
   versions    TemplateVersion[]
 
   @@index([ownerId, changeSeq])
@@ -98,9 +97,13 @@ model SavedTemplate {
   templateId String   @map("template_id") @db.Uuid
   addedAt    DateTime @default(now()) @map("added_at") @db.Timestamptz
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  template   Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
 
+  // No relation to Template on purpose (plan section 7 shows one with
+  // onDelete: Cascade, which E14 overrules): saved rows must survive a
+  // template delete so the manifest can report them as deleted. The
+  // templateId is deliberately a bare UUID; joins are manual.
   @@id([userId, templateId])
+  @@index([templateId])
   @@map("saved_templates")
 }
 

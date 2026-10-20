@@ -6,6 +6,7 @@ import type { AppDeps } from "../../src/domain/ports.js";
 import { createDbClient, type DbClient } from "../../src/infra/prisma/client.js";
 import { createSavedRepository } from "../../src/infra/prisma/saved.js";
 import { createSessionRepository } from "../../src/infra/prisma/sessions.js";
+import { createSyncRepository } from "../../src/infra/prisma/sync.js";
 import { createTemplateRepository } from "../../src/infra/prisma/templates.js";
 import { createUserRepository } from "../../src/infra/prisma/users.js";
 import { createPasswordHasher } from "../../src/infra/security/passwordHasher.js";
@@ -68,5 +69,6 @@ export function realDeps(db: DbClient): AppDeps {
 		sessionTtlDays: config.sessionTtlDays,
 		templates: createTemplateRepository(db),
 		saved: createSavedRepository(db),
+		sync: createSyncRepository(db),
 	};
 }

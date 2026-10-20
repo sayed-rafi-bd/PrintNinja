@@ -4,6 +4,7 @@ import {
 	deleteVersion,
 	getTemplate,
 	listCommunity,
+	listManifest,
 	listMine,
 	listVersions,
 	publishTemplate,
@@ -383,6 +384,46 @@ describe("lists, search and use", () => {
 		await expect(recordUse(deps, "99999999-9999-4999-8999-999999999999", 1)).rejects.toBeInstanceOf(
 			NotFoundError,
 		);
+	});
+});
+
+describe("manifest", () => {
+	it("reports published, withdrawn and deleted states", async () => {
+		const r = repos();
+		const tdeps = { templates: r.templates };
+		const sdeps = { templates: r.templates, saved: r.saved };
+		const id = write().id as string;
+		await putTemplate(r, write(), OWNER_ID);
+		await publishTemplate(tdeps, id, OWNER_ID, new Date());
+		await saveTemplate(sdeps, OTHER_ID, id);
+
+		let manifest = await listManifest(sdeps, OTHER_ID);
+		expect(manifest).toEqual([
+			{
+				id,
+				revision: 1,
+				state: "published",
+				ownerHandle: "Owner",
+				updatedAt: expect.any(Date),
+			},
+		]);
+
+		await putTemplate(r, { ...write(), body: "<div>v2</div>", ifRevision: 1 }, OWNER_ID);
+		manifest = await listManifest(sdeps, OTHER_ID);
+		expect(manifest[0]).toMatchObject({ revision: 2, state: "published" });
+
+		await unpublishTemplate(tdeps, id, OWNER_ID);
+		manifest = await listManifest(sdeps, OTHER_ID);
+		expect(manifest[0]).toMatchObject({ revision: 2, state: "withdrawn" });
+
+		await publishTemplate(tdeps, id, OWNER_ID, new Date());
+		manifest = await listManifest(sdeps, OTHER_ID);
+		expect(manifest[0]).toMatchObject({ revision: 2, state: "published" });
+
+		await deleteTemplate(tdeps, id, OWNER_ID);
+		manifest = await listManifest(sdeps, OTHER_ID);
+		expect(manifest[0]).toMatchObject({ id, revision: 0, state: "deleted", ownerHandle: "" });
+		expect((manifest[0]?.updatedAt as Date).getTime()).not.toBeNaN();
 	});
 });
 

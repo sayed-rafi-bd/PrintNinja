@@ -157,6 +157,23 @@ describe("generated OpenAPI document", () => {
       "/v2/templates/{id}/versions/{n}/restore",
     );
   });
+
+  it("documents the sync and manifest endpoints", async () => {
+    const document = await generate();
+
+    const changes = document.paths["/v2/sync/changes"] as {
+      get: { responses: Record<string, unknown> };
+    };
+    expect(Object.keys(changes.get.responses).sort()).toEqual([
+      "200",
+      "400",
+      "401",
+    ]);
+    const manifest = document.paths["/v2/saved/manifest"] as {
+      get: { responses: Record<string, unknown> };
+    };
+    expect(Object.keys(manifest.get.responses).sort()).toEqual(["200", "401"]);
+  });
 });
 
 describe("health route", () => {

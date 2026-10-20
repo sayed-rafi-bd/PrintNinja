@@ -16,6 +16,8 @@ describe("loadConfig", () => {
 		expect(config.trustProxy).toBe(0);
 		expect(config.sessionTtlDays).toBe(30);
 		expect(config.sessionCleanupMinutes).toBe(60);
+		expect(config.syncTombstoneDays).toBe(90);
+		expect(config.syncPageBytes).toBe(8 * 1024 * 1024);
 		expect(config.rateLimitMax).toBe(120);
 		expect(config.rateLimitAuthMax).toBe(10);
 		expect(config.rateLimitAuthWindowSeconds).toBe(300);

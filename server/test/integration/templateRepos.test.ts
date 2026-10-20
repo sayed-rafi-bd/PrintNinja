@@ -201,7 +201,7 @@ for (const name of ["fake", "prisma"] as const) {
 			expect(republished?.publishedAt?.toISOString()).toBe("2026-10-21T00:00:00.000Z");
 		});
 
-		it("deletes write a tombstone and remove versions and saves", async () => {
+		it("deletes write a tombstone and remove versions but keep saves", async () => {
 			const id = randomUUID();
 			await be.templates.create(write(id, owner), version);
 			await be.templates.setPublished(id, new Date());
@@ -211,7 +211,8 @@ for (const name of ["fake", "prisma"] as const) {
 			expect(deleted).toEqual({ ownerId: owner });
 			expect(await be.templates.findById(id)).toBeNull();
 			expect(await be.versionCount(id)).toBe(0);
-			expect(await be.saved.countByUser(other)).toBe(0);
+			// Saved rows survive so the manifest can report the delete (E14).
+			expect(await be.saved.countByUser(other)).toBe(1);
 
 			const tombs = await be.tombstones(owner);
 			expect(tombs).toHaveLength(1);

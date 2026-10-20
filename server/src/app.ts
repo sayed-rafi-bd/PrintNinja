@@ -17,6 +17,7 @@ import { authRoutes } from "./http/routes/auth.js";
 import { communityRoutes } from "./http/routes/community.js";
 import { healthRoutes } from "./http/routes/health.js";
 import { savedRoutes } from "./http/routes/saved.js";
+import { syncRoutes } from "./http/routes/sync.js";
 import { templateRoutes } from "./http/routes/templates.js";
 import { versionRoutes } from "./http/routes/versions.js";
 import { APP_VERSION } from "./version.js";
@@ -132,6 +133,7 @@ export async function buildApp(args: {
 	await app.register(communityRoutes, { deps });
 	await app.register(savedRoutes, { deps });
 	await app.register(versionRoutes, { deps });
+	await app.register(syncRoutes, { deps, byteBudget: config.syncPageBytes });
 
 	return app;
 }

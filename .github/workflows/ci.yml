@@ -146,7 +146,10 @@ jobs:
       - name: Start the stack
         run: |
           printf 'POSTGRES_PASSWORD=e2e-test-password\nCORS_ORIGINS=http://localhost:1420\n' > .env
-          docker compose up -d --build --wait --wait-timeout 180
+          # The container suite shares one client address, so the global
+          # limiter runs relaxed here (the auth limiter stays production:
+          # E8 asserts the real 429). See RATE_LIMIT_* in env.example.
+          RATE_LIMIT_MAX=10000 docker compose up -d --build --wait --wait-timeout 180
       - name: E1 and E8 against the running stack
         run: E2E_BASE_URL=http://localhost:3001 pnpm --filter server test:e2e
       - name: Stack logs on failure

@@ -144,4 +144,16 @@ export interface SavedRepository {
 	save(userId: string, templateId: string): Promise<void>;
 	/** Idempotent: nothing saved is still a success. */
 	unsave(userId: string, templateId: string): Promise<void>;
+	/** Saved rows with their templates (null when the template was
+	 * deleted) and the tombstone time for deleted rows. */
+	listManifest(userId: string): Promise<ManifestSource[]>;
+}
+
+/** One saved-list row with its template (null when deleted) and, for
+ * deleted rows, the tombstone time the manifest reports as updated_at. */
+export interface ManifestSource {
+	templateId: string;
+	addedAt: Date;
+	template: TemplateView | null;
+	deletedAt: Date | null;
 }

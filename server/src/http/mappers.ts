@@ -5,6 +5,12 @@ import type {
 	VersionSummaryView,
 	VersionView,
 } from "../domain/templatePorts.js";
+import type { ManifestItem as SavedManifestItem } from "../domain/templates/saved.js";
+import type { SyncChange } from "../domain/syncPorts.js";
+import type {
+	ManifestItemResponse,
+	SyncChangeResponse,
+} from "./schemas/sync.js";
 import type {
 	TemplateResponse,
 	TemplateSummaryResponse,
@@ -81,5 +87,35 @@ export function toVersion(view: VersionView): VersionResponse {
 		...toVersionSummary(view),
 		body: view.body,
 		css: view.css,
+	};
+}
+
+export function toSyncChange(change: SyncChange): SyncChangeResponse {
+	if ("entityKey" in change) {
+		return {
+			seq: change.seq.toString(10),
+			entity: change.entity,
+			op: "delete",
+			id: change.entityKey,
+		};
+	}
+	return {
+		seq: change.seq.toString(10),
+		entity: "template",
+		op: "upsert",
+		data: {
+			...toTemplate(change.data),
+			head_version_no: change.headVersionNo,
+		},
+	};
+}
+
+export function toManifestItem(item: SavedManifestItem): ManifestItemResponse {
+	return {
+		id: item.id,
+		revision: item.revision,
+		state: item.state,
+		owner_handle: item.ownerHandle,
+		updated_at: item.updatedAt.toISOString(),
 	};
 }

@@ -6,6 +6,7 @@ import type {
 	SavedRepository,
 	TemplateRepository,
 } from "./templatePorts.js";
+import type { SyncRepository } from "./syncPorts.js";
 
 export interface UserRecord {
 	id: string;
@@ -95,4 +96,5 @@ export interface AuthDeps {
 export interface AppDeps extends AuthDeps {
 	templates: TemplateRepository;
 	saved: SavedRepository;
+	sync: SyncRepository;
 }

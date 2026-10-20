@@ -63,6 +63,12 @@ const configSchema = z.object({
 		.default(0),
 	SESSION_TTL_DAYS: positiveInt.default(30),
 	SESSION_CLEANUP_MINUTES: positiveInt.default(60),
+	/** Days tombstones are kept before the hourly cleanup purges them.
+	 * A cursor older than the oldest kept tombstone gets reset: true. */
+	SYNC_TOMBSTONE_DAYS: positiveInt.default(90),
+	/** Per-page byte budget for the sync stream. Pages stop at the
+	 * record limit or this budget, whichever is first. */
+	SYNC_PAGE_BYTES: positiveInt.default(8 * 1024 * 1024),
 	RATE_LIMIT_MAX: positiveInt.default(120),
 	RATE_LIMIT_AUTH_MAX: positiveInt.default(10),
 	RATE_LIMIT_AUTH_WINDOW_SECONDS: positiveInt.default(300),
@@ -83,6 +89,8 @@ export type Config = {
 	trustProxy: number;
 	sessionTtlDays: number;
 	sessionCleanupMinutes: number;
+	syncTombstoneDays: number;
+	syncPageBytes: number;
 	rateLimitMax: number;
 	rateLimitAuthMax: number;
 	rateLimitAuthWindowSeconds: number;
@@ -122,6 +130,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 		trustProxy: parsed.TRUST_PROXY,
 		sessionTtlDays: parsed.SESSION_TTL_DAYS,
 		sessionCleanupMinutes: parsed.SESSION_CLEANUP_MINUTES,
+		syncTombstoneDays: parsed.SYNC_TOMBSTONE_DAYS,
+		syncPageBytes: parsed.SYNC_PAGE_BYTES,
 		rateLimitMax: parsed.RATE_LIMIT_MAX,
 		rateLimitAuthMax: parsed.RATE_LIMIT_AUTH_MAX,
 		rateLimitAuthWindowSeconds: parsed.RATE_LIMIT_AUTH_WINDOW_SECONDS,

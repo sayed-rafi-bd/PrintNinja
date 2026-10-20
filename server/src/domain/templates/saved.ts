@@ -52,3 +52,44 @@ export async function unsaveTemplate(
 ): Promise<void> {
 	await repos.saved.unsave(userId, id);
 }
+
+export type ManifestState = "published" | "withdrawn" | "deleted";
+
+export interface ManifestItem {
+	id: string;
+	revision: number;
+	state: ManifestState;
+	ownerHandle: string;
+	updatedAt: Date;
+}
+
+/**
+ * The saved manifest (endpoint 22): revision and state of every saved
+ * template, in save order. A deleted template's revision is unknowable
+ * (the row is gone), so it reports 0 with the tombstone time — the app
+ * matches by id and marks it deleted.
+ */
+export async function listManifest(
+	repos: { saved: SavedRepository },
+	userId: string,
+): Promise<ManifestItem[]> {
+	const rows = await repos.saved.listManifest(userId);
+	return rows.map((row) => {
+		if (!row.template) {
+			return {
+				id: row.templateId,
+				revision: 0,
+				state: "deleted" as const,
+				ownerHandle: "",
+				updatedAt: row.deletedAt ?? row.addedAt,
+			};
+		}
+		return {
+			id: row.templateId,
+			revision: row.template.revision,
+			state: (row.template.publishedAt ? "published" : "withdrawn") as ManifestState,
+			ownerHandle: row.template.ownerHandle,
+			updatedAt: row.template.updatedAt,
+		};
+	});
+}

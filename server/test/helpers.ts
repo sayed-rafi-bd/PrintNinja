@@ -26,6 +26,8 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
 		trustProxy: 0,
 		sessionTtlDays: 30,
 		sessionCleanupMinutes: 60,
+		syncTombstoneDays: 90,
+		syncPageBytes: 8 * 1024 * 1024,
 		rateLimitMax: 120,
 		rateLimitAuthMax: 10,
 		rateLimitAuthWindowSeconds: 300,
@@ -55,6 +57,7 @@ export function fakeDeps(overrides: Partial<AppDeps> = {}): AppDeps {
 		sessionTtlDays: 30,
 		templates: library.templates,
 		saved: library.saved,
+		sync: library.sync,
 		...overrides,
 	};
 }

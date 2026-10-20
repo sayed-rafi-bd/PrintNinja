@@ -11,7 +11,8 @@ export {
 } from "./templates.js";
 export { deleteVersion, listVersions, readVersion, restoreVersion } from "./versions.js";
 export type { RestoreResult } from "./versions.js";
-export { listSaved, saveTemplate, unsaveTemplate } from "./saved.js";
+export { listManifest, listSaved, saveTemplate, unsaveTemplate } from "./saved.js";
+export type { ManifestItem, ManifestState } from "./saved.js";
 export { MAX_SAVED_PER_USER } from "./saved.js";
 export {
 	BODY_MAX_BYTES,
