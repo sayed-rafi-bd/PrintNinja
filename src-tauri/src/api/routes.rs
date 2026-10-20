@@ -98,7 +98,29 @@ async fn auth_middleware_inner(
 
     // All DB access happens in a sync helper so the MutexGuard is never
     // held across an await point.
-    let decision = check_auth(&auth, &token, headers.get("idempotency-key"));
+
+    // GET reads; every other method changes what gets printed — a print,
+    // a batch, a re-queue or a cancel — so it needs the `print` scope.
+    let required_scope = if request.method() == axum::http::Method::GET {
+        "read"
+    } else {
+        "print"
+    };
+    // The peer address is inserted by the serve call's
+    // `into_make_service_with_connect_info`. Absent means the listener
+    // lost it — the allowlist treats that as a refusal, never a pass.
+    let peer = request
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|c| c.0);
+
+    let decision = check_auth(
+        &auth,
+        &token,
+        required_scope,
+        peer,
+        headers.get("idempotency-key"),
+    );
 
     match decision {
         AuthDecision::Allow => next.run(request).await,
@@ -111,6 +133,9 @@ async fn auth_middleware_inner(
             })),
         )
             .into_response(),
+        AuthDecision::Forbidden(reason) => {
+            (StatusCode::FORBIDDEN, Json(json!({ "error": reason }))).into_response()
+        }
         AuthDecision::Unauthorized => (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "invalid API key" })),
@@ -129,15 +154,26 @@ enum AuthDecision {
     Allow,
     /// Key already taken; carries the job that owns it.
     Duplicate(i64),
+    /// The key verified but is refused here: wrong scope for this route,
+    /// or its IP allowlist does not include the peer.
+    Forbidden(String),
     Unauthorized,
     Unavailable,
 }
 
-/// Synchronous auth + idempotency check. Keeping this non-async guarantees
+/// Synchronous auth + enforcement. Keeping this non-async guarantees
 /// the DB mutex is released before the handler future is awaited.
+///
+/// The order is the security: the key verifies first, then its IP
+/// allowlist, then the scope for this route, and only then the idempotency
+/// replay fast path — an unauthenticated or under-scoped request must
+/// never be answered with the duplicate's 200, which would leak that a
+/// key exists and is in use.
 fn check_auth(
     auth: &AuthCtx,
     token: &str,
+    required_scope: &str,
+    peer: Option<std::net::SocketAddr>,
     idempotency: Option<&axum::http::HeaderValue>,
 ) -> AuthDecision {
     let Ok(guard) = auth.db.lock() else {
@@ -145,11 +181,39 @@ fn check_auth(
     };
     let conn = guard.connection();
 
-    // Idempotency replay must not print twice (PLANNING.md 7.1). This is a
-    // fast path only — two requests can still both pass it before either
-    // inserts. The atomic reservation is the unique index on
-    // `idempotency_key` hit at begin_job (P12); that constraint is what
-    // makes the race print once.
+    let Some(key) = crate::commands::api::verify_stored_key(conn, token) else {
+        return AuthDecision::Unauthorized;
+    };
+
+    // `allowed_ips` is an allowlist when configured (comma list or JSON
+    // array of exact peer-IP strings, e.g. `203.0.113.9`). Empty — which
+    // is every key the app creates — means no restriction.
+    if !key.allowed_ips.is_empty() {
+        match peer {
+            Some(addr)
+                if key
+                    .allowed_ips
+                    .iter()
+                    .any(|ip| ip == &addr.ip().to_string()) => {}
+            Some(addr) => {
+                return AuthDecision::Forbidden(format!("key is not allowed from {}", addr.ip()))
+            }
+            None => {
+                return AuthDecision::Forbidden(
+                    "peer address unknown; this key's IP allowlist applies".into(),
+                )
+            }
+        }
+    }
+
+    // The default key holds `print,read`; a hand-set key may hold either.
+    if !key.check_scope(required_scope) {
+        return AuthDecision::Forbidden(format!("key lacks scope '{required_scope}'"));
+    }
+
+    // Idempotency replay must not print twice (PLANNING.md 7.1). A fast
+    // path only — the atomic reservation is the unique index on
+    // `idempotency_key` hit at begin_job (P12).
     if let Some(key) = idempotency.and_then(|v| v.to_str().ok()) {
         let existing: Option<i64> = conn
             .query_row(
@@ -163,11 +227,13 @@ fn check_auth(
         }
     }
 
-    if crate::commands::api::verify_stored_key(conn, token) {
-        AuthDecision::Allow
-    } else {
-        AuthDecision::Unauthorized
-    }
+    // The key authenticated an allowed request: record the use (P12).
+    let _ = conn.execute(
+        "UPDATE api_clients SET last_used_at = datetime('now') WHERE id = ?1",
+        [key.id],
+    );
+
+    AuthDecision::Allow
 }
 
 /// State threaded into the auth middleware.

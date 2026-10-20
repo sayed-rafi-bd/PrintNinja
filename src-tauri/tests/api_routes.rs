@@ -799,6 +799,16 @@ async fn verify_stored_key_matches_hashed_value() {
 
     assert!(printninja_lib::verify_api_key(conn, &plain));
     assert!(!printninja_lib::verify_api_key(conn, "pn_live_nope"));
+
+    // The richer API hands the middleware the row it enforces.
+    let key = printninja_lib::commands::api::verify_stored_key(conn, &plain)
+        .expect("the valid key must verify");
+    assert_eq!(
+        key.scopes,
+        vec!["print".to_string(), "read".to_string()],
+        "the app's default key holds print,read"
+    );
+    assert!(key.allowed_ips.is_empty(), "and no IP allowlist");
 }
 /// Regression for #18: nothing ever wrote `print_jobs.idempotency_key`, so the
 /// replay guard in `check_auth` — which looks for an existing row with that
@@ -1046,5 +1056,311 @@ async fn the_openapi_document_matches_the_router() {
     assert!(
         spec_ep.iter().any(|c| c == "200"),
         "the spec endpoint must document itself: {spec_ep:?}"
+    );
+
+    // Every keyed endpoint documents both refusal modes: no or wrong key
+    // (401) and a key refused by scope or IP allowlist (403). Health is
+    // open and documents neither.
+    for (path, operations) in paths.as_object().expect("paths object") {
+        for (method, operation) in operations.as_object().expect("operations") {
+            if path == "/v1/health" {
+                continue;
+            }
+            let documented: Vec<&String> = operation["responses"]
+                .as_object()
+                .unwrap_or_else(|| panic!("responses of {method} {path}"))
+                .keys()
+                .collect();
+            assert!(
+                documented.iter().any(|c| *c == "401"),
+                "{method} {path} must document 401: {documented:?}"
+            );
+            assert!(
+                documented.iter().any(|c| *c == "403"),
+                "{method} {path} must document 403: {documented:?}"
+            );
+        }
+    }
+}
+
+// ───────────────────────────────────────────────────────────────
+// scopes, allowed_ips, last_used_at (P12: stored, now enforced)
+// ───────────────────────────────────────────────────────────────
+
+/// The default key holds `print,read`; a hand-set key holding only `print`
+/// may print but not read, and a key holding only `read` may read but not
+/// print — 403, never a silent success. The replay fast path must not
+/// outrank that: a used `Idempotency-Key` presented with the wrong scope
+/// gets 403, not the duplicate's 200.
+#[tokio::test]
+async fn scopes_are_enforced_and_outrank_the_replay_response() {
+    let (db, admin_key) = setup();
+    seed_printers_and_templates(&db);
+
+    let (print_only_plain, print_only_hash) = ApiKey::generate();
+    let (read_only_plain, read_only_hash) = ApiKey::generate();
+    {
+        let guard = db.lock().unwrap();
+        let c = guard.connection();
+        c.execute(
+            "INSERT INTO api_clients (name, key_hash, scopes) VALUES ('print-only', ?1, 'print')",
+            [&print_only_hash],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO api_clients (name, key_hash, scopes) VALUES ('read-only', ?1, 'read')",
+            [&read_only_hash],
+        )
+        .unwrap();
+    }
+
+    // A print-only key cannot read …
+    let app = router(&db);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/jobs")
+                .header("authorization", format!("Bearer {print_only_plain}"))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::FORBIDDEN,
+        "a key without scope 'read' must not list jobs"
+    );
+
+    // … but may print: the pipeline runs and reports its own outcome —
+    // never an auth refusal.
+    let app = router(&db);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/print")
+                .header("authorization", format!("Bearer {print_only_plain}"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::json!({"template": "Receipt", "printer": "Desk"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        res.status() != StatusCode::FORBIDDEN && res.status() != StatusCode::UNAUTHORIZED,
+        "a key with scope 'print' must not be refused: {}",
+        res.status()
+    );
+
+    // Consume an idempotency key with the full-scope default key …
+    let app = router(&db);
+    let _ = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/print")
+                .header("authorization", format!("Bearer {admin_key}"))
+                .header("content-type", "application/json")
+                .header("idempotency-key", "scope-order")
+                .body(axum::body::Body::from(
+                    serde_json::json!({"template": "Receipt", "printer": "Desk"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // … then present it with a read-only key on a printing route: the
+    // scope decides, not the replay fast path.
+    let app = router(&db);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/print")
+                .header("authorization", format!("Bearer {read_only_plain}"))
+                .header("content-type", "application/json")
+                .header("idempotency-key", "scope-order")
+                .body(axum::body::Body::from(
+                    serde_json::json!({"template": "Receipt", "printer": "Desk"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::FORBIDDEN,
+        "authentication and scope must be judged before the replay response"
+    );
+}
+
+/// A non-empty `allowed_ips` is enforced against the peer address, and
+/// fails closed when the peer is unknown. A key without an allowlist is
+/// peer-independent — which is what every key created by the app is.
+#[tokio::test]
+async fn an_ip_allowlist_is_enforced_and_fails_closed() {
+    let (db, default_plain) = setup();
+
+    let (plain, hash) = ApiKey::generate();
+    {
+        let guard = db.lock().unwrap();
+        guard
+            .connection()
+            .execute(
+                "INSERT INTO api_clients (name, key_hash, scopes, allowed_ips)
+                 VALUES ('lan', ?1, 'print,read', '203.0.113.9')",
+                [&hash],
+            )
+            .unwrap();
+    }
+
+    let request = |plain: &str, peer: Option<std::net::SocketAddr>| {
+        let mut req = Request::builder()
+            .uri("/v1/printers")
+            .header("authorization", format!("Bearer {plain}"))
+            .body(axum::body::Body::empty())
+            .unwrap();
+        if let Some(addr) = peer {
+            req.extensions_mut()
+                .insert(axum::extract::ConnectInfo(addr));
+        }
+        router(&db).oneshot(req)
+    };
+
+    // The allowlist refuses when the peer is unknown — a listener that
+    // lost ConnectInfo must not become a bypass.
+    let res = request(&plain, None).await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN, "fail closed");
+
+    // The listed peer is allowed …
+    let listed: std::net::SocketAddr = "203.0.113.9:40000".parse().unwrap();
+    let res = request(&plain, Some(listed)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // … and every other peer is refused.
+    let other: std::net::SocketAddr = "198.51.100.7:40000".parse().unwrap();
+    let res = request(&plain, Some(other)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // A key without an allowlist stays peer-independent.
+    let res = request(&default_plain, Some(other)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "no allowlist, no refusal");
+}
+
+/// `last_used_at` was stored and never written. It now records every
+/// request the key was allowed to make — and nothing for a refusal.
+#[tokio::test]
+async fn last_used_at_is_stamped_only_when_the_request_is_allowed() {
+    let (db, key) = setup();
+
+    let app = router(&db);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/printers")
+                .header("authorization", format!("Bearer {key}"))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let stamped: Option<String> = {
+        let guard = db.lock().unwrap();
+        guard
+            .connection()
+            .query_row(
+                // setup() seeds the default key under the name 't'.
+                "SELECT last_used_at FROM api_clients WHERE name = 't'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    assert!(
+        stamped.as_deref().is_some_and(|s| !s.is_empty()),
+        "an allowed request must stamp last_used_at: {stamped:?}"
+    );
+
+    // A refused request stamps nothing: leave a sentinel, get the 403,
+    // and the sentinel must still be there.
+    let (plain, hash) = ApiKey::generate();
+    {
+        let guard = db.lock().unwrap();
+        guard
+            .connection()
+            .execute(
+                "INSERT INTO api_clients (name, key_hash, scopes, last_used_at)
+                 VALUES ('read-only', ?1, 'read', 'sentinel')",
+                [&hash],
+            )
+            .unwrap();
+    }
+    let app = router(&db);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/printers")
+                .header("authorization", format!("Bearer {plain}"))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "read-only may read");
+
+    // Leave a sentinel between the allowed GET and the refused POST.
+    {
+        let guard = db.lock().unwrap();
+        guard
+            .connection()
+            .execute(
+                "UPDATE api_clients SET last_used_at = 'sentinel' WHERE name = 'read-only'",
+                [],
+            )
+            .unwrap();
+    }
+
+    let app = router(&db);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/print")
+                .header("authorization", format!("Bearer {plain}"))
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(
+                    serde_json::json!({"template": "Receipt", "printer": "Desk"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::FORBIDDEN,
+        "read-only may not print"
+    );
+
+    let stamped: Option<String> = {
+        let guard = db.lock().unwrap();
+        guard
+            .connection()
+            .query_row(
+                "SELECT last_used_at FROM api_clients WHERE name = 'read-only'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    assert_eq!(
+        stamped.as_deref(),
+        Some("sentinel"),
+        "a 403 must not stamp last_used_at"
     );
 }

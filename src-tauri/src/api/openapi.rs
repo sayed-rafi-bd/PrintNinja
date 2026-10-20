@@ -49,7 +49,8 @@ impl Default for OpenApiSpec {
                         "summary": "List printers",
                         "responses": {
                             "200": { "description": "Printers, with a `count`" },
-                            "401": { "description": "Missing or invalid API key" }
+                            "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
                         }
                     }
                 },
@@ -58,7 +59,8 @@ impl Default for OpenApiSpec {
                         "summary": "List templates",
                         "responses": {
                             "200": { "description": "Templates, with a `count`" },
-                            "401": { "description": "Missing or invalid API key" }
+                            "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
                         }
                     }
                 },
@@ -104,6 +106,7 @@ impl Default for OpenApiSpec {
                             "200": { "description": "Printed: `{ job_id, status, duration_ms }`; also the `duplicate` body for a replayed `Idempotency-Key`" },
                             "400": { "description": "`template` is required, or `callback_url` was sent (not supported)" },
                             "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" },
                             "404": { "description": "Printer, template, or current version not found" },
                             "415": { "description": "Wrong or missing `Content-Type`" },
                             "422": { "description": "Malformed JSON, or `printer` missing" },
@@ -136,6 +139,7 @@ impl Default for OpenApiSpec {
                             "202": { "description": "Batch queued: `{ batch_id, status, records, mode }`; the worker prints it" },
                             "400": { "description": "`data` is not an array, is empty, exceeds 5,000 records, `mode` is invalid, or `template` is missing" },
                             "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" },
                             "404": { "description": "Printer or template not found" },
                             "415": { "description": "Wrong or missing `Content-Type`" },
                             "422": { "description": "Malformed JSON, or `printer`/`data` missing" }
@@ -147,7 +151,8 @@ impl Default for OpenApiSpec {
                         "summary": "List jobs",
                         "responses": {
                             "200": { "description": "Jobs, with a `count`" },
-                            "401": { "description": "Missing or invalid API key" }
+                            "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
                         }
                     }
                 },
@@ -158,6 +163,7 @@ impl Default for OpenApiSpec {
                             "200": { "description": "Job record" },
                             "400": { "description": "`id` is not an integer" },
                             "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" },
                             "404": { "description": "No such job" }
                         }
                     },
@@ -167,7 +173,8 @@ impl Default for OpenApiSpec {
                         "responses": {
                             "204": { "description": "Cancelled (no body)" },
                             "400": { "description": "`id` is not an integer, or the job is missing or not cancellable (already started or finished)" },
-                            "401": { "description": "Missing or invalid API key" }
+                            "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
                         }
                     }
                 },
@@ -179,6 +186,7 @@ impl Default for OpenApiSpec {
                             "200": { "description": "Re-queued: `{ job_id, status }`" },
                             "400": { "description": "`id` is not an integer, or the job is not failed/cancelled" },
                             "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" },
                             "404": { "description": "No such job" }
                         }
                     }
@@ -188,7 +196,8 @@ impl Default for OpenApiSpec {
                         "summary": "This document",
                         "responses": {
                             "200": { "description": "The OpenAPI description of this API" },
-                            "401": { "description": "Missing or invalid API key" }
+                            "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
                         }
                     }
                 }
