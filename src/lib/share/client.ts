@@ -154,6 +154,11 @@ export async function login(handle: string, password: string): Promise<AuthRespo
   return authRequest("/v2/auth/login", handle, password);
 }
 
+/** Who the stored session belongs to. 401s end the session via callApi. */
+export async function fetchMe(): Promise<{ id: string; handle: string }> {
+  return callApi<{ id: string; handle: string }>(apiDeps(), { method: "GET", path: "/v2/auth/me" });
+}
+
 export async function logout(): Promise<void> {
   try {
     await callApi<unknown>(apiDeps(), { method: "POST", path: "/v2/auth/logout" });
