@@ -28,7 +28,8 @@ Silent print for Windows and Android — design HTML templates, fetch JSON data,
 | Markdown | `react-markdown` + `remark-gfm` (no `rehype-raw` → XSS as text, links `http/https/mailto` only) |
 | Sanitize | `sanitize.ts` + `handlebars.rs` strip `<script>`/`on*`, `find_remote_refs` → `data: URIs`, CSP `default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:`, `sandbox=""` iframes |
 | API | `axum` + `tower-http` (local `127.0.0.1:17717` — API-key scopes and, when set, an IP allowlist are enforced — plus share `server-legacy/` at `share_service_url`) |
-| Share service | `server-legacy/` (`axum`, `rusqlite`/SQLite, `scrypt` + sha256 sessions, throttle) |
+| Share service | `server-legacy/` (`axum`, `rusqlite`/SQLite, `scrypt` + sha256 sessions, throttle) — the app's counterpart until the cutover |
+| Share service (v2, in progress) | `server/` (TypeScript, Fastify 5 + Zod 4, PostgreSQL 16 via Prisma 7, `argon2id` + scrypt fallback) — auth endpoints `POST /v2/auth/{register,login,logout}`, `GET /v2/auth/me`, `GET /v2/health`; every failure uses the `{ error: { code, message, details?, request_id } }` envelope (`server/openapi/openapi.json` is the contract) |
 | Secrets | No keyring: the share-session token is plain text in the local `settings` table (moving it to an OS key store is a follow-up). `rendered_html` is secret-redacted before it is stored in `print_jobs` |
 | Android | Kotlin plugins: WebView → PDF, `UsbManager`, RFCOMM |
 
@@ -63,6 +64,11 @@ src-tauri/src/
   api/{routes,auth,openapi}  queue.rs  transport/{...}  data/fetcher.rs  deeplink.rs  render/handlebars.rs (sanitize)  db (ensure_v2_schema)  readme.rs
 server-legacy/               # share service, Rust, deleted at cutover (REFACTORING.md Phase 3)
   src/{main.rs (v1 auth/templates/saved), db.rs, auth.rs (throttle, sessions), error.rs}
+server/                      # share service v2, TypeScript (REFACTORING.md Phase 1)
+  src/{server.ts, app.ts, config.ts, http/{plugins,routes,schemas}, domain/{auth,errors,ports}, infra/{prisma,security}}
+  prisma/{schema.prisma, migrations}  test/{unit, integration, e2e}  openapi/openapi.json
+e2e/                         # Playwright suite (app in Chromium + harness service)
+  support/{stack.ts, fixtures.ts, api.ts, testids.ts, fakeAgent}  tests/smoke.e2e.ts
 ```
 
 ## Getting Started
@@ -81,9 +87,28 @@ Prerequisites: Node 22, Rust stable, pnpm 10; for Android: Java 17, Android SDK/
 |---|---|
 | `pnpm dev` | Vite dev server |
 | `pnpm build` | `tsc -b && vite build` |
-| `pnpm lint` / `pnpm format` | Biome (`src/**/*.{ts,tsx}` + `index.html` + `vite.config.ts`) |
+| `pnpm lint` / `pnpm format` | Biome (app `src/`, `server/src`, `server/test/`, `e2e/`) |
 | `pnpm test` | Vitest (jsdom) |
+| `pnpm e2e` | Playwright smoke (app in Chromium vs the harness stack) |
+| `pnpm --filter server dev` | v2 service with reload (`tsx`, needs `DATABASE_URL` — see below) |
+| `pnpm --filter server test` / `test:unit` / `test:int` | unit + integration / unit only / integration only (Testcontainers PostgreSQL) |
+| `pnpm --filter server test:e2e` | E1/E8 over HTTP against `E2E_BASE_URL` (default `http://localhost:3001`, needs `docker compose up -d`) |
+| `pnpm --filter server db:migrate` / `db:generate` / `db:validate` | apply migrations / build the Prisma client (gitignored, always generate on a fresh clone) / validate the schema |
+| `pnpm --filter server openapi:generate` | regenerate `server/openapi/openapi.json` (CI fails on drift) |
+| `docker compose up -d` / `down -v` | v2 service + PostgreSQL (migrates itself on boot, healthy at `:3001/v2/health`) |
 | `cargo test` (in `src-tauri`) | Rust (lib + integration) — `CARGO_INCREMENTAL=0 cargo test` on low-disk hosts |
+
+### Share service (v2)
+
+The replacement for `server-legacy/` (which the app still uses until the Phase 3 cutover). Auth only in Phase 1: register `201`, login `200`, logout `204`, me `200`; duplicate handle `409 handle_taken`; unknown handle and wrong password both `401 invalid_credentials`; brute force limited to 10 attempts per 5 minutes per IP and handle (`429` + `Retry-After`); passwords 8–128 chars, handles 1–32 of `A–Z a–z 0–9 _ -`, matched case-insensitively.
+
+```bash
+cp env.example .env   # edit POSTGRES_PASSWORD and CORS_ORIGINS at minimum
+docker compose up -d  # postgres:16 + service, migrates on boot
+curl localhost:3001/v2/health
+```
+
+Configuration is environment-only (nothing auto-loads; development passes `--env-file`). All variables are listed in `env.example`: `DATABASE_URL` (PostgreSQL here — the legacy service reuses the name for its SQLite path), `CORS_ORIGINS`, `HOST` (`127.0.0.1` local, `0.0.0.0` in containers), `PORT`, `SESSION_TTL_DAYS`, `SESSION_CLEANUP_MINUTES`, `RATE_LIMIT_MAX`, `RATE_LIMIT_AUTH_MAX`, `RATE_LIMIT_AUTH_WINDOW_SECONDS`, `ARGON2_MEMORY_KIB`, `ARGON2_TIME_COST`, `ARGON2_PARALLELISM`, `DOCS_ENABLED`, `LOG_LEVEL`. The service fails fast naming the offending variable; the Dockerfile and CI generate the Prisma client with a dummy `DATABASE_URL` because generation never connects.
 
 ## Building
 
