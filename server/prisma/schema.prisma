@@ -1,0 +1,61 @@
+// Phase 1 slice of REFACTORING.md section 7: identity, sessions and the
+// change-tracking tables. Template, version, dataset, profile, setting
+// and font models arrive with Phase 2, each with its own migration.
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/infra/prisma/generated"
+}
+
+// Prisma 7: no url here. The connection string lives in prisma.config.ts.
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  // Prisma 7 fills uuid() in the client, so the migration carries no
+  // database default; our flows always supply the id anyway.
+  id           String    @id @default(uuid()) @db.Uuid
+  handle       String // as typed, 1 to 32 of A-Z a-z 0-9 _ -
+  handleKey    String    @unique @map("handle_key") // lowercase of handle; case-insensitive uniqueness
+  passwordHash String    @map("password_hash")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  sessions     Session[]
+  sync         UserSync?
+
+  @@map("users")
+}
+
+model Session {
+  tokenHash String   @id @map("token_hash") // SHA-256 hex of the opaque token
+  userId    String   @map("user_id") @db.Uuid
+  expiresAt DateTime @map("expires_at") @db.Timestamptz
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+// Change tracking (Phase 1 creates this and Tombstone; Phase 2 uses them).
+// Every synced write locks this row and increments nextSeq in the same
+// transaction, so one user's change numbers commit in order with no gaps.
+model UserSync {
+  userId  String @id @map("user_id") @db.Uuid
+  nextSeq BigInt @default(1) @map("next_seq")
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_sync")
+}
+
+model Tombstone {
+  userId    String   @map("user_id") @db.Uuid
+  seq       BigInt
+  entity    String // template | dataset | profile | setting | font
+  entityKey String   @map("entity_key") // the UUID, or the setting key
+  deletedAt DateTime @default(now()) @map("deleted_at") @db.Timestamptz
+
+  @@id([userId, seq])
+  @@index([userId, deletedAt])
+  @@map("tombstones")
+}

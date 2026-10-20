@@ -37,7 +37,10 @@ export default {
   options: {
     tsConfig: { fileName: "tsconfig.json" },
     doNotFollow: { path: "node_modules" },
-    exclude: { path: "^(test|scripts|node_modules)" },
+    // The generated Prisma client is third-party code in our tree: its
+    // hundreds of files would drown the layer check, and the
+    // prisma-stays-in-infra rule above already guards who imports it.
+    exclude: { path: "^(test|scripts|node_modules|src/infra/prisma/generated)" },
     reporterOptions: { "text": { "highlightFocused": true } },
   },
 };
