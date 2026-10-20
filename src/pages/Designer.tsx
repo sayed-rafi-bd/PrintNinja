@@ -193,7 +193,7 @@ export function DesignerPage() {
     (async () => {
       try {
         const list = await invoke<TemplateVersion[]>("list_versions", {
-          templateId: tpl.id,
+          template_id: tpl.id,
         });
         setVersions(list ?? []);
       } catch {
@@ -426,7 +426,7 @@ export function DesignerPage() {
           const hydrated = await Promise.all(
             rows.map(async (r) => {
               try {
-                const versions = await invoke<TemplateVersion[]>("list_versions", { templateId: r.id });
+                const versions = await invoke<TemplateVersion[]>("list_versions", { template_id: r.id });
                 const latest = versions?.[0];
                 return {
                   id: r.id,
@@ -600,7 +600,7 @@ export function DesignerPage() {
   const refreshVersions = async () => {
     try {
       const list = await invoke<TemplateVersion[]>("list_versions", {
-        templateId: currentTemplateDbId,
+        template_id: currentTemplateDbId,
       });
       setVersions(list ?? []);
       const latest = list?.[0];
@@ -641,7 +641,7 @@ export function DesignerPage() {
         css_to: string;
         html_changed: boolean;
         css_changed: boolean;
-      }>("diff_versions", { fromId: from.id, toId: to.id });
+      }>("diff_versions", { from_id: from.id, to_id: to.id });
       setDiff(d);
     } catch {
       setDiff({

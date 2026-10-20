@@ -91,6 +91,13 @@ export function createSyncScheduler(deps: SchedulerDeps) {
 			failures = 0;
 			backoffUntil = 0;
 			await emit(conflictIds.length > 0 ? "conflict" : "synced");
+			// Lists read the cache on mount; a completed pull must refresh
+			// them (F3/F4: B shows A's template with no manual step).
+			if (typeof window !== "undefined" && !disposed) {
+				window.dispatchEvent(
+					new CustomEvent("sync:pulled", { detail: { pulled: res.pulled, pushed: res.pushed } }),
+				);
+			}
 		} catch (err) {
 			lastError = err instanceof Error ? err.message : String(err);
 			failures += 1;

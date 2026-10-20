@@ -86,3 +86,12 @@ export interface ApiTemplateSummary {
 export function apiMine(token: string): Promise<{ items: ApiTemplateSummary[] }> {
 	return request<{ items: ApiTemplateSummary[] }>("GET", "/v2/templates/mine?page=1&page_size=100", { token });
 }
+
+export interface ApiVersion {
+	version_no: number;
+	body: string;
+}
+
+export function apiVersions(token: string, id: string): Promise<{ items: ApiVersion[] }> {
+	return request<{ items: ApiVersion[] }>("GET", `/v2/templates/${id}/versions?page=1&page_size=5`, { token });
+}

@@ -51,6 +51,7 @@ export interface EngineCache {
 /** Network side of the engine. Production wires these to `callApi`. */
 export interface EngineApi {
 	fetchChanges(since: string): Promise<ChangesPage>;
+	fetchTemplate(id: string): Promise<{ revision: number }>;
 	putTemplate(
 		id: string,
 		body: {
@@ -144,16 +145,19 @@ export async function pushDirty(cache: EngineCache, api: EngineApi): Promise<{ p
 	const conflicts: string[] = [];
 	for (const row of rows) {
 		const serverId = row.server_id ?? freshServerId();
+		const body = {
+			name: row.name,
+			summary: row.summary,
+			page_w_mm: row.page_w_mm,
+			page_h_mm: row.page_h_mm,
+			language: "html" as const,
+			body: row.html,
+			css: row.css,
+			readme: row.readme,
+		};
 		try {
 			const res = await api.putTemplate(serverId, {
-				name: row.name,
-				summary: row.summary,
-				page_w_mm: row.page_w_mm,
-				page_h_mm: row.page_h_mm,
-				language: "html",
-				body: row.html,
-				css: row.css,
-				readme: row.readme,
+				...body,
 				...(row.server_id && row.base_revision != null ? { if_revision: row.base_revision } : {}),
 			});
 			await cache.markPushed(serverId, res.revision);
@@ -162,6 +166,16 @@ export async function pushDirty(cache: EngineCache, api: EngineApi): Promise<{ p
 			if (err instanceof ApiError && err.code === "revision_conflict") {
 				await cache.markConflicted(serverId);
 				conflicts.push(serverId);
+				continue;
+			}
+			if (err instanceof ApiError && err.code === "revision_required") {
+				// The server already has this id: a create whose response
+				// was lost (reload, crash), or an adopted row. Retry as an
+				// update against the stored revision.
+				const current = await api.fetchTemplate(serverId);
+				const res = await api.putTemplate(serverId, { ...body, if_revision: current.revision });
+				await cache.markPushed(serverId, res.revision);
+				pushed += 1;
 				continue;
 			}
 			throw err;

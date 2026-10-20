@@ -52,6 +52,7 @@ describe("pull", () => {
 					reset: false,
 				})
 				.mockResolvedValueOnce({ changes: [], next_cursor: "Mg==", has_more: false, reset: false }),
+			fetchTemplate: async () => ({ revision: 1 }),
 			putTemplate: async () => ({ revision: 1 }),
 			deleteTemplate: async () => {},
 			postUse: async () => {},
@@ -81,6 +82,7 @@ describe("pull", () => {
 					has_more: false,
 					reset: false,
 				}),
+			fetchTemplate: async () => ({ revision: 1 }),
 			putTemplate: async () => ({ revision: 1 }),
 			deleteTemplate: async () => {},
 			postUse: async () => {},
@@ -117,6 +119,7 @@ describe("pushDirty", () => {
 		});
 		const api: EngineApi = {
 			fetchChanges: async () => ({ changes: [], next_cursor: "", has_more: false, reset: false }),
+				fetchTemplate: async () => ({ revision: 1 }),
 			putTemplate: async (id, body) => {
 				bodies.push([id, body]);
 				return { revision: 4 };
@@ -135,6 +138,7 @@ describe("pushDirty", () => {
 		const c = cache({ listDirty: async () => [row({ server_id: null, base_revision: null })] });
 		const api: EngineApi = {
 			fetchChanges: async () => ({ changes: [], next_cursor: "", has_more: false, reset: false }),
+				fetchTemplate: async () => ({ revision: 1 }),
 			putTemplate: async (id, body) => {
 				bodies.push(body);
 				expect(typeof id).toBe("string");
@@ -145,6 +149,35 @@ describe("pushDirty", () => {
 		};
 		await pushDirty(c, api);
 		expect(bodies[0]).not.toHaveProperty("if_revision");
+	});
+
+	it("retries a 428 as an update against the stored revision", async () => {
+		const puts: unknown[] = [];
+		const marks: unknown[] = [];
+		const c = cache({
+			listDirty: async () => [row({ server_id: "a", base_revision: null })],
+			markPushed: async (id, rev) => {
+				marks.push([id, rev]);
+			},
+		});
+		const api: EngineApi = {
+			fetchChanges: async () => ({ changes: [], next_cursor: "", has_more: false, reset: false }),
+			fetchTemplate: async () => ({ revision: 7 }),
+			putTemplate: async (_id, body) => {
+				puts.push(body);
+				if (!("if_revision" in (body as Record<string, unknown>))) {
+					throw new ApiError({ code: "revision_required", message: "Update needs if_revision", requestId: "r", status: 428 });
+				}
+				return { revision: 8 };
+			},
+			deleteTemplate: async () => {},
+			postUse: async () => {},
+		};
+		const res = await pushDirty(c, api);
+		expect(res).toEqual({ pushed: 1, conflicts: [] });
+		expect(puts).toHaveLength(2);
+		expect((puts[1] as Record<string, unknown>)["if_revision"]).toBe(7);
+		expect(marks).toEqual([["a", 8]]);
 	});
 
 	it("marks 409 rows conflicted and keeps going, but throws on other errors", async () => {
@@ -158,6 +191,7 @@ describe("pushDirty", () => {
 		});
 		const api: EngineApi = {
 			fetchChanges: async () => ({ changes: [], next_cursor: "", has_more: false, reset: false }),
+				fetchTemplate: async () => ({ revision: 1 }),
 			putTemplate: async (id) => {
 				if (id === "a") throw conflict();
 				return { revision: 2 };
@@ -191,6 +225,7 @@ describe("pushTombstones", () => {
 		});
 		const api: EngineApi = {
 			fetchChanges: async () => ({ changes: [], next_cursor: "", has_more: false, reset: false }),
+				fetchTemplate: async () => ({ revision: 1 }),
 			putTemplate: async () => ({ revision: 1 }),
 			deleteTemplate: async (id) => {
 				if (id === "b") throw notFound();
@@ -212,6 +247,7 @@ describe("pushTombstones", () => {
 		});
 		const api: EngineApi = {
 			fetchChanges: async () => ({ changes: [], next_cursor: "", has_more: false, reset: false }),
+				fetchTemplate: async () => ({ revision: 1 }),
 			putTemplate: async () => ({ revision: 1 }),
 			deleteTemplate: async () => {
 				throw new Error("boom");
@@ -238,6 +274,7 @@ describe("drainUses", () => {
 		});
 		const api: EngineApi = {
 			fetchChanges: async () => ({ changes: [], next_cursor: "", has_more: false, reset: false }),
+				fetchTemplate: async () => ({ revision: 1 }),
 			putTemplate: async () => ({ revision: 1 }),
 			deleteTemplate: async () => {},
 			postUse: async (id, count) => {
@@ -274,6 +311,7 @@ describe("syncOnce", () => {
 				order.push("fetch");
 				return { changes: [], next_cursor: "MQ==", has_more: false, reset: false };
 			},
+			fetchTemplate: async () => ({ revision: 1 }),
 			putTemplate: async () => ({ revision: 1 }),
 			deleteTemplate: async () => {},
 			postUse: async () => {},

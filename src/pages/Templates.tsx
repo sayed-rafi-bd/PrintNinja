@@ -116,6 +116,14 @@ export function TemplatesPage() {
     loadMine();
   }, [loadMine]);
 
+  // A completed pull lands rows after mount; reload the lists so the new
+  // content shows with no manual Refresh (F3/F4).
+  useEffect(() => {
+    const onPulled = () => void loadMine();
+    window.addEventListener("sync:pulled", onPulled);
+    return () => window.removeEventListener("sync:pulled", onPulled);
+  }, [loadMine]);
+
   useEffect(() => {
     if (activeTab === "community") loadCommunity();
   }, [activeTab, loadCommunity]);

@@ -19,6 +19,7 @@ function setup(over: { cache?: Partial<EngineCache>; api?: Partial<EngineApi>; n
 	};
 	const api: EngineApi = {
 		fetchChanges: async () => ({ changes: [], next_cursor: "MQ==", has_more: false, reset: false }),
+			fetchTemplate: async () => ({ revision: 1 }),
 		putTemplate: async () => ({ revision: 1 }),
 		deleteTemplate: async () => {},
 		postUse: async () => {},
@@ -116,6 +117,22 @@ describe("sync scheduler", () => {
 		await vi.waitFor(() => expect(statuses.some((s) => s.state === "synced")).toBe(true));
 		expect(scheduler._debug().failures).toBe(0);
 		scheduler.stop();
+	});
+
+	it("broadcasts sync:pulled after a successful sync", async () => {
+		const seen: Array<{ pulled: number; pushed: number }> = [];
+		const onPulled = (e: Event) => seen.push((e as CustomEvent).detail);
+		window.addEventListener("sync:pulled", onPulled);
+		try {
+			const { scheduler } = setup();
+			scheduler.start();
+			await vi.advanceTimersByTimeAsync(0);
+			await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0));
+			expect(seen[0]).toEqual({ pulled: 0, pushed: 0 });
+			scheduler.stop();
+		} finally {
+			window.removeEventListener("sync:pulled", onPulled);
+		}
 	});
 
 	it("never runs two syncs at once", async () => {

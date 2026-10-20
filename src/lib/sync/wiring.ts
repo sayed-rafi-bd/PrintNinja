@@ -48,6 +48,7 @@ export function productionApi(deps: ApiDeps = apiDeps()): EngineApi {
 				method: "GET",
 				path: `/v2/sync/changes?since=${encodeURIComponent(since)}&limit=100`,
 			}),
+		fetchTemplate: (id) => callApi<{ revision: number }>(deps, { method: "GET", path: `/v2/templates/${id}` }),
 		putTemplate: (id, body) =>
 			callApi<{ revision: number }>(deps, { method: "PUT", path: `/v2/templates/${id}`, body }),
 		deleteTemplate: (id) => callApi<void>(deps, { method: "DELETE", path: `/v2/templates/${id}` }),

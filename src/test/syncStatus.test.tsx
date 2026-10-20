@@ -20,6 +20,7 @@ function fakes(over: { cache?: Partial<EngineCache>; api?: Partial<EngineApi> } 
 	};
 	const api: EngineApi = {
 		fetchChanges: async () => ({ changes: [], next_cursor: "MQ==", has_more: false, reset: false }),
+			fetchTemplate: async () => ({ revision: 1 }),
 		putTemplate: async () => ({ revision: 1 }),
 		deleteTemplate: async () => {},
 		postUse: async () => {},

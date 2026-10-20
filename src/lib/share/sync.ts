@@ -52,7 +52,7 @@ export function getLocalTemplate(id: number): Promise<SyncTemplate> {
 
 /** The version the local row points at, which is where editing happens. */
 async function getCurrentVersion(templateId: number): Promise<{ html: string; css: string }> {
-  const versions = await invoke<TemplateVersion[]>("list_versions", { templateId });
+  const versions = await invoke<TemplateVersion[]>("list_versions", { template_id: templateId });
   const current = versions?.[0];
   if (!current) return { html: "", css: "" };
   return { html: current.html ?? "", css: current.css ?? "" };
