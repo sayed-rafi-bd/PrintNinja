@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Validator } from "@seriousme/openapi-schema-validator";
 import { buildApp } from "../src/app.js";
+import { testConfig } from "./helpers.js";
 
 type GeneratedDocument = Record<string, unknown> & {
   openapi: string;
@@ -8,7 +9,7 @@ type GeneratedDocument = Record<string, unknown> & {
 };
 
 async function generate(): Promise<GeneratedDocument> {
-  const app = await buildApp({ logger: false });
+  const app = await buildApp(testConfig());
   await app.ready();
   const document = app.swagger() as unknown as GeneratedDocument;
   await app.close();
@@ -57,7 +58,7 @@ describe("generated OpenAPI document", () => {
 
 describe("health route", () => {
   it("answers 200 with status and version", async () => {
-    const app = await buildApp({ logger: false });
+    const app = await buildApp(testConfig());
     const response = await app.inject({ method: "GET", url: "/v2/health" });
     await app.close();
 
@@ -68,7 +69,7 @@ describe("health route", () => {
   });
 
   it("serves the raw document at /openapi.json and the UI at /docs", async () => {
-    const app = await buildApp({ logger: false });
+    const app = await buildApp(testConfig());
     const json = await app.inject({ method: "GET", url: "/openapi.json" });
     const docs = await app.inject({ method: "GET", url: "/docs" });
     await app.close();

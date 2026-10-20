@@ -1,7 +1,8 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "PrintNinja API",
+    "title": "PrintNinja server",
+    "description": "Local HTTP service for the PrintNinja desktop app. All responses use the shared error envelope.",
     "version": "0.5.0"
   },
   "components": {
