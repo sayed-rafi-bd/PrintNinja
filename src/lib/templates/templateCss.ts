@@ -1,22 +1,15 @@
 /**
- * Bundled print stylesheet for user templates.
+ * Print stylesheets for user templates.
  *
- * Rendered documents used to pull `https://cdn.tailwindcss.com` at print
- * time. That was a DEV-ONLY artifact, so it:
- *   - failed offline / on an air-gapped shop LAN,
- *   - was blocked by many corporate proxies,
- *   - sat outside our CSP, and
- *   - re-downloaded and re-compiled Tailwind on every single job.
+ * Rendered documents used to pull `https://cdn.tailwindcss.com` at print time,
+ * and later inlined one shared, safelisted Tailwind build. Both are gone: each
+ * template version now carries its own stylesheet, compiled from the classes
+ * it actually uses (`compileTemplateCss`, stored as `compiled_css`). That
+ * keeps every print job self-contained and CSP-clean, and lets templates use
+ * any Tailwind class, including arbitrary values like `w-[37mm]`.
  *
- * `src/lib/templates/templates.generated.ts` is a real, minified Tailwind
- * build produced by `pnpm build:templates:css` from
- * `src/styles/templates.src.css` plus the safelist in
- * `tailwind.templates.config.ts`. It is inlined into every rendered document,
- * which keeps each print job self-contained and CSP-clean.
+ * What is left here is the small base layer every document gets.
  */
-import { TEMPLATE_PRINT_CSS } from "@/lib/templates/templates.generated";
-
-export { TEMPLATE_PRINT_CSS };
 
 /**
  * Tailwind's base reset must be present, otherwise unclassed template markup
@@ -39,13 +32,23 @@ svg{shape-rendering:crispEdges}
 @media print{.print-only{display:block}body{min-height:0}}`;
 
 /**
- * Combine the base print CSS with the generated Tailwind bundle.
+ * Combine the base print CSS with the template's compiled Tailwind CSS.
  *
- * Base rules come first so the Tailwind utilities layer can override them,
- * and so caller-supplied CSS (appended last) always wins.
+ * `compiledCss` may be blank, for a version saved before per-template
+ * compilation existed or whose compile failed; the document then has the base
+ * rules and the template's own CSS only. The Rust print path
+ * assembles the same three parts in the same order (`build_template_css`), so
+ * preview and print agree.
+ *
+ * Base rules come first so the Tailwind utilities can override them, and so
+ * caller-supplied CSS (appended last) always wins.
  */
-export function buildTemplateCss(userCss?: string | null): string {
-  const parts = [TEMPLATE_BASE_CSS, TEMPLATE_PRINT_CSS];
+export function buildTemplateCss(
+  userCss?: string | null,
+  compiledCss?: string | null,
+): string {
+  const parts = [TEMPLATE_BASE_CSS];
+  if (compiledCss && compiledCss.trim()) parts.push(compiledCss);
   if (userCss && userCss.trim()) parts.push(userCss);
   return parts.join("\n");
 }

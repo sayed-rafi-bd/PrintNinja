@@ -66,11 +66,12 @@ pub struct PrintResponse {
 }
 
 /// Load template HTML/CSS for a job (pinned version, or current version).
+/// The tuple is `(html, css, compiled_css, version_id, width_mm, height_mm)`.
 fn resolve_template(
     conn: &rusqlite::Connection,
     template_id: i64,
     version_id: Option<i64>,
-) -> AppResult<(String, String, i64, f64, f64)> {
+) -> AppResult<(String, String, String, i64, f64, f64)> {
     let version_id = match version_id {
         Some(v) => v,
         None => {
@@ -87,11 +88,11 @@ fn resolve_template(
         }
     };
 
-    let (html, css): (String, String) = conn
+    let (html, css, compiled_css): (String, String, String) = conn
         .query_row(
-            "SELECT html, css FROM template_versions WHERE id = ?1 AND template_id = ?2",
+            "SELECT html, css, compiled_css FROM template_versions WHERE id = ?1 AND template_id = ?2",
             [version_id, template_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .map_err(|_| AppError::NotFound(format!("Version {} not found", version_id)))?;
 
@@ -103,24 +104,29 @@ fn resolve_template(
         )
         .map_err(|_| AppError::NotFound(format!("Template {} not found", template_id)))?;
 
-    Ok((html, css, version_id, w as f64, h as f64))
+    Ok((html, css, compiled_css, version_id, w as f64, h as f64))
 }
 
-/// Bundled print stylesheets, byte-identical to what the Designer/Print
-/// preview inlines (`buildTemplateCss` in `src/lib/templates/templateCss.ts`).
+/// Base print stylesheet, byte-identical to `TEMPLATE_BASE_CSS` in
+/// `src/lib/templates/templateCss.ts`, which the Designer/Print preview inlines.
 ///
 /// Templates are authored with Tailwind utility classes (`text-xs`,
-/// `border-b-2`, `flex`, ...) and store little or no CSS of their own, so
-/// without these the PDF comes out completely unstyled even though the
-/// preview looks right. `template-print.css` is regenerated together with
-/// `templates.generated.ts` by `pnpm build:templates:css`.
+/// `border-b-2`, `flex`, ...). Each template version carries its own stylesheet
+/// compiled from the classes it uses (`compiled_css`), so the utilities are not
+/// bundled here.
 const TEMPLATE_BASE_CSS: &str = include_str!("../../assets/template-base.css");
-const TEMPLATE_PRINT_CSS: &str = include_str!("../../assets/template-print.css");
 
-/// Base reset, then the Tailwind bundle, then the template's own CSS last so
-/// it wins (same order as the frontend).
-fn build_template_css(user_css: &str) -> String {
-    let mut parts = vec![TEMPLATE_BASE_CSS.trim(), TEMPLATE_PRINT_CSS.trim()];
+/// Base reset, then the version's compiled Tailwind CSS, then the template's
+/// own CSS last so it wins (same order as the frontend).
+///
+/// `compiled_css` is empty for a version saved before per-template compilation
+/// existed, or whose compile failed; it then prints with the base rules and its
+/// own CSS only. Re-saving the template compiles it.
+fn build_template_css(user_css: &str, compiled_css: &str) -> String {
+    let mut parts = vec![TEMPLATE_BASE_CSS.trim()];
+    if !compiled_css.trim().is_empty() {
+        parts.push(compiled_css.trim());
+    }
     if !user_css.trim().is_empty() {
         parts.push(user_css);
     }
@@ -255,8 +261,9 @@ pub async fn run_print(
                 .lock()
                 .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
             let conn = guard.connection()?;
-            let (h, c, vid, tw, th) = resolve_template(&conn, tid, req.template_version_id)?;
-            (h, build_template_css(&c), Some(vid), tw, th)
+            let (h, c, compiled, vid, tw, th) =
+                resolve_template(&conn, tid, req.template_version_id)?;
+            (h, build_template_css(&c, &compiled), Some(vid), tw, th)
         }
         None => (
             req.html.clone(),
@@ -701,11 +708,23 @@ mod tests {
     }
 
     #[test]
-    fn template_css_includes_tailwind_bundle_and_user_css_last() {
-        let css = build_template_css(".brand{color:#f00}");
-        assert!(css.contains(".text-xs"), "tailwind bundle missing");
-        assert!(css.contains(".border-b-2"), "tailwind bundle missing");
+    fn template_css_is_base_compiled_then_user_css() {
+        let css = build_template_css(".brand{color:#f00}", ".w-\\[37mm\\]{width:37mm}");
+        assert!(css.starts_with(TEMPLATE_BASE_CSS.trim()));
+        let compiled = css.find("37mm").expect("compiled css missing");
+        let user = css.find(".brand{color:#f00}").expect("user css missing");
+        assert!(compiled < user, "user css must come last so it wins");
         assert!(css.trim_end().ends_with(".brand{color:#f00}"));
+    }
+
+    #[test]
+    fn blank_compiled_css_leaves_base_and_user_css_only() {
+        let css = build_template_css(".brand{color:#f00}", "  \n ");
+        assert_eq!(
+            css,
+            format!("{}\n.brand{{color:#f00}}", TEMPLATE_BASE_CSS.trim())
+        );
+        assert_eq!(build_template_css("", ""), TEMPLATE_BASE_CSS.trim());
     }
 
     #[test]

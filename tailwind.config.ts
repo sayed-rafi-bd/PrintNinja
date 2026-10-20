@@ -1,7 +1,16 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
-  content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  content: [
+    "./index.html",
+    "./src/**/*.{ts,tsx}",
+    // Template-authoring code and tests hold class names as *data* (Handlebars
+    // examples such as `w-[{{width}}mm]`, starter template markup). Scanning them
+    // would emit junk rules into the app's own stylesheet, and some are invalid
+    // CSS. Templates get their own stylesheet from `compileTemplateCss`.
+    "!./src/lib/templates/**",
+    "!./src/test/**",
+  ],
   theme: {
     container: {
       center: true,

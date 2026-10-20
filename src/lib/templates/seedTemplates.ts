@@ -1,3 +1,4 @@
+import { compiledFields } from "@/lib/templates/compileTemplateCss";
 import { invoke } from "@/lib/invoke";
 import { STARTER_TEMPLATES } from "@/lib/templates/defaultTemplate";
 
@@ -38,6 +39,7 @@ async function loadOrSeed(): Promise<TemplateRow[]> {
           orientation: t.orientation,
           html: t.html,
           css: t.css,
+          ...(await compiledFields(t.html)),
         },
       });
       created.push(row);

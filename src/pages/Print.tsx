@@ -104,12 +104,12 @@ export function PrintPage() {
     let cancelled = false;
     (async () => {
       try {
-        const versions = await invoke<{ id: number; html: string; css: string }[]>("list_versions", { templateId: template.id });
+        const versions = await invoke<{ id: number; html: string; css: string; compiled_css?: string }[]>("list_versions", { templateId: template.id });
         const latest = versions?.[0];
         if (!latest) { if (!cancelled) { setPreviewHtml(""); setPreviewError("This template has no versions yet. Open it in Designer and save it."); } return; }
         const { renderTemplate } = await import("@/lib/render/renderTemplate");
         if (!cancelled) {
-          setPreviewHtml(renderTemplate(latest.html, latest.css, DEFAULT_MOCK_DATA as any));
+          setPreviewHtml(renderTemplate(latest.html, latest.css, DEFAULT_MOCK_DATA as any, latest.compiled_css));
           setPreviewError("");
         }
       } catch (e) {

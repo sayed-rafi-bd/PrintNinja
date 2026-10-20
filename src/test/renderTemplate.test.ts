@@ -1,10 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { renderTemplate, wrapWithTailwind } from "@/lib/render/renderTemplate";
 import {
   TEMPLATE_BASE_CSS,
-  TEMPLATE_PRINT_CSS,
   buildTemplateCss,
   injectStyles,
 } from "@/lib/templates/templateCss";
@@ -13,88 +10,49 @@ import {
   STARTER_TEMPLATES,
 } from "@/lib/templates/defaultTemplate";
 
-const ROOT = resolve(__dirname, "../..");
-
-describe("bundled print stylesheet", () => {
-  it("exists as a committed build artifact", () => {
-    // Regenerate with: pnpm build:templates:css
-    expect(TEMPLATE_PRINT_CSS.length).toBeGreaterThan(5000);
-  });
-
+describe("base print stylesheet", () => {
   it("never references the Tailwind CDN", () => {
     // Regression for #35/#81: templates used to load cdn.tailwindcss.com.
-    expect(TEMPLATE_PRINT_CSS).not.toContain("cdn.tailwindcss.com");
     expect(TEMPLATE_BASE_CSS).not.toContain("cdn.tailwindcss.com");
     expect(buildTemplateCss()).not.toContain("cdn.");
   });
 
   it("contains no external resource references", () => {
-    expect(TEMPLATE_PRINT_CSS).not.toMatch(/url\(\s*['"]?https?:/i);
-    expect(TEMPLATE_PRINT_CSS).not.toContain("@import");
+    expect(TEMPLATE_BASE_CSS).not.toMatch(/url\(\s*['"]?https?:/i);
+    expect(TEMPLATE_BASE_CSS).not.toContain("@import");
   });
 
-  it("stays small enough to inline into every print job", () => {
-    // A full safelist across all Tailwind variants produced ~430 KB.
-    expect(TEMPLATE_PRINT_CSS.length).toBeLessThan(120_000);
+  it("carries the reset and print essentials", () => {
+    expect(TEMPLATE_BASE_CSS).toContain("box-sizing:border-box");
+    expect(TEMPLATE_BASE_CSS).toContain("print-color-adjust");
   });
 
-  it("carries Tailwind's preflight reset and print essentials", () => {
-    expect(TEMPLATE_PRINT_CSS).toContain("box-sizing:border-box");
-    expect(TEMPLATE_PRINT_CSS).toContain("print-color-adjust");
+  it("defines the Designer's helper classes", () => {
+    for (const c of [
+      ".page-break-before",
+      ".page-break-after",
+      ".page-break-inside-avoid",
+      ".no-print",
+      ".print-only",
+      ".barcode",
+    ]) {
+      expect(TEMPLATE_BASE_CSS, c).toContain(c);
+    }
   });
 
-  it("emits a rule for every utility in the Tailwind safelist", () => {
-    const config = readFileSync(
-      resolve(ROOT, "tailwind.templates.config.ts"),
-      "utf8",
-    );
-    const paletteMatch = config.match(
-      /const PALETTE = \[([\s\S]*?)\n\];/,
-    );
-    expect(paletteMatch, "PALETTE must still exist in the config").toBeTruthy();
-
-    const utilities = [
-      ...(paletteMatch![1].match(/"([^"]+)"/g) ?? []),
-    ].map((u) => u.replace(/"/g, "").replace("\\/", "/"));
-
-    expect(utilities.length).toBeGreaterThan(150);
-
-    const missing = utilities.filter(
-      (u) => !TEMPLATE_PRINT_CSS.includes(`.${CSS_ESCAPE(u)}`),
-    );
-    expect(missing, "run `pnpm build:templates:css`").toEqual([]);
-  });
-
-  it("emits a rule for every class used by the starter templates", () => {
-    const source = readFileSync(
-      resolve(ROOT, "src/lib/templates/defaultTemplate.ts"),
-      "utf8",
-    );
-    const classAttrs = [
-      ...source.matchAll(/class="([^"]+)"/g),
-    ].flatMap((m) => m[1].split(/\s+/).filter(Boolean));
-
-    // Arbitrary values like text-[10px] are not safelisted; they are picked
-    // up by the config's `content` glob instead.
-    const plain = classAttrs.filter((c) => !c.includes("["));
-    expect(plain.length).toBeGreaterThan(20);
-
-    const missing = plain.filter(
-      (c) => !TEMPLATE_PRINT_CSS.includes(`.${CSS_ESCAPE(c)}`),
-    );
-    expect(missing, "run `pnpm build:templates:css`").toEqual([]);
+  it("is small: the Tailwind rules come from the template, not from here", () => {
+    expect(TEMPLATE_BASE_CSS.length).toBeLessThan(2_000);
   });
 });
 
-/** Escape the characters Tailwind escapes in class selectors. */
-function CSS_ESCAPE(name: string): string {
-  return name.replace(/([/:.%])/g, "\\$1");
-}
-
 describe("buildTemplateCss", () => {
-  it("puts the base print rules before the Tailwind bundle", () => {
-    const css = buildTemplateCss();
-    expect(css.indexOf("@page")).toBeLessThan(css.indexOf("--tw-"));
+  it("puts the base print rules before the template's Tailwind CSS", () => {
+    const css = buildTemplateCss("", ".flex{display:flex}");
+    expect(css.indexOf("@page")).toBeLessThan(css.indexOf(".flex{display:flex}"));
+  });
+
+  it("is just the base rules for a template with no compiled CSS", () => {
+    expect(buildTemplateCss()).toBe(TEMPLATE_BASE_CSS);
   });
 
   it("appends caller CSS last so it wins", () => {
@@ -277,4 +235,32 @@ describe("wrapWithTailwind", () => {
     expect(out).toContain("<!DOCTYPE html>");
     expect(out).toContain("<style data-printninja>");
   });
+});
+
+describe("per-template compiled CSS", () => {
+  const COMPILED = ".w-\\[37mm\\]{width:37mm}";
+
+  it("is inlined into the rendered document", () => {
+    const doc = renderTemplate("<p class='w-[37mm]'>x</p>", "", {}, COMPILED);
+    expect(doc).toContain(COMPILED);
+  });
+
+  it("keeps the base reset first and the template's own CSS last", () => {
+    const doc = renderTemplate("<p>x</p>", ".brand{color:#f00}", {}, COMPILED);
+    const base = doc.indexOf("box-sizing:border-box");
+    const compiled = doc.indexOf(COMPILED);
+    const own = doc.indexOf(".brand{color:#f00}");
+    expect(base).toBeGreaterThanOrEqual(0);
+    expect(compiled).toBeGreaterThan(base);
+    expect(own).toBeGreaterThan(compiled);
+  });
+
+  it.each([undefined, null, "", "  \n "])(
+    "renders with the base rules only for %j",
+    (blank) => {
+      const doc = renderTemplate("<p>x</p>", "", {}, blank as string | null | undefined);
+      expect(doc).toContain("box-sizing:border-box");
+      expect(doc).not.toContain("--tw-");
+    },
+  );
 });

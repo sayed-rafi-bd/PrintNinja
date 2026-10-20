@@ -71,6 +71,11 @@ pub struct CreateTemplateRequest {
     pub orientation: Option<String>,
     pub html: Option<String>,
     pub css: Option<String>,
+    /// Tailwind CSS compiled from `html` by the frontend; see `TemplateVersion`.
+    #[serde(default)]
+    pub compiled_css: Option<String>,
+    #[serde(default)]
+    pub compiled_key: Option<String>,
     pub readme: Option<String>,
     pub summary: Option<String>,
 }
@@ -143,9 +148,16 @@ pub fn create_template(db: State<DbState>, req: CreateTemplateRequest) -> AppRes
 
     // Create version 1 so `current_version_id` always points somewhere.
     tx.execute(
-        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-         VALUES (?1, 1, ?2, ?3, 'manual')",
-        rusqlite::params![template_id, html, css,],
+        "INSERT INTO template_versions
+           (template_id, version_no, html, css, created_by, compiled_css, compiled_key)
+         VALUES (?1, 1, ?2, ?3, 'manual', ?4, ?5)",
+        rusqlite::params![
+            template_id,
+            html,
+            css,
+            req.compiled_css.clone().unwrap_or_default(),
+            req.compiled_key.clone().unwrap_or_default(),
+        ],
     )?;
     let version_id = tx.last_insert_rowid();
 

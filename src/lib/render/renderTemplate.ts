@@ -87,6 +87,8 @@ export function renderTemplate(
   html: string,
   css: string,
   data: Record<string, unknown>,
+  /** The template's compiled Tailwind CSS; the shared bundle is used if blank. */
+  compiledCss?: string | null,
 ): string {
   registerHelpers();
 
@@ -108,7 +110,7 @@ export function renderTemplate(
   // execute code, even from a compromised server row.
   body = sanitizeForRender(body);
 
-  const combined = buildTemplateCss(css);
+  const combined = buildTemplateCss(css, compiledCss);
 
   // If the template is already a full document, inject into it rather than
   // nesting a second <html>.

@@ -23,7 +23,7 @@ Silent print for Windows and Android — design HTML templates, fetch JSON data,
 | App shell | Tauri 2 (Windows + Android) |
 | UI | React 18 + Vite 6 + TypeScript 5 + Tailwind 3 + shadcn/ui + Zustand + TanStack Query/Table, IBM Plex via `@fontsource` |
 | DB | SQLite (`tauri-plugin-sql` migrations + `rusqlite` commands) — 11 tables |
-| Template | Handlebars (singleton registry), `buildTemplateCss` inlines a committed minified Tailwind bundle (`pnpm build:templates:css`) |
+| Template | Handlebars (singleton registry), each template version stores its own Tailwind CSS (`compiled_css`), compiled in the app by Tailwind v4 `compile()` from the classes the template uses; `buildTemplateCss` inlines it after a small base layer |
 | Barcodes | `bwip-js` `toSVG()` (inline SVG, no canvas data-URI) |
 | Markdown | `react-markdown` + `remark-gfm` (no `rehype-raw` → XSS as text, links `http/https/mailto` only) |
 | Sanitize | `sanitize.ts` + `handlebars.rs` strip `<script>`/`on*`, `find_remote_refs` → `data: URIs`, CSP `default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:`, `sandbox=""` iframes |
@@ -58,7 +58,6 @@ src/                         # React
   pages/Designer (canvas/visual/code/readme/preview + Publish)  Templates (Community/Mine/Saved)  Print  PrinterSetup  History  Settings (Share)
   components/ui  Layout  VisualDesigner  ReadmeEditor
   lib/{store,render{renderTemplate,sanitize},templates,share/client,hooks,utils}
-  styles/templates.src.css   # print stylesheet source → templates.generated.ts
 src-tauri/src/
   commands/{print,printer,template{readme, publish info, origin},version,history,batch,font,profile,settings,api}
   api/{routes,auth,openapi}  queue.rs  transport/{...}  data/fetcher.rs  deeplink.rs  render/handlebars.rs (sanitize)  db (ensure_v2_schema)  readme.rs
@@ -81,8 +80,7 @@ Prerequisites: Node 22, Rust stable, pnpm 10; for Android: Java 17, Android SDK/
 | Command | Purpose |
 |---|---|
 | `pnpm dev` | Vite dev server |
-| `pnpm build` | `tsc -b && vite build` (runs `prebuild` → `build:templates:css`) |
-| `pnpm build:templates:css` | Tailwind → `src/lib/templates/templates.generated.ts` (commit the output) |
+| `pnpm build` | `tsc -b && vite build` |
 | `pnpm lint` / `pnpm format` | Biome (`src/**/*.{ts,tsx}` + `index.html` + `vite.config.ts`) |
 | `pnpm test` | Vitest (jsdom) |
 | `cargo test` (in `src-tauri`) | Rust (lib + integration) — `CARGO_INCREMENTAL=0 cargo test` on low-disk hosts |

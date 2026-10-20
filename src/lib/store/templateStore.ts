@@ -28,6 +28,9 @@ export interface TemplateVersion {
   note: string | null;
   created_at: string;
   created_by: string;
+  /** Tailwind CSS compiled from `html`; empty if not compiled yet. */
+  compiled_css?: string;
+  compiled_key?: string;
 }
 
 export interface SampleDataset {

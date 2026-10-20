@@ -137,3 +137,42 @@ describe("DesignerSidebar", () => {
     expect(p.openDiff).toHaveBeenCalledWith(versions[1], versions[0]);
   });
 });
+
+describe("ClassWarnings", () => {
+  it("renders nothing for a template without data-built classes", async () => {
+    const { ClassWarnings } = await import("@/components/designer/ClassWarnings");
+    const { container } = render(
+      <ClassWarnings html={`<p class="p-2 {{#if a}}flex{{else}}grid{{/if}}">x</p>`} />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("names the line and the offending class, and explains the fix", async () => {
+    const { ClassWarnings } = await import("@/components/designer/ClassWarnings");
+    render(<ClassWarnings html={`<p>one</p>\n<b class="p-2 bg-{{color}}-500">x</b>`} />);
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("1 class name is built from data");
+    expect(alert).toHaveTextContent("Line 2:");
+    expect(alert).toHaveTextContent("bg-{{color}}-500");
+    expect(alert).toHaveTextContent(/every branch/);
+    expect(alert).toHaveTextContent(/CSS variable/);
+  });
+
+  it("counts several and caps the list", async () => {
+    const { ClassWarnings } = await import("@/components/designer/ClassWarnings");
+    const rows = Array.from({ length: 7 }, (_, i) => `<i class="m-{{n${i}}}">x</i>`).join("\n");
+    render(<ClassWarnings html={rows} />);
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("7 class names are built from data");
+    expect(alert).toHaveTextContent("…and 2 more");
+    expect(within(alert).getAllByText(/^Line \d+:/)).toHaveLength(5);
+  });
+
+  it("updates when the template is fixed", async () => {
+    const { ClassWarnings } = await import("@/components/designer/ClassWarnings");
+    const { rerender, container } = render(<ClassWarnings html={`<b class="bg-{{c}}">x</b>`} />);
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    rerender(<ClassWarnings html={`<b class="{{#if c}}bg-red-600{{else}}bg-green-600{{/if}}">x</b>`} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+});

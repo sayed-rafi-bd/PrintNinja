@@ -271,7 +271,9 @@ export function TemplatesPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const detail = await res.json();
       const { renderTemplate } = await import("@/lib/render/renderTemplate");
-      setPreviewHtml(renderTemplate(detail.body ?? "", "", DEFAULT_MOCK_DATA as any));
+      const { compileTemplateCss } = await import("@/lib/templates/compileTemplateCss");
+      const { css: compiled } = await compileTemplateCss(detail.body ?? "");
+      setPreviewHtml(renderTemplate(detail.body ?? "", "", DEFAULT_MOCK_DATA as any, compiled));
     } catch (e) {
       setPreviewError(`Could not load the preview: ${e}`);
     }
