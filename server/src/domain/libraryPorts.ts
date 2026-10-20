@@ -56,6 +56,57 @@ export interface ProfileWrite {
 	settingsJson: string;
 }
 
+export interface SettingView {
+	ownerId: string;
+	key: string;
+	value: string;
+	revision: number;
+	changeSeq: bigint;
+	updatedAt: Date;
+}
+
+export interface SettingWrite {
+	ownerId: string;
+	key: string;
+	value: string;
+}
+
+export interface SettingRepository {
+	findByKey(ownerId: string, key: string): Promise<SettingView | null>;
+	create(input: SettingWrite): Promise<SettingView>;
+	update(input: SettingWrite, expectedRevision: number): Promise<SettingView>;
+	deleteWithTombstone(ownerId: string, key: string): Promise<boolean>;
+	listByOwner(ownerId: string): Promise<SettingView[]>;
+}
+
+export interface FontView {
+	id: string;
+	ownerId: string;
+	name: string;
+	format: string;
+	sizeBytes: number;
+	sha256: string;
+	revision: number;
+	changeSeq: bigint;
+	createdAt: Date;
+	updatedAt: Date;
+}
+
+export interface UploadedFont extends FontView {
+	bytes: Uint8Array;
+}
+
+export interface FontRepository {
+	findById(id: string): Promise<FontView | null>;
+	findFile(id: string): Promise<UploadedFont | null>;
+	countByOwner(ownerId: string): Promise<number>;
+	create(input: { id: string; ownerId: string; name: string }): Promise<FontView>;
+	updateName(input: { id: string; ownerId: string; name: string }, expectedRevision: number): Promise<FontView>;
+	replaceFile(input: { id: string; ownerId: string; bytes: Uint8Array; format: string; sha256: string }): Promise<UploadedFont>;
+	deleteWithTombstone(id: string): Promise<{ ownerId: string } | null>;
+	listByOwner(ownerId: string): Promise<FontView[]>;
+}
+
 export interface ProfileRepository {
 	findById(id: string): Promise<ProfileView | null>;
 	create(input: ProfileWrite): Promise<ProfileView>;

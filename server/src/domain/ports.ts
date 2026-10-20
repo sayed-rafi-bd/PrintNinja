@@ -3,13 +3,15 @@
 // imports Fastify or Prisma — the layer check enforces it.
 
 import type {
+	DatasetRepository,
+	FontRepository,
+	ProfileRepository,
+	SettingRepository,
+} from "./libraryPorts.js";
+import type {
 	SavedRepository,
 	TemplateRepository,
 } from "./templatePorts.js";
-import type {
-	DatasetRepository,
-	ProfileRepository,
-} from "./libraryPorts.js";
 import type { SyncRepository } from "./syncPorts.js";
 
 export interface UserRecord {
@@ -103,4 +105,6 @@ export interface AppDeps extends AuthDeps {
 	sync: SyncRepository;
 	datasets: DatasetRepository;
 	profiles: ProfileRepository;
+	settings: SettingRepository;
+	fonts: FontRepository;
 }

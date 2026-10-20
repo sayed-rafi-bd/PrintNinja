@@ -123,3 +123,33 @@ describe("putProfile", () => {
 		await expect(deleteProfile(r, "missing", OWNER_ID)).rejects.toBeInstanceOf(NotFoundError);
 	});
 });
+
+describe("font files", () => {
+	function ttfExtra(): Uint8Array {
+		return new Uint8Array([0x00, 0x01, 0x00, 0x00, 0xaa, 0xbb]);
+	}
+
+	it("stores bytes with the sha and serves them back exactly", async () => {
+		const { createFakeAccountRepos } = await import("./fakes/account.js");
+		const { fonts } = createFakeAccountRepos();
+		const { putFontFile, getFontFile } = await import("../src/domain/fonts.js");
+		await fonts.create({ id: "f1", ownerId: "owner-1", name: "Body" });
+		const stored = await putFontFile({ fonts }, "f1", ttfExtra(), "owner-1");
+		expect(stored.format).toBe("ttf");
+		expect(stored.sizeBytes).toBe(6);
+		expect(stored.sha256).toHaveLength(64);
+		const back = await getFontFile({ fonts }, "f1", "owner-1");
+		expect([...back.bytes]).toEqual([...ttfExtra()]);
+		expect(back.sha256).toBe(stored.sha256);
+	});
+
+	it("rejects unknown magic, empty and oversize files, and strangers", async () => {
+		const { createFakeAccountRepos } = await import("./fakes/account.js");
+		const { fonts } = createFakeAccountRepos();
+		const { putFontFile } = await import("../src/domain/fonts.js");
+		await fonts.create({ id: "f2", ownerId: "owner-1", name: "Body" });
+		await expect(putFontFile({ fonts }, "f2", new Uint8Array([1, 2, 3]), "owner-1")).rejects.toThrow(/format/i);
+		await expect(putFontFile({ fonts }, "f2", new Uint8Array(0), "owner-1")).rejects.toThrow(/empty/i);
+		await expect(putFontFile({ fonts }, "f2", ttfExtra(), "other-1")).rejects.toThrow(/not allowed|forbidden/i);
+	});
+});

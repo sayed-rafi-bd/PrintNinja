@@ -9,6 +9,8 @@ import { createSessionRepository } from "../../src/infra/prisma/sessions.js";
 import { createSyncRepository } from "../../src/infra/prisma/sync.js";
 import { createTemplateRepository } from "../../src/infra/prisma/templates.js";
 import { createDatasetRepository } from "../../src/infra/prisma/datasets.js";
+import { createSettingRepository } from "../../src/infra/prisma/settings.js";
+import { createFontRepository } from "../../src/infra/prisma/fonts.js";
 import { createProfileRepository } from "../../src/infra/prisma/profiles.js";
 import { createUserRepository } from "../../src/infra/prisma/users.js";
 import { createPasswordHasher } from "../../src/infra/security/passwordHasher.js";
@@ -72,6 +74,8 @@ export function realDeps(db: DbClient): AppDeps {
 		templates: createTemplateRepository(db),
 		datasets: createDatasetRepository(db),
 		profiles: createProfileRepository(db),
+		settings: createSettingRepository(db),
+		fonts: createFontRepository(db),
 		saved: createSavedRepository(db),
 		sync: createSyncRepository(db),
 	};

@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "fonts" ALTER COLUMN "format" SET DEFAULT '',
+ALTER COLUMN "size_bytes" SET DEFAULT 0,
+ALTER COLUMN "sha256" SET DEFAULT '';

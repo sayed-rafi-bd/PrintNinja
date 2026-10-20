@@ -119,9 +119,9 @@ model Font {
   id          String   @id @db.Uuid // client-generated, like templates (offline create)
   ownerId     String   @map("owner_id") @db.Uuid
   name        String
-  format      String // ttf | otf | woff2, checked against magic bytes
-  sizeBytes   Int      @map("size_bytes")
-  sha256      String // of the stored bytes; the download ETag
+  format      String   @default("") // ttf | otf | woff2, checked against magic bytes; empty until the file lands
+  sizeBytes   Int      @default(0) @map("size_bytes")
+  sha256      String   @default("") // of the stored bytes; the download ETag
   revision    Int      @default(1)
   changeSeq   BigInt   @map("change_seq")
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
