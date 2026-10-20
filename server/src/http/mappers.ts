@@ -99,6 +99,67 @@ export function toSyncChange(change: SyncChange): SyncChangeResponse {
 			id: change.entityKey,
 		};
 	}
+	if (change.entity === "dataset") {
+		return {
+			seq: change.seq.toString(10),
+			entity: "dataset",
+			op: "upsert",
+			data: {
+				id: change.data.id,
+				name: change.data.name,
+				data_json: change.data.dataJson,
+				revision: change.data.revision,
+				created_at: change.data.createdAt.toISOString(),
+				updated_at: change.data.updatedAt.toISOString(),
+			},
+		};
+	}
+	if (change.entity === "profile") {
+		return {
+			seq: change.seq.toString(10),
+			entity: "profile",
+			op: "upsert",
+			data: {
+				id: change.data.id,
+				template_id: change.data.templateId,
+				printer_name: change.data.printerName,
+				settings_json: change.data.settingsJson,
+				revision: change.data.revision,
+				created_at: change.data.createdAt.toISOString(),
+				updated_at: change.data.updatedAt.toISOString(),
+			},
+		};
+	}
+	if (change.entity === "setting") {
+		return {
+			seq: change.seq.toString(10),
+			entity: "setting",
+			op: "upsert",
+			data: {
+				key: change.data.key,
+				value: change.data.value,
+				revision: change.data.revision,
+				updated_at: change.data.updatedAt.toISOString(),
+			},
+		};
+	}
+	if (change.entity === "font") {
+		return {
+			seq: change.seq.toString(10),
+			entity: "font",
+			op: "upsert",
+			data: {
+				id: change.data.id,
+				name: change.data.name,
+				format: change.data.format,
+				size_bytes: change.data.sizeBytes,
+				sha256: change.data.sha256,
+				revision: change.data.revision,
+				created_at: change.data.createdAt.toISOString(),
+				updated_at: change.data.updatedAt.toISOString(),
+			},
+		};
+	}
 	return {
 		seq: change.seq.toString(10),
 		entity: "template",

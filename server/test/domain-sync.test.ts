@@ -68,7 +68,7 @@ describe("readChanges", () => {
 
 		const result = await readChanges(repos, "owner-1", { cursor: 0n, limit: 100, types: ["template"] }, 8 * 1024 * 1024);
 		expect(result.reset).toBe(true);
-		expect(result.changes.map((c) => ("data" in c ? `upsert:${c.data.id}` : `delete:${c.entityKey}`))).toContain("delete:a1");
+		expect(result.changes.map((c) => ("data" in c ? (c.entity === "setting" ? `upsert:setting:${c.data.key}` : `upsert:${c.data.id}`) : `delete:${c.entityKey}`))).toContain("delete:a1");
 	});
 
 	it("parses and validates cursors and type filters", async () => {

@@ -3614,6 +3614,74 @@ export interface paths {
                             } | {
                                 seq: string;
                                 /** @enum {string} */
+                                entity: "dataset";
+                                /** @enum {string} */
+                                op: "upsert";
+                                data: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    name: string;
+                                    data_json: string;
+                                    revision: number;
+                                    /** Format: date-time */
+                                    created_at: string;
+                                    /** Format: date-time */
+                                    updated_at: string;
+                                };
+                            } | {
+                                seq: string;
+                                /** @enum {string} */
+                                entity: "profile";
+                                /** @enum {string} */
+                                op: "upsert";
+                                data: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    /** Format: uuid */
+                                    template_id: string;
+                                    printer_name: string;
+                                    settings_json: string;
+                                    revision: number;
+                                    /** Format: date-time */
+                                    created_at: string;
+                                    /** Format: date-time */
+                                    updated_at: string;
+                                };
+                            } | {
+                                seq: string;
+                                /** @enum {string} */
+                                entity: "setting";
+                                /** @enum {string} */
+                                op: "upsert";
+                                data: {
+                                    key: string;
+                                    value: string;
+                                    revision: number;
+                                    /** Format: date-time */
+                                    updated_at: string;
+                                };
+                            } | {
+                                seq: string;
+                                /** @enum {string} */
+                                entity: "font";
+                                /** @enum {string} */
+                                op: "upsert";
+                                data: {
+                                    /** Format: uuid */
+                                    id: string;
+                                    name: string;
+                                    format: string;
+                                    size_bytes: number;
+                                    sha256: string;
+                                    revision: number;
+                                    /** Format: date-time */
+                                    created_at: string;
+                                    /** Format: date-time */
+                                    updated_at: string;
+                                };
+                            } | {
+                                seq: string;
+                                /** @enum {string} */
                                 entity: "template" | "dataset" | "profile" | "setting" | "font";
                                 /** @enum {string} */
                                 op: "delete";

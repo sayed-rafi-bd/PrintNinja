@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { fontSchema, settingSchema } from "./account.js";
+import { datasetSchema, profileSchema } from "./library.js";
 import { templateSchema } from "./templates.js";
 
 // Endpoints 21 (delta sync) and 22 (saved manifest), plan sections 7/9.
@@ -14,11 +16,39 @@ const templateChangeData = templateSchema.extend({
 	head_version_no: z.number().int(),
 });
 
-const upsertChange = z.object({
+const templateUpsertChange = z.object({
 	seq: z.string(),
 	entity: z.literal("template"),
 	op: z.literal("upsert"),
 	data: templateChangeData,
+});
+
+const datasetUpsertChange = z.object({
+	seq: z.string(),
+	entity: z.literal("dataset"),
+	op: z.literal("upsert"),
+	data: datasetSchema,
+});
+
+const profileUpsertChange = z.object({
+	seq: z.string(),
+	entity: z.literal("profile"),
+	op: z.literal("upsert"),
+	data: profileSchema,
+});
+
+const settingUpsertChange = z.object({
+	seq: z.string(),
+	entity: z.literal("setting"),
+	op: z.literal("upsert"),
+	data: settingSchema,
+});
+
+const fontUpsertChange = z.object({
+	seq: z.string(),
+	entity: z.literal("font"),
+	op: z.literal("upsert"),
+	data: fontSchema,
 });
 
 const deleteChange = z.object({
@@ -28,7 +58,14 @@ const deleteChange = z.object({
 	id: z.string(),
 });
 
-export const changeSchema = z.discriminatedUnion("op", [upsertChange, deleteChange]);
+export const changeSchema = z.union([
+	templateUpsertChange,
+	datasetUpsertChange,
+	profileUpsertChange,
+	settingUpsertChange,
+	fontUpsertChange,
+	deleteChange,
+]);
 
 export const changesResponse = z.object({
 	changes: z.array(changeSchema),

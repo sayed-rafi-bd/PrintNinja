@@ -1,8 +1,10 @@
 import type { TemplateView } from "./templatePorts.js";
+import type { DatasetView, FontView, ProfileView, SettingView } from "./libraryPorts.js";
 
 /** Sync change tracking (REFACTORING.md section 7). Only the signed-in
- * user's own records; Phase 4 adds dataset, profile, setting and font
- * rows. Saved community templates use the manifest, never this stream. */
+ * user's own records, now spanning templates and the Phase 4 library
+ * (datasets, profiles, settings, fonts). Saved community templates use
+ * the manifest, never this stream. */
 
 export type SyncEntity = "template" | "dataset" | "profile" | "setting" | "font";
 
@@ -19,7 +21,32 @@ export interface SyncDelete {
 	entityKey: string;
 }
 
-export type SyncChange = SyncUpsert | SyncDelete;
+export interface DatasetUpsert {
+	seq: bigint;
+	entity: "dataset";
+	data: DatasetView;
+}
+
+export interface ProfileUpsert {
+	seq: bigint;
+	entity: "profile";
+	data: ProfileView;
+}
+
+export interface SettingUpsert {
+	seq: bigint;
+	entity: "setting";
+	data: SettingView;
+}
+
+export interface FontUpsert {
+	seq: bigint;
+	entity: "font";
+	// Metadata only; bytes travel through the file endpoint.
+	data: FontView;
+}
+
+export type SyncChange = SyncUpsert | DatasetUpsert | ProfileUpsert | SettingUpsert | FontUpsert | SyncDelete;
 
 export interface ChangePage {
 	changes: SyncChange[];

@@ -114,8 +114,8 @@ for (const name of ["fake", "prisma"] as const) {
 			expect(page.hasMore).toBe(false);
 			expect(page.nextCursor).toBe(b.seq);
 			const first = page.changes[0];
-			expect(first && "data" in first && first.data.name).toBe("a");
-			expect(first && "data" in first && first.headVersionNo).toBe(1);
+			expect(first && first.entity === "template" && "data" in first && first.data.name).toBe("a");
+			expect(first && first.entity === "template" && "data" in first && first.headVersionNo).toBe(1);
 
 			const second = await be.templates.update(
 				{ ...(await be.templates.findById(b.id))!, body: "<div>b2</div>" },
@@ -133,7 +133,7 @@ for (const name of ["fake", "prisma"] as const) {
 			await be.templates.deleteWithTombstone(a.id);
 
 			const page = await be.sync.readSince(owner, { cursor: 0n, limit: 100, types: ["template"] }, 8 * 1024 * 1024);
-			const kinds = page.changes.map((c) => ("data" in c ? `upsert:${c.data.name}` : `delete:${c.entityKey}`));
+			const kinds = page.changes.map((c) => ("entityKey" in c ? `delete:${c.entityKey}` : c.entity === "template" ? `upsert:${c.data.name}` : `upsert:${c.entity}:${c.seq}`));
 			expect(kinds).toContain(`delete:${a.id}`);
 			expect(kinds).toContain("upsert:b");
 
