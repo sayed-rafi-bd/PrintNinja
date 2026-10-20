@@ -5,7 +5,8 @@
  * push that local copy to the server and pull it back; nothing here runs while
  * printing. The server copy is reached through the local row's `remote_id`.
  */
-import { invoke } from "@/lib/invoke";
+import { agent } from "@/lib/agent/commands";
+import type { TemplateRow } from "@/lib/agent/types";
 import { compiledFields } from "@/lib/templates/compileTemplateCss";
 import { ApiError } from "@/lib/api/errors";
 import {
@@ -20,42 +21,20 @@ import {
   type RemoteTemplateSummary,
 } from "./client";
 
-/** The local row, as far as sync is concerned. */
-export interface SyncTemplate {
-  id: number;
-  name: string;
-  summary: string;
-  page_w_mm: number;
-  page_h_mm: number;
-  readme: string;
-  remote_id: string | null;
-  /** The sync identity minted at creation; the only id pushes may use. */
-  server_id: string | null;
-  published_at: string | null;
-  origin: string;
-  origin_owner: string | null;
-}
-
-interface TemplateVersion {
-  id: number;
-  html: string;
-  css: string;
-}
-
 export type LocalOrigin = "own" | "saved";
 
 /** Saved (community) copies are read-only: no editing, no Save, no Publish. */
-export function isReadOnly(template: Pick<SyncTemplate, "origin">): boolean {
+export function isReadOnly(template: Pick<TemplateRow, "origin">): boolean {
   return template.origin === "saved";
 }
 
-export function getLocalTemplate(id: number): Promise<SyncTemplate> {
-  return invoke<SyncTemplate>("get_template", { id });
+export function getLocalTemplate(id: number): Promise<TemplateRow> {
+  return agent("get_template", { id });
 }
 
 /** The version the local row points at, which is where editing happens. */
 async function getCurrentVersion(templateId: number): Promise<{ html: string; css: string }> {
-  const versions = await invoke<TemplateVersion[]>("list_versions", { template_id: templateId });
+  const versions = await agent("list_versions", { template_id: templateId });
   const current = versions?.[0];
   if (!current) return { html: "", css: "" };
   return { html: current.html ?? "", css: current.css ?? "" };
@@ -88,7 +67,7 @@ export interface SaveOptions {
  * engine push bases on the new revision instead of 409ing.
  */
 export async function saveToServer(
-  template: SyncTemplate,
+  template: TemplateRow,
   options: SaveOptions = {},
 ): Promise<SaveResult> {
   const { html, css } = await getCurrentVersion(template.id);
@@ -168,10 +147,10 @@ export async function saveToServer(
   const storedId = remote.id;
   // The push is recorded so the next engine push bases on the new
   // revision instead of 409ing on the stale one.
-  await invoke("cache_mark_pushed", { server_id: storedId, revision: remote.revision });
+  await agent("cache_mark_pushed", { server_id: storedId, revision: remote.revision });
   // The local copy and the server copy now agree. A published template records the
   // moment the server copy was published; a private one has no publish time at all.
-  await invoke("set_publish_info", {
+  await agent("set_publish_info", {
     req: { id: template.id, remote_id: storedId, published_at: isPublished ? updatedAt : null },
   });
   return { remoteId: storedId, updatedAt, published: isPublished };
@@ -188,14 +167,14 @@ export interface RefreshResult {
  * Pull the server copy over the local one. Everything is fetched before anything
  * is written, so a failed fetch leaves the local copy as it was.
  */
-export async function refreshFromServer(template: SyncTemplate): Promise<RefreshResult> {
+export async function refreshFromServer(template: TemplateRow): Promise<RefreshResult> {
   const serverRef = template.server_id ?? template.remote_id;
   if (!serverRef) {
     throw new Error("This template is not on the server yet. Save it first.");
   }
   const remote = await fetchRemoteTemplate(serverRef);
 
-  await invoke("create_version", {
+  await agent("create_version", {
     req: {
       template_id: template.id,
       html: remote.body ?? "",
@@ -206,8 +185,8 @@ export async function refreshFromServer(template: SyncTemplate): Promise<Refresh
       created_by: "sync",
     },
   });
-  await invoke("update_readme", { req: { id: template.id, readme: remote.readme ?? "" } });
-  await invoke("update_template_meta", {
+  await agent("update_readme", { req: { id: template.id, readme: remote.readme ?? "" } });
+  await agent("update_template_meta", {
     req: {
       id: template.id,
       name: remote.name,
@@ -219,7 +198,7 @@ export async function refreshFromServer(template: SyncTemplate): Promise<Refresh
   // Local content now matches the server copy, so both timestamps move together and
   // the "changes not saved" badge clears until the next local edit. A template that
   // is private on the server stays private here too.
-  await invoke("set_publish_info", {
+  await agent("set_publish_info", {
     req: {
       id: template.id,
       remote_id: remote.id,
@@ -258,7 +237,7 @@ export async function downloadToLocal(
 ): Promise<DownloadResult> {
   const remote = await fetchRemoteTemplate(remoteId);
 
-  const existing = await invoke<SyncTemplate[]>("list_templates");
+  const existing = await agent("list_templates", {});
   const already = (existing ?? []).find((t) => t.remote_id === remoteId || t.server_id === remoteId);
   if (already) return { id: already.id, created: false };
 
@@ -267,7 +246,7 @@ export async function downloadToLocal(
     // A downloaded copy arrives synced at the server's revision: the
     // engine must not push it back as a new own template, and a later
     // pull refreshes it instead of duplicating it.
-    created = await invoke<SyncTemplate>("create_template", {
+    created = await agent("create_template", {
       req: {
         name: remote.name,
         page_w_mm: Math.round(remote.page_w_mm),
@@ -290,11 +269,11 @@ export async function downloadToLocal(
     throw new Error(`Could not add “${remote.name}” on this PC: ${String(e)}`);
   }
 
-  await invoke("set_publish_info", {
+  await agent("set_publish_info", {
     req: { id: created.id, remote_id: remote.id, published_at: remote.updated_at },
   });
   if (origin === "saved") {
-    await invoke("update_template_origin", {
+    await agent("update_template_origin", {
       req: { id: created.id, origin, origin_owner: originOwner ?? remote.owner_handle },
     });
   }
@@ -307,7 +286,7 @@ export async function downloadToLocal(
  */
 export async function adoptLocalTemplates(
   rows: Array<
-    Pick<SyncTemplate, "id" | "name" | "summary" | "page_w_mm" | "page_h_mm" | "readme" | "server_id"> & {
+    Pick<TemplateRow, "id" | "name" | "summary" | "page_w_mm" | "page_h_mm" | "readme" | "server_id"> & {
       html: string;
       css: string;
     }
@@ -327,7 +306,7 @@ export async function adoptLocalTemplates(
       css: row.css,
       readme: row.readme ?? "",
     });
-    await invoke("cache_mark_pushed", { server_id: remote.id, revision: remote.revision });
+    await agent("cache_mark_pushed", { server_id: remote.id, revision: remote.revision });
     pushed += 1;
   }
   return { pushed };

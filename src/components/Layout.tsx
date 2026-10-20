@@ -16,7 +16,7 @@ import { useShareStatus } from "@/lib/shell/useShareStatus";
 import { useSyncStatus } from "@/lib/sync/useSyncStatus";
 import { useAdoption } from "@/lib/sync/useAdoption";
 import { usePrefs } from "@/lib/prefs/PrefsProvider";
-import { tauriInvoke } from "@/lib/tauriGuard";
+import { agent } from "@/lib/agent/commands";
 import { cn } from "@/lib/utils";
 
 function ShareIndicator() {
@@ -166,7 +166,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   // Printing is physical, so the palette asks before sending the last job again.
   const askReprintLast = async () => {
     try {
-      const jobs = await tauriInvoke<HistoryJob[]>("list_jobs");
+      const jobs = await agent("list_jobs");
       const last = [...jobs].sort((a, b) => b.id - a.id)[0];
       if (!last) {
         toast.info(t("shell.reprint_none"));
@@ -182,7 +182,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     if (!reprintJob) return;
     setReprinting(true);
     try {
-      await tauriInvoke("reprint_job", { id: reprintJob.id });
+      await agent("reprint_job", { id: reprintJob.id });
       toast.success(t("shell.reprint_done", { id: reprintJob.id }));
       setReprintJob(null);
     } catch {

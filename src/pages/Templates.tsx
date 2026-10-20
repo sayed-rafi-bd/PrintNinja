@@ -4,8 +4,9 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Bookmark, BookmarkCheck, CloudDownload, CloudUpload, Eye, Pencil, Printer, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/PageHeader";
+import type { TemplateRow } from "@/lib/agent/types";
 import { StatusBadge } from "@/components/StatusBadge";
-import { invoke } from "@/lib/invoke";
+import { agent } from "@/lib/agent/commands";
 import { Card, CardContent } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ConflictDialog, type ConflictedRow } from "@/components/ConflictDialog";
@@ -31,22 +32,6 @@ import * as share from "@/lib/share/client";
 import { downloadToLocal, refreshFromServer, saveToServer } from "@/lib/share/sync";
 import { cn } from "@/lib/utils";
 
-interface LocalTemplate {
-  id: number;
-  name: string;
-  readme: string;
-  summary: string;
-  remote_id: string | null;
-  server_id: string | null;
-  published_at: string | null;
-  origin: string;
-  origin_owner: string | null;
-  withdrawn: boolean;
-  updated_at: string;
-  page_w_mm: number;
-  page_h_mm: number;
-}
-
 type ServerSummary = share.CommunitySummary;
 
 export function TemplatesPage() {
@@ -54,8 +39,8 @@ export function TemplatesPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState("mine");
   const [configured, setConfigured] = useState(true);
-  const [removeTarget, setRemoveTarget] = useState<LocalTemplate | null>(null);
-  const [refreshTarget, setRefreshTarget] = useState<LocalTemplate | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<TemplateRow | null>(null);
+  const [refreshTarget, setRefreshTarget] = useState<TemplateRow | null>(null);
   const [getOpen, setGetOpen] = useState(false);
   const [previewTpl, setPreviewTpl] = useState<ServerSummary | null>(null);
   const [previewHtml, setPreviewHtml] = useState("");
@@ -64,8 +49,8 @@ export function TemplatesPage() {
   const [communityLoading, setCommunityLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("updated");
-  const [mine, setMine] = useState<LocalTemplate[]>([]);
-  const [saved, setSaved] = useState<LocalTemplate[]>([]);
+  const [mine, setMine] = useState<TemplateRow[]>([]);
+  const [saved, setSaved] = useState<TemplateRow[]>([]);
   const [saving, setSaving] = useState<Set<string>>(new Set());
   const [syncing, setSyncing] = useState<number | null>(null);
   const [offline, setOffline] = useState(false);
@@ -77,7 +62,7 @@ export function TemplatesPage() {
 
   const loadMine = useCallback(async () => {
     try {
-      const list = await invoke<LocalTemplate[]>("list_templates");
+      const list = await agent("list_templates", {});
       setMine(list.filter((t) => t.origin === "own"));
       setSaved(list.filter((t) => t.origin === "saved"));
     } catch {
@@ -85,7 +70,7 @@ export function TemplatesPage() {
       setSaved([]);
     }
     try {
-      const rows = await invoke<ConflictedRow[]>("cache_list_conflicted");
+      const rows = await agent("cache_list_conflicted", {});
       setConflicts(Array.isArray(rows) ? rows : []);
     } catch {
       setConflicts([]);
@@ -157,7 +142,7 @@ export function TemplatesPage() {
     };
   }, [activeTab, saved]);
 
-  const handleSaveToServer = async (tpl: LocalTemplate) => {
+  const handleSaveToServer = async (tpl: TemplateRow) => {
     if (syncing != null) return;
     setSyncing(tpl.id);
     try {
@@ -171,7 +156,7 @@ export function TemplatesPage() {
     }
   };
 
-  const handleRefresh = async (tpl: LocalTemplate) => {
+  const handleRefresh = async (tpl: TemplateRow) => {
     if (syncing != null) return;
     setSyncing(tpl.id);
     try {
@@ -226,7 +211,7 @@ export function TemplatesPage() {
     }
   };
 
-  const handleUnsave = async (localTpl: LocalTemplate) => {
+  const handleUnsave = async (localTpl: TemplateRow) => {
     if (!localTpl.remote_id) return;
     try {
       await share.unsaveRemoteTemplate(localTpl.remote_id);
@@ -240,7 +225,7 @@ export function TemplatesPage() {
     // The server confirmed the unsave, so the local copy is forgotten
     // outright — no tombstone, nothing for the engine to push.
     try {
-      await invoke("cache_forget_template", { server_id: localTpl.server_id ?? localTpl.remote_id });
+      await agent("cache_forget_template", { server_id: localTpl.server_id ?? localTpl.remote_id });
       toast.success("Removed from Saved");
       await loadMine();
     } catch (e) {
@@ -249,12 +234,12 @@ export function TemplatesPage() {
   };
 
   // Opens the Print page with this template selected.
-  const handleUse = async (tpl: LocalTemplate, isSavedCopy: boolean) => {
+  const handleUse = async (tpl: TemplateRow, isSavedCopy: boolean) => {
     // For saved copies, queue a use count locally; the sync engine sends
     // it later (section 6.6). Never blocks navigation, silent if offline.
     if (isSavedCopy && tpl.remote_id) {
       try {
-        await invoke("cache_queue_use", { server_id: tpl.remote_id, delta: 1 });
+        await agent("cache_queue_use", { server_id: tpl.remote_id, delta: 1 });
       } catch {}
     }
     usePrintStore.getState().setTemplateId(String(tpl.id));
@@ -278,7 +263,7 @@ export function TemplatesPage() {
 
   const isSaved = (serverId: string) => saved.some((t) => t.remote_id === serverId);
 
-  const mineColumns = useMemo<ColumnDef<LocalTemplate>[]>(() => [
+  const mineColumns = useMemo<ColumnDef<TemplateRow>[]>(() => [
     {
       id: "name", header: "Template", accessorFn: (r) => r.name.toLowerCase(), enableSorting: true,
       cell: (c) => (
@@ -340,7 +325,7 @@ export function TemplatesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [syncing]);
 
-  const savedColumns = useMemo<ColumnDef<LocalTemplate>[]>(() => [
+  const savedColumns = useMemo<ColumnDef<TemplateRow>[]>(() => [
     {
       id: "name", header: "Template", accessorFn: (r) => r.name.toLowerCase(), enableSorting: true,
       cell: (c) => (

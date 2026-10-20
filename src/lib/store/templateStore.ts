@@ -1,37 +1,11 @@
 import { create } from "zustand";
+import type { TemplateRow, TemplateVersionRow } from "@/lib/agent/types";
 
-export interface Template {
-  id: number;
-  name: string;
-  current_version_id: number | null;
-  page_w_mm: number;
-  page_h_mm: number;
-  orientation: "portrait" | "landscape";
-  readme: string;
-  summary: string;
-  remote_id: string | null;
-  published_at: string | null;
-  origin: string;
-  origin_owner: string | null;
-  withdrawn: boolean;
-  created_at: string;
-  updated_at: string;
-}
+/** A template row in the local store: the canonical IPC shape. */
+export type Template = TemplateRow;
 
-export interface TemplateVersion {
-  id: number;
-  template_id: number;
-  version_no: number;
-  html: string;
-  css: string;
-  label: string | null;
-  note: string | null;
-  created_at: string;
-  created_by: string;
-  /** Tailwind CSS compiled from `html`; empty if not compiled yet. */
-  compiled_css?: string;
-  compiled_key?: string;
-}
+/** A version row in the local store: the canonical IPC shape. */
+export type TemplateVersion = TemplateVersionRow;
 
 export interface SampleDataset {
   id: number;

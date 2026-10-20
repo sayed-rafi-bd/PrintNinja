@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
-import { invoke } from "@/lib/invoke";
+import { agent } from "@/lib/agent/commands";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,31 +30,16 @@ import { toast } from "sonner";
 import { usePrintStore } from "@/lib/store/printStore";
 import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
 import { DEFAULT_MOCK_DATA } from "@/lib/templates/defaultTemplate";
-import { ensureStarterTemplates, type TemplateRow } from "@/lib/templates/seedTemplates";
+import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
+import type { StarterTemplate } from "@/lib/templates/seedTemplates";
 import { compileTemplateCss } from "@/lib/templates/compileTemplateCss";
-interface PrintResponse {
-  success: boolean;
-  job_id: string;
-  duration_ms: number;
-  error?: string;
-}
-
-interface PrinterInfo {
-  id: string;
-  name: string;
-  address: string;
-  printer_type: string;
-  language: string;
-  status?: string;
-}
-
 const MM_TO_PX = 3.7795;
 
 export function PrintPage() {
   const { t } = useTranslation();
   const store = usePrintStore();
   const { printers, refresh: refreshSystemPrinters } = useSystemPrinters();
-  const [templates, setTemplates] = useState<TemplateRow[]>([]);
+  const [templates, setTemplates] = useState<StarterTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [showBatchDialog, setShowBatchDialog] = useState(false);
   const [batchInput, setBatchInput] = useState("");
@@ -74,7 +59,7 @@ export function PrintPage() {
     (async () => {
       try {
         const [p, tpl] = await Promise.all([
-          invoke<PrinterInfo[]>("enumerate_system_printers").catch(() => []),
+          agent("enumerate_system_printers", {}).catch(() => []),
           ensureStarterTemplates(),
         ]);
         if (cancelled) return;
@@ -106,7 +91,7 @@ export function PrintPage() {
     let cancelled = false;
     (async () => {
       try {
-        const versions = await invoke<{ id: number; html: string; css: string; compiled_css?: string }[]>("list_versions", { template_id: template.id });
+        const versions = await agent("list_versions", { template_id: template.id });
         const latest = versions?.[0];
         if (!latest) { if (!cancelled) { setPreviewHtml(""); setPreviewError("This template has no versions yet. Open it in Designer and save it."); } return; }
         const { renderTemplate } = await import("@/lib/render/renderTemplate");
@@ -120,7 +105,7 @@ export function PrintPage() {
           const built = await compileTemplateCss(latest.html);
           compiledCss = built.css;
           if (built.css.trim() && !cancelled) {
-            invoke("create_version", {
+            agent("create_version", {
               req: {
                 template_id: template.id,
                 html: latest.html,
@@ -150,7 +135,7 @@ export function PrintPage() {
 
   const refreshBatches = async () => {
     try {
-      const list = await invoke<Array<{ id: number; total: number; done: number; failed: number; mode: string; status: string }>>("list_batches");
+      const list = await agent("list_batches", {});
       setBatches(list ?? []);
     } catch {}
   };
@@ -220,17 +205,17 @@ export function PrintPage() {
     if (!store.templateId) { toast.error("Select a template first"); return; }
     if (!store.printerId) { toast.error("Select a printer first"); return; }
     const printer = printers.find((p) => p.name === store.printerId);
-    let printerId = printer ? Number((printer as unknown as { id: number }).id) || 0 : 0;
+    let printerId = printer ? Number(printer.id) || 0 : 0;
     if (!printerId) {
       try {
-        const all = await invoke<Array<{ id: number; name: string }>>("list_printers");
+        const all = await agent("list_printers", {});
         const match = all.find((p) => p.name === store.printerId);
         if (match) printerId = match.id;
       } catch {}
     }
     if (!printerId) { toast.error("Could not resolve printer — re-select it"); return; }
     try {
-      await invoke("create_batch", {
+      await agent("create_batch", {
         req: {
           template_id: Number(store.templateId) || 0,
           printer_id: printerId,
@@ -250,10 +235,10 @@ export function PrintPage() {
   };
 
   const handleCancelBatch = async (id: number) => {
-    try { await invoke("cancel_batch", { id }); toast.success(`Batch #${id} cancelled`); refreshBatches(); } catch (e) { toast.error(String(e)); }
+    try { await agent("cancel_batch", { id }); toast.success(`Batch #${id} cancelled`); refreshBatches(); } catch (e) { toast.error(String(e)); }
   };
   const handleRetryBatch = async (id: number) => {
-    try { await invoke("retry_batch", { id }); toast.success(`Batch #${id} retry queued`); refreshBatches(); } catch (e) { toast.error(String(e)); }
+    try { await agent("retry_batch", { id }); toast.success(`Batch #${id} retry queued`); refreshBatches(); } catch (e) { toast.error(String(e)); }
   };
 
   const loadPrinters = async () => {
@@ -283,7 +268,7 @@ export function PrintPage() {
     store.setError("");
 
     try {
-      const result = await invoke<PrintResponse>("print_html", {
+      const result = await agent("print_html", {
         req: {
           printer_name: store.printerId,
           html: "",
@@ -324,7 +309,7 @@ export function PrintPage() {
     store.setStatus("printing");
     store.setError("");
     try {
-      const result = await invoke<PrintResponse>("spike_test_print");
+      const result = await agent("spike_test_print", {});
       store.setDurationMs(result.duration_ms);
       if (result.success) {
         store.setStatus("success");

@@ -2,7 +2,7 @@ import { useRef } from "react";
 import { Check, QrCode, Save, Type } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { invoke } from "@/lib/invoke";
+import { agent } from "@/lib/agent/commands";
 
 interface Props {
   onBarcode: () => void;
@@ -38,9 +38,9 @@ export function DesignerActions({ onBarcode, onSaveVersion, onShowCanvas, classN
             if (!file) return;
             try {
               const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-              await invoke("upload_font", {
-                fileName: file.name,
-                fileData: bytes,
+              await agent("upload_font", {
+                file_name: file.name,
+                file_data: bytes,
                 family: file.name.replace(/\.[^/.]+$/, ""),
               });
               toast.success(`Font "${file.name}" uploaded`);

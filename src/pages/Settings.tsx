@@ -4,7 +4,8 @@ import { AppearanceSettings } from "@/components/AppearanceSettings";
 import { PageHeader } from "@/components/PageHeader";
 import { SetupChecklist } from "@/components/SetupChecklist";
 import { parseSection, type SettingsSection } from "@/lib/setup/checklist";
-import { invoke } from "@/lib/invoke";
+import { agent } from "@/lib/agent/commands";
+import type { ApiStatus, FontRow } from "@/lib/agent/types";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,19 +35,6 @@ import { diagnostics } from "@/lib/diagnostics";
 import * as share from "@/lib/share/client";
 import { normalizeServiceUrl } from "@/lib/share/session";
 
-interface ApiStatus {
-  running: boolean;
-  address: string;
-  port: number;
-  lan_access: boolean;
-}
-
-interface FontRow {
-  id: number;
-  family: string;
-  format: string;
-}
-
 const DEFAULT_KEY = "— not generated —";
 
 /**
@@ -62,7 +50,7 @@ const lsKey = (key: string) => `printninja-setting:${key}`;
 async function readSetting(key: string): Promise<string | null> {
   if (isWebMode()) return localStorage.getItem(lsKey(key));
   try {
-    return await invoke<string | null>("get_setting", { key });
+    return await agent("get_setting", { key });
   } catch {
     return localStorage.getItem(lsKey(key));
   }
@@ -72,7 +60,7 @@ async function writeSetting(key: string, value: string): Promise<boolean> {
   localStorage.setItem(lsKey(key), value);
   if (isWebMode()) return true;
   try {
-    await invoke("set_setting", { key, value });
+    await agent("set_setting", { key, value });
     return true;
   } catch (e) {
     // Persisted locally at least; surface the backend problem.
@@ -122,7 +110,7 @@ export function SettingsPage() {
 
   const loadFonts = useCallback(async () => {
     try {
-      setFonts((await invoke<FontRow[]>("list_fonts")) ?? []);
+      setFonts((await agent("list_fonts", {})) ?? []);
     } catch {
       /* backend unavailable */
     }
@@ -141,7 +129,7 @@ export function SettingsPage() {
       return;
     }
     try {
-      setApiStatus(await invoke<ApiStatus>("get_api_status"));
+      setApiStatus(await agent("get_api_status", {}));
     } catch {
       /* backend unavailable */
     }
@@ -184,7 +172,7 @@ export function SettingsPage() {
           const raw = localStorage.getItem(lsKey("trusted_sources"));
           setTrusted(raw ? (JSON.parse(raw) as string[]) : []);
         } else {
-          setTrusted((await invoke<string[]>("get_trusted_sources")) ?? []);
+          setTrusted((await agent("get_trusted_sources", {})) ?? []);
         }
       } catch {
         setTrusted([]);
@@ -221,9 +209,9 @@ export function SettingsPage() {
   const startApi = async () => {
     setStarting(true);
     try {
-      const addr = await invoke<string>("start_api_server", {
+      const addr = await agent("start_api_server", {
         port: Number(apiPort),
-        lanAccess,
+        lan_access: lanAccess,
       });
       toast.success(`API server listening on ${addr}`);
       await writeSetting("api_port", apiPort);
@@ -238,7 +226,7 @@ export function SettingsPage() {
 
   const stopApi = async () => {
     try {
-      await invoke("stop_api_server");
+      await agent("stop_api_server", {});
       toast.success("API server stopped");
       await loadApiStatus();
     } catch (e) {
@@ -248,7 +236,7 @@ export function SettingsPage() {
 
   const regenerateKey = async () => {
     try {
-      const key = await invoke<string>("regenerate_api_key");
+      const key = await agent("regenerate_api_key", {});
       setApiKey(key);
       setShowKey(true);
       toast.success("New API key generated — copy it now, it is not shown again");
@@ -270,9 +258,9 @@ export function SettingsPage() {
   const uploadFont = async (file: File) => {
     try {
       const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
-      await invoke("upload_font", {
-        fileName: file.name,
-        fileData: bytes,
+      await agent("upload_font", {
+        file_name: file.name,
+        file_data: bytes,
         family: null,
       });
       toast.success(`Uploaded ${file.name}`);
@@ -443,7 +431,7 @@ export function SettingsPage() {
                       aria-label={`Remove ${f.family}`}
                       onClick={async () => {
                         try {
-                          await invoke("delete_font", { id: f.id });
+                          await agent("delete_font", { id: f.id });
                           await loadFonts();
                           toast.success(`Removed ${f.family}`);
                         } catch (e) {

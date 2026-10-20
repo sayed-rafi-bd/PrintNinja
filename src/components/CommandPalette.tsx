@@ -4,7 +4,7 @@ import { FilePlus, Printer as PrintIcon, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { NAV_ITEMS } from "@/lib/shell/nav";
-import { tauriInvoke } from "@/lib/tauriGuard";
+import { agent } from "@/lib/agent/commands";
 
 interface Props {
   open: boolean;
@@ -26,7 +26,7 @@ export function CommandPalette({ open, onOpenChange, onNavigate, onReprintLast }
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    tauriInvoke<Array<{ id: number; name: string }>>("list_templates")
+    agent("list_templates", {})
       .then((rows) => { if (!cancelled) setTemplates(rows); })
       .catch(() => { if (!cancelled) setTemplates([]); });
     return () => { cancelled = true; };

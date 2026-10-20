@@ -1,25 +1,9 @@
 import { create } from "zustand";
 
-export interface HistoryJob {
-  id: number;
-  batch_id: number | null;
-  record_index: number | null;
-  template_id: number | null;
-  template_version_id: number | null;
-  printer_id: number | null;
-  source: "ui" | "api" | "deeplink" | "batch" | "test";
-  source_url: string | null;
-  status: "queued" | "printing" | "success" | "failed" | "cancelled";
-  error: string | null;
-  copies: number;
-  settings_json: string | null;
-  rendered_html: string | null;
-  idempotency_key: string | null;
-  is_test: boolean;
-  started_at: string | null;
-  finished_at: string | null;
-  duration_ms: number | null;
-}
+import type { HistoryJob as AgentHistoryJob } from "@/lib/agent/types";
+
+/** A print job row: the canonical IPC shape. */
+export type HistoryJob = AgentHistoryJob;
 
 export interface HistoryFilter {
   status: string;

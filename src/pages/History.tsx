@@ -3,7 +3,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { Bookmark, Download, Eye, RotateCcw, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { invoke } from "@/lib/invoke";
+import { agent } from "@/lib/agent/commands";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataTable } from "@/components/DataTable";
 import { PageHeader } from "@/components/PageHeader";
@@ -62,7 +62,7 @@ export function HistoryPage() {
     let cancelled = false;
     (async () => {
       try {
-        const jobs = await invoke<HistoryJob[]>("list_jobs");
+        const jobs = await agent("list_jobs", {});
         if (!cancelled) store.setJobs(jobs ?? []);
       } catch (e) {
         if (!cancelled) toast.error(`Failed to load history: ${e}`);
@@ -70,7 +70,7 @@ export function HistoryPage() {
         if (!cancelled) setLoading(false);
       }
       try {
-        const list = await invoke<PrinterOption[]>("list_printers");
+        const list = await agent("list_printers", {});
         if (!cancelled) setPrinters(list ?? []);
       } catch {
         /* printer names are optional here */
@@ -112,12 +112,12 @@ export function HistoryPage() {
   const selectedFailed = selectedJobs.filter((j) => j.status === "failed");
 
   const reprintOne = async (job: HistoryJob) => {
-    const copy = await invoke<HistoryJob>("reprint_job", { id: job.id });
+    const copy = await agent("reprint_job", { id: job.id });
     useHistoryStore.getState().setJobs([copy, ...useHistoryStore.getState().jobs]);
     return copy;
   };
   const retryOne = async (job: HistoryJob) => {
-    const updated = await invoke<HistoryJob>("retry_job", { id: job.id });
+    const updated = await agent("retry_job", { id: job.id });
     const cur = useHistoryStore.getState();
     cur.setJobs(cur.jobs.map((j) => (j.id === updated.id ? updated : j)));
   };
@@ -148,7 +148,7 @@ export function HistoryPage() {
   const confirmDelete = async (job: HistoryJob) => {
     setBusy(true);
     try {
-      await invoke("delete_job", { id: job.id });
+      await agent("delete_job", { id: job.id });
       const cur = useHistoryStore.getState();
       cur.setJobs(cur.jobs.filter((j) => j.id !== job.id));
       setSelected((s) => { const n = new Set(s); n.delete(String(job.id)); return n; });

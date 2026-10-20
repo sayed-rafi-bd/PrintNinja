@@ -3,12 +3,13 @@
  * Settings live in SQLite through Tauri; in the browser preview (and when the
  * backend is unavailable) they fall back to localStorage so the UI keeps working.
  */
+import { agent } from "@/lib/agent/commands";
+
 const lsKey = (key: string) => `printninja-setting:${key}`;
 
 export async function readSetting(key: string): Promise<string | null> {
   try {
-    const { invoke } = await import("@/lib/invoke");
-    const v = await invoke<string | null>("get_setting", { key });
+    const v = await agent("get_setting", { key });
     if (v != null && v !== "") return v;
   } catch {
     /* web mode or backend unavailable */
@@ -28,8 +29,7 @@ export async function writeSetting(key: string, value: string): Promise<void> {
     /* storage unavailable */
   }
   try {
-    const { invoke } = await import("@/lib/invoke");
-    await invoke("set_setting", { key, value });
+    await agent("set_setting", { key, value });
   } catch {
     /* kept in localStorage */
   }

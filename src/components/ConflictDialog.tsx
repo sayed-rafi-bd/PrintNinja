@@ -8,7 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { invoke } from "@/lib/invoke";
+import { agent } from "@/lib/agent/commands";
 import * as share from "@/lib/share/client";
 import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
 
@@ -61,7 +61,7 @@ export function ConflictDialog({
       // Rebase onto the server's current revision so the next push
       // overwrites cleanly; the other PC's edit stays in version history.
       const remote = await share.fetchRemoteTemplate(serverId);
-      await invoke("cache_resolve_conflict", { server_id: serverId, resolution: "mine", rebase_to: remote.revision });
+      await agent("cache_resolve_conflict", { server_id: serverId, resolution: "mine", rebase_to: remote.revision });
       notifyLocalEdit();
     });
 
@@ -69,7 +69,7 @@ export function ConflictDialog({
     run("theirs", async () => {
       if (!serverId) throw new Error("This template was never on the server");
       const remote = await share.fetchRemoteTemplate(serverId);
-      await invoke("cache_resolve_conflict", {
+      await agent("cache_resolve_conflict", {
         server_id: serverId,
         resolution: "theirs",
         server_copy: {
@@ -91,19 +91,12 @@ export function ConflictDialog({
   const keepBoth = () =>
     run("both", async () => {
       if (!serverId || !conflict) throw new Error("This template was never on the server");
-      const local = await invoke<{
-        name: string;
-        page_w_mm: number;
-        page_h_mm: number;
-        orientation: string;
-        readme: string;
-        summary: string;
-      }>("get_template", { id: conflict.id });
-      const versions = await invoke<{ html: string; css: string }[]>("list_versions", {
+      const local = await agent("get_template", { id: conflict.id });
+      const versions = await agent("list_versions", {
         template_id: conflict.id,
       });
       const latest = versions[0] ?? { html: "", css: "" };
-      await invoke("create_template", {
+      await agent("create_template", {
         req: {
           name: `${local.name} (copy)`,
           page_w_mm: local.page_w_mm,
@@ -117,7 +110,7 @@ export function ConflictDialog({
       });
       notifyLocalEdit();
       const remote = await share.fetchRemoteTemplate(serverId);
-      await invoke("cache_resolve_conflict", {
+      await agent("cache_resolve_conflict", {
         server_id: serverId,
         resolution: "theirs",
         server_copy: {

@@ -1,8 +1,8 @@
 import { compiledFields } from "@/lib/templates/compileTemplateCss";
-import { invoke } from "@/lib/invoke";
+import { agent } from "@/lib/agent/commands";
 import { STARTER_TEMPLATES } from "@/lib/templates/defaultTemplate";
 
-export interface TemplateRow {
+export interface StarterTemplate {
   id: number;
   name: string;
   page_w_mm: number;
@@ -22,16 +22,30 @@ export interface TemplateRow {
  * A module-level promise dedupes concurrent callers (Designer and Print both
  * call this on mount), so the starters are only created once.
  */
-let pending: Promise<TemplateRow[]> | null = null;
+let pending: Promise<StarterTemplate[]> | null = null;
 
-async function loadOrSeed(): Promise<TemplateRow[]> {
-  const existing = await invoke<TemplateRow[]>("list_templates");
-  if (existing && existing.length > 0) return existing;
+const toStarter = (row: {
+  id: number;
+  name: string;
+  page_w_mm: number;
+  page_h_mm: number;
+  orientation: string;
+}): StarterTemplate => ({
+  id: row.id,
+  name: row.name,
+  page_w_mm: row.page_w_mm,
+  page_h_mm: row.page_h_mm,
+  orientation: row.orientation,
+});
 
-  const created: TemplateRow[] = [];
+async function loadOrSeed(): Promise<StarterTemplate[]> {
+  const existing = await agent("list_templates", {});
+  if (existing && existing.length > 0) return existing.map(toStarter);
+
+  const created: StarterTemplate[] = [];
   for (const t of STARTER_TEMPLATES) {
     try {
-      const row = await invoke<TemplateRow>("create_template", {
+      const row = await agent("create_template", {
         req: {
           name: t.name,
           page_w_mm: t.page_w_mm,
@@ -42,7 +56,7 @@ async function loadOrSeed(): Promise<TemplateRow[]> {
           ...(await compiledFields(t.html)),
         },
       });
-      created.push(row);
+      created.push(toStarter(row));
     } catch (e) {
       // A duplicate name or a backend without the command must not abort the
       // rest of the seed; the caller falls back to whatever was created.
@@ -52,13 +66,13 @@ async function loadOrSeed(): Promise<TemplateRow[]> {
   return created;
 }
 
-export function ensureStarterTemplates(): Promise<TemplateRow[]> {
+export function ensureStarterTemplates(): Promise<StarterTemplate[]> {
   if (!pending) {
     pending = loadOrSeed().catch((e) => {
       // Web mode: no Tauri backend. Reset so a later mount can retry.
       pending = null;
       console.warn("Starter template seeding unavailable:", e);
-      return [] as TemplateRow[];
+      return [] as StarterTemplate[];
     });
   }
   return pending;

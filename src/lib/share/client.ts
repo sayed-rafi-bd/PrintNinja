@@ -7,6 +7,7 @@
  * over HTTPS with a Bearer token stored in local settings.
  */
 import { callApi, type ApiDeps } from "@/lib/api/client";
+import { agent } from "@/lib/agent/commands";
 import type { paths } from "@/lib/api/schema";
 import { ApiError, ServerUnreachableError, SessionExpiredError } from "@/lib/api/errors";
 
@@ -30,8 +31,7 @@ const SETTINGS_KEYS = {
 
 async function getSetting(key: string): Promise<string | null> {
   try {
-    const { invoke } = await import("@/lib/invoke");
-    return await invoke<string | null>("get_setting", { key });
+    return await agent("get_setting", { key });
   } catch {
     try {
       return localStorage.getItem(`printninja-setting:${key}`);
@@ -43,12 +43,11 @@ async function getSetting(key: string): Promise<string | null> {
 
 async function setSetting(key: string, value: string | null): Promise<void> {
   try {
-    const { invoke } = await import("@/lib/invoke");
     if (value === null) {
       // No delete_setting command; set to empty and treat as missing on read
-      await invoke("set_setting", { key, value: "" });
+      await agent("set_setting", { key, value: "" });
     } else {
-      await invoke("set_setting", { key, value });
+      await agent("set_setting", { key, value });
     }
   } catch {
     try {

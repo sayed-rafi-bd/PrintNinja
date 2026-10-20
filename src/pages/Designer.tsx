@@ -16,7 +16,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { DESKTOP_QUERY, WIDE_QUERY, useMediaQuery } from "@/lib/hooks/useMediaQuery";
 import { usePersistentState } from "@/lib/hooks/usePersistentState";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@/lib/invoke";
+import { agent } from "@/lib/agent/commands";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,8 +55,8 @@ import {
   isReadOnly,
   saveToServer,
   type SaveOptions,
-  type SyncTemplate,
 } from "@/lib/share/sync";
+import type { TemplateRow } from "@/lib/agent/types";
 
 const PAGE_PRESETS = [
   { label: "A4", width: 210, height: 297 },
@@ -139,7 +139,25 @@ export function DesignerPage() {
   // Templates available in the designer — persisted in SQLite via
   // `list_templates` / `create_template`. Starter templates are the
   // fallback when the DB is empty (first launch) or in web mode.
-  const [templates, setTemplates] = useState<Array<{ id: number; name: string; html: string; css: string; page_w_mm?: number; page_h_mm?: number; orientation?: string }>>([]);
+  // Local working copies: content for the editor plus the server link
+  // when the row came from a full template (nulls when it did not).
+  const [templates, setTemplates] = useState<
+    Array<{
+      id: number;
+      name: string;
+      html: string;
+      css: string;
+      page_w_mm?: number;
+      page_h_mm?: number;
+      orientation?: string;
+      readme?: string;
+      summary?: string;
+      remote_id?: string | null;
+      server_id?: string | null;
+      published_at?: string | null;
+      origin?: string;
+    }>
+  >([]);
   const [currentTemplateId, setCurrentTemplateId] = useState<number | null>(null);
   const [_templatesLoading, setTemplatesLoading] = useState(true);
   void _templatesLoading;
@@ -153,7 +171,22 @@ export function DesignerPage() {
     },
   ]);
 
-  const loadTemplate = (tpl: { id: number; name: string; html: string; css: string; page_w_mm?: number; page_h_mm?: number; orientation?: string; readme?: string }) => {
+  const loadTemplate = (tpl: {
+    id: number;
+    name: string;
+    html: string;
+    css: string;
+    page_w_mm?: number;
+    page_h_mm?: number;
+    orientation?: string;
+    readme?: string;
+    summary?: string;
+    remote_id?: string | null;
+    server_id?: string | null;
+    published_at?: string | null;
+    origin?: string;
+    updated_at?: string;
+  }) => {
     setCurrentTemplateId(tpl.id);
     setTemplateName(tpl.name);
     setHtmlCode(formatHtml(tpl.html));
@@ -167,14 +200,14 @@ export function DesignerPage() {
     // Load readme and publish info if provided, otherwise fetch from DB
     if (tpl.readme !== undefined) {
       setReadme(tpl.readme);
-      setRemoteId((tpl as any).server_id ?? (tpl as any).remote_id ?? null);
-      setPublishedAt((tpl as any).published_at ?? null);
-      setTemplateUpdatedAt((tpl as any).updated_at ?? null);
-      setOrigin(((tpl as any).origin ?? "own") === "saved" ? "saved" : "own");
+      setRemoteId(tpl.server_id ?? tpl.remote_id ?? null);
+      setPublishedAt(tpl.published_at ?? null);
+      setTemplateUpdatedAt(tpl.updated_at ?? null);
+      setOrigin((tpl.origin ?? "own") === "saved" ? "saved" : "own");
     } else {
       (async () => {
         try {
-          const full = await invoke<any>("get_template", { id: tpl.id });
+          const full = await agent("get_template", { id: tpl.id });
           setReadme(full.readme ?? "");
           setRemoteId(full.server_id ?? full.remote_id ?? null);
           setPublishedAt(full.published_at ?? null);
@@ -192,7 +225,7 @@ export function DesignerPage() {
     // Load the persisted versions for the newly selected template.
     (async () => {
       try {
-        const list = await invoke<TemplateVersion[]>("list_versions", {
+        const list = await agent("list_versions", {
           template_id: tpl.id,
         });
         setVersions(
@@ -220,7 +253,7 @@ export function DesignerPage() {
    * metadata) and tell the engine to push. Saving is local-first: the
    * server copy arrives through the next sync, not through a direct PUT.
    */
-  const saveLocal = async (): Promise<SyncTemplate | null> => {
+  const saveLocal = async (): Promise<TemplateRow | null> => {
     if (!currentTemplateDbId) {
       toast.error("No template selected");
       return null;
@@ -234,7 +267,7 @@ export function DesignerPage() {
       }
       // The editor holds the copy this PC would print. Put its content and its
       // metadata into the local row first, so Print and this PC read the same copy.
-      await invoke("create_version", {
+      await agent("create_version", {
         req: {
           template_id: currentTemplateDbId,
           html: htmlCode,
@@ -245,7 +278,7 @@ export function DesignerPage() {
           created_by: "manual",
         },
       });
-      const updated = await invoke("update_template_meta", {
+      const updated = await agent("update_template_meta", {
         req: {
           id: currentTemplateDbId,
           name: templateName,
@@ -306,7 +339,7 @@ export function DesignerPage() {
     setPending("unpublish");
     try {
       await share.unpublishTemplate(remoteId);
-      await invoke("clear_publish_info", { req: { id: currentTemplateDbId } });
+      await agent("clear_publish_info", { req: { id: currentTemplateDbId } });
       setRemoteId(null);
       setPublishedAt(null);
       toast.success("Unpublished");
@@ -360,7 +393,7 @@ export function DesignerPage() {
       return;
     }
     try {
-      const created = await invoke<{ id: number; name: string; page_w_mm: number; page_h_mm: number; orientation: string }>("create_template", {
+      const created = await agent("create_template", {
         req: {
           name,
           page_w_mm: STARTER_TEMPLATES[0].page_w_mm,
@@ -445,7 +478,7 @@ export function DesignerPage() {
           const hydrated = await Promise.all(
             rows.map(async (r) => {
               try {
-                const versions = await invoke<TemplateVersion[]>("list_versions", { template_id: r.id });
+                const versions = await agent("list_versions", { template_id: r.id });
                 const latest = versions?.[0];
                 return {
                   id: r.id,
@@ -480,7 +513,7 @@ export function DesignerPage() {
           setCurrentTemplateDbId(hydrated[0].id);
           // Load README and publish info for the first template
           try {
-            const full = await invoke<any>("get_template", { id: hydrated[0].id });
+            const full = await agent("get_template", { id: hydrated[0].id });
             setReadme(full.readme ?? "");
             setRemoteId(full.server_id ?? full.remote_id ?? null);
             setPublishedAt(full.published_at ?? null);
@@ -544,6 +577,7 @@ export function DesignerPage() {
       readme: "",
       summary: "",
       remote_id: null,
+      server_id: null,
       published_at: null,
       origin: "own",
       origin_owner: null,
@@ -561,7 +595,7 @@ export function DesignerPage() {
    */
   const handleSaveVersion = async () => {
     try {
-      const version = await invoke<TemplateVersion>("create_version", {
+      const version = await agent("create_version", {
         req: {
           template_id: currentTemplateDbId,
           html: htmlCode,
@@ -677,7 +711,7 @@ export function DesignerPage() {
         );
         return;
       }
-      const list = await invoke<TemplateVersion[]>("list_versions", {
+      const list = await agent("list_versions", {
         template_id: currentTemplateDbId,
       });
       setVersions(
@@ -723,7 +757,7 @@ export function DesignerPage() {
     if (version.localId == null) return;
     try {
       // Restore creates a NEW version server-side; nothing is overwritten.
-      const created = await invoke<TemplateVersion>("restore_version", {
+      const created = await agent("restore_version", {
         id: version.localId,
       });
       await refreshVersions();
@@ -750,7 +784,7 @@ export function DesignerPage() {
     }
     if (version.localId == null) return;
     try {
-      await invoke("delete_version", { id: version.localId });
+      await agent("delete_version", { id: version.localId });
       await refreshVersions();
       toast.success(`Deleted v${version.versionNo}`);
     } catch (e) {
@@ -771,16 +805,7 @@ export function DesignerPage() {
     try {
       const [f, t] = await Promise.all([bodies(from), bodies(to)]);
       if (from.localId != null && to.localId != null) {
-        const d = await invoke<{
-          from_version_no: number;
-          to_version_no: number;
-          html_from: string;
-          html_to: string;
-          css_from: string;
-          css_to: string;
-          html_changed: boolean;
-          css_changed: boolean;
-        }>("diff_versions", { from_id: from.localId, to_id: to.localId });
+        const d = await agent("diff_versions", { from_id: from.localId, to_id: to.localId });
         setDiff(d);
         return;
       }
@@ -830,7 +855,7 @@ export function DesignerPage() {
     }
     setReadmeSaving(true);
     try {
-      await invoke("update_readme", { req: { id: currentTemplateDbId, readme } });
+      await agent("update_readme", { req: { id: currentTemplateDbId, readme } });
       notifyLocalEdit();
       toast.success("README saved");
     } catch (e) {

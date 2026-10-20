@@ -1,4 +1,5 @@
 import { lazy, Suspense, useState, useEffect } from "react";
+import { agent } from "@/lib/agent/commands";
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AuthGate } from "./components/AuthGate";
 import { Layout } from "./components/Layout";
@@ -54,8 +55,7 @@ function AppContent() {
     let cancelled = false;
     (async () => {
       try {
-        const { invoke } = await import("@/lib/invoke");
-        const v = await invoke<string | null>("get_setting", { key: "onboarding_done" }).catch(() => null);
+        const v = await agent("get_setting", { key: "onboarding_done" }).catch(() => null);
         if (cancelled) return;
         if (v === "true") {
           try { localStorage.setItem("printninja-onboarding-complete", "true"); } catch {}
@@ -92,8 +92,7 @@ function AppContent() {
   const handleOnboardingComplete = async (destination?: string) => {
     localStorage.setItem("printninja-onboarding-complete", "true");
     try {
-      const { invoke } = await import("@/lib/invoke");
-      await invoke("set_setting", { key: "onboarding_done", value: "true" }).catch(() => {});
+      await agent("set_setting", { key: "onboarding_done", value: "true" }).catch(() => {});
     } catch {}
     // The router has not mounted yet, so set the starting address before it does.
     if (destination) window.history.replaceState(null, "", destination);

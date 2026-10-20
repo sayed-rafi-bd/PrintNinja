@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { PageHeader } from "@/components/PageHeader";
-import { invoke } from "@/lib/invoke";
+import { agent } from "@/lib/agent/commands";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Plus, Printer, Wifi, Usb, Bluetooth, Monitor, Trash2, TestTube, Scan, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import type { PrinterRow } from "@/lib/agent/types";
 
 
 const PRINTER_TYPES = [
@@ -48,17 +49,6 @@ const PAPERS = [
   { value: "210", label: "A4 (210 mm)" },
 ];
 
-interface SavedPrinter {
-  id: number;
-  name: string;
-  printer_type: string;
-  address: string;
-  language: string;
-  paper_width_mm: number | null;
-  dpi: number | null;
-  status?: string;
-}
-
 interface SystemPrinter {
   id: string;
   name: string;
@@ -85,13 +75,13 @@ const TYPE_ICONS: Record<string, typeof Printer> = {
 
 export function PrinterSetupPage() {
   const { t } = useTranslation();
-  const [printers, setPrinters] = useState<SavedPrinter[]>([]);
+  const [printers, setPrinters] = useState<PrinterRow[]>([]);
   const [systemPrinters, setSystemPrinters] = useState<SystemPrinter[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("all");
   const [testing, setTesting] = useState<number | null>(null);
   const [scanning, setScanning] = useState(false);
-  const [removeTarget, setRemoveTarget] = useState<SavedPrinter | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<PrinterRow | null>(null);
 
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({
@@ -106,7 +96,7 @@ export function PrinterSetupPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const saved = await invoke<SavedPrinter[]>("list_printers");
+      const saved = await agent("list_printers", {});
       setPrinters(saved ?? []);
     } catch (e) {
       toast.error(`Failed to load printers: ${e}`);
@@ -118,14 +108,14 @@ export function PrinterSetupPage() {
   useEffect(() => {
     load();
     // Discover OS printers for the "Add" dialog.
-    invoke<SystemPrinter[]>("enumerate_system_printers")
+    agent("enumerate_system_printers", {})
       .then((list) => setSystemPrinters(list ?? []))
       .catch(() => setSystemPrinters([]));
   }, [load]);
 
   const refreshSystem = async () => {
     try {
-      const list = await invoke<SystemPrinter[]>("enumerate_system_printers");
+      const list = await agent("enumerate_system_printers", {});
       setSystemPrinters(list ?? []);
       toast.success(`Found ${list.length} system printer(s)`);
     } catch (e) {
@@ -136,7 +126,7 @@ export function PrinterSetupPage() {
   const scanAndAddSystem = async () => {
     setScanning(true);
     try {
-      const list = await invoke<SystemPrinter[]>("enumerate_system_printers");
+      const list = await agent("enumerate_system_printers", {});
       if (!list || list.length === 0) {
         toast.info("No system printers found");
         return;
@@ -149,7 +139,7 @@ export function PrinterSetupPage() {
           continue;
         }
         try {
-          await invoke("add_printer", {
+          await agent("add_printer", {
             req: {
               name: sp.name,
               printer_type: "system",
@@ -192,7 +182,7 @@ export function PrinterSetupPage() {
     }
 
     try {
-      await invoke("add_printer", {
+      await agent("add_printer", {
         req: {
           name: form.name.trim(),
           printer_type: form.printer_type,
@@ -221,9 +211,9 @@ export function PrinterSetupPage() {
     }
   };
 
-  const removePrinter = async (p: SavedPrinter) => {
+  const removePrinter = async (p: PrinterRow) => {
     try {
-      await invoke("delete_printer", { id: p.id });
+      await agent("delete_printer", { id: p.id });
       setPrinters((prev) => prev.filter((x) => x.id !== p.id));
       toast.success(`Removed "${p.name}"`);
     } catch (e) {
@@ -231,10 +221,10 @@ export function PrinterSetupPage() {
     }
   };
 
-  const testPrinter = async (p: SavedPrinter) => {
+  const testPrinter = async (p: PrinterRow) => {
     setTesting(p.id);
     try {
-      await invoke("test_printer", { id: p.id });
+      await agent("test_printer", { id: p.id });
       toast.success(`Test page sent to ${p.name}`);
     } catch (e) {
       toast.error(`Test print failed: ${e}`);
@@ -248,7 +238,7 @@ export function PrinterSetupPage() {
   const group = GROUPS.find((g) => g.key === tab) ?? GROUPS[0];
   const filtered = group.types ? printers.filter((p) => group.types?.includes(p.printer_type)) : printers;
 
-  const columns = useMemo<ColumnDef<SavedPrinter>[]>(() => [
+  const columns = useMemo<ColumnDef<PrinterRow>[]>(() => [
     {
       id: "name", header: "Printer", accessorFn: (p) => p.name.toLowerCase(), enableSorting: true,
       cell: (c) => {

@@ -1,14 +1,9 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@/lib/invoke";
+import { agent } from "@/lib/agent/commands";
 
-export interface SystemPrinter {
-  id: string;
-  name: string;
-  address: string;
-  printer_type: string;
-  language: string;
-  status?: string;
-}
+import type { SystemPrinterRow } from "@/lib/agent/types";
+
+export type SystemPrinter = SystemPrinterRow;
 
 let cache: SystemPrinter[] | null = null;
 let cacheAt = 0;
@@ -27,7 +22,7 @@ export function useSystemPrinters() {
     let cancelled = false;
     (async () => {
       try {
-        const list = await invoke<SystemPrinter[]>("enumerate_system_printers");
+        const list = await agent("enumerate_system_printers");
         if (cancelled) return;
         cache = list ?? [];
         cacheAt = Date.now();
@@ -43,7 +38,7 @@ export function useSystemPrinters() {
 
   const refresh = async () => {
     try {
-      const list = await invoke<SystemPrinter[]>("enumerate_system_printers");
+      const list = await agent("enumerate_system_printers");
       cache = list ?? [];
       cacheAt = Date.now();
       setPrinters(cache);

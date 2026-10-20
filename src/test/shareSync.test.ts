@@ -30,8 +30,8 @@ import {
   listAvailableRemoteTemplates,
   refreshFromServer,
   saveToServer,
-  type SyncTemplate,
 } from "@/lib/share/sync";
+import type { TemplateRow } from "@/lib/agent/types";
 
 const REMOTE = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -53,18 +53,23 @@ const REMOTE = {
   updated_at: "2026-03-02T00:00:00Z",
 };
 
-const local = (over: Partial<SyncTemplate> = {}): SyncTemplate => ({
+const local = (over: Partial<TemplateRow> = {}): TemplateRow => ({
   id: 7,
   name: "Invoice",
   summary: "A4 invoice",
   page_w_mm: 210,
   page_h_mm: 297,
+  current_version_id: null,
+  orientation: "portrait",
+  created_at: "2026-03-01T00:00:00Z",
   readme: "# Invoice",
+  withdrawn: false,
   remote_id: null,
   server_id: "11111111-1111-4111-8111-111111111111",
   published_at: null,
   origin: "own",
   origin_owner: null,
+  updated_at: "2026-03-01T00:00:00Z",
   ...over,
 });
 

@@ -12,6 +12,7 @@ import {
   type SettingsSection,
 } from "@/lib/setup/checklist";
 import { tauriInvoke } from "@/lib/tauriGuard";
+import { agent } from "@/lib/agent/commands";
 
 const EMPTY: ChecklistInput = {
   printers: null,
@@ -41,7 +42,9 @@ async function loadStatus(): Promise<ChecklistInput> {
   ]);
   let apiRunning: boolean | null = null;
   try {
-    const status = await tauriInvoke<{ running?: boolean } | null>("get_api_status");
+    // Static command: typed. countOf above keeps the raw invoke on
+    // purpose — its command name is dynamic.
+    const status = await agent("get_api_status", {});
     apiRunning = status ? Boolean(status.running) : null;
   } catch {
     apiRunning = null;

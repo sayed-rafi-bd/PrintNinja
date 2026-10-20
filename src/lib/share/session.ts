@@ -6,6 +6,7 @@
  * could not be reached (show the "cannot reach server" screen).
  */
 import { getServiceUrl, getSessionToken, setSessionToken } from "./client";
+import { agent } from "@/lib/agent/commands";
 
 export type SessionCheck =
   | { state: "signed_in"; handle: string }
@@ -78,8 +79,7 @@ export async function canOpenOffline(): Promise<boolean> {
   try {
     const token = await getSessionToken();
     if (!token) return false;
-    const { invoke } = await import("@/lib/invoke");
-    const templates = await invoke<unknown[]>("list_templates");
+    const templates = await agent("list_templates");
     return Array.isArray(templates) && templates.length > 0;
   } catch {
     return false;

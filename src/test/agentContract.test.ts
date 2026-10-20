@@ -29,7 +29,7 @@ function appCommands(): Set<string> {
 	const found = new Set<string>();
 	for (const path of srcFiles(srcDir)) {
 		const text = readFileSync(path, "utf8");
-		for (const match of text.matchAll(/invoke\(\s*"([a-z_0-9]+)"/g)) {
+		for (const match of text.matchAll(/(?:invoke|agent|tauriInvoke)\(\s*"([a-z_0-9]+)"/g)) {
 			found.add(match[1] as string);
 		}
 	}
