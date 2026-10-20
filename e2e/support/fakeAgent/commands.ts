@@ -1,4 +1,4 @@
-import { getSetting, setSetting } from "./store.js";
+import { getSetting, seedPrinters, setSetting } from "./store.js";
 import { createFakeCache, type SyncChangeIn } from "./cache.js";
 
 // In-memory implementation of the IPC commands. Phase 1 implements the
@@ -16,6 +16,10 @@ type Handler = (args: Record<string, unknown>) => unknown;
 // One cache per browser context (module scope = the injected page).
 const cache = createFakeCache();
 
+// Printers are read once at bundle evaluation, before index.ts consumes
+// the one-shot seed (invoke-time reads would find it already gone).
+const seededPrinters = seedPrinters();
+
 const implemented: Record<string, Handler> = {
 	get_setting: (args) => getSetting(String(args.key ?? "")),
 	set_setting: (args) => {
@@ -24,6 +28,15 @@ const implemented: Record<string, Handler> = {
 		return null;
 	},
 	ping: () => null,
+	enumerate_system_printers: () =>
+		seededPrinters.map((p, i) => ({
+			id: `printer-${i + 1}`,
+			name: String(p["name"] ?? `E2E Printer ${i + 1}`),
+			address: String(p["address"] ?? "usb:e2e"),
+			printer_type: String(p["printer_type"] ?? "label"),
+			language: String(p["language"] ?? "zpl"),
+			status: "idle",
+		})),
 	cache_apply_changes: (args) =>
 		cache.applyChanges(
 			(args["changes"] as SyncChangeIn[] | undefined) ?? [],
@@ -116,7 +129,6 @@ const acknowledgedStubs: string[] = [
 	"get_trusted_sources",
 	"set_trusted_sources",
 	"print_html",
-	"enumerate_system_printers",
 	"spike_test_print",
 	"delete_version",
 	"restore_version",

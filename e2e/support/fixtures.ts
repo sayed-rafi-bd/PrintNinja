@@ -41,6 +41,7 @@ export async function pc(browser: Browser, seed: AgentSeed = {}): Promise<Pc> {
 			...(seed.settings ?? {}),
 		},
 		...(seed.templates !== undefined ? { templates: seed.templates } : {}),
+		...(seed.printers !== undefined ? { printers: seed.printers } : {}),
 	});
 	return { context };
 }

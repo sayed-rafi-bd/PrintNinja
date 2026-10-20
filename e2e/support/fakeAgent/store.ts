@@ -7,6 +7,8 @@ export type AgentSeed = {
 	settings?: Record<string, string | null>;
 	/** Templates to pre-seed the fake sync cache (see cache.ts SeedTemplate). */
 	templates?: Array<Record<string, unknown>>;
+	/** System printers for enumerate_system_printers (device-local). */
+	printers?: Array<{ name: string; address?: string; printer_type?: string; language?: string }>;
 };
 
 export type AgentState = {
@@ -46,6 +48,18 @@ export function seedTemplates(): Array<Record<string, unknown>> {
 		if (!raw) return [];
 		const seed = JSON.parse(raw) as AgentSeed;
 		return Array.isArray(seed.templates) ? seed.templates : [];
+	} catch {
+		return [];
+	}
+}
+
+/** System printers pre-seeded for this context (F-series specs). */
+export function seedPrinters(): Array<Record<string, unknown>> {
+	try {
+		const raw = localStorage.getItem(SEED_KEY);
+		if (!raw) return [];
+		const seed = JSON.parse(raw) as AgentSeed;
+		return Array.isArray(seed.printers) ? seed.printers : [];
 	} catch {
 		return [];
 	}
