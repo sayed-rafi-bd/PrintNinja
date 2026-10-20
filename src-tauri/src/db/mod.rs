@@ -359,7 +359,7 @@ pub fn ensure_sync_schema(conn: &Connection) -> rusqlite::Result<()> {
         [],
         |r| r.get(0),
     )?;
-    if (migrated > 0) {
+    if migrated > 0 {
         conn.execute(
             "INSERT INTO settings (key, value) VALUES ('install_migrated', '1') ON CONFLICT(key) DO NOTHING",
             [],
