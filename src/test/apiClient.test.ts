@@ -120,3 +120,35 @@ describe("typed api client", () => {
 		expect(seen.map((r) => new URL(r.url).host)).toEqual(["one.test", "two.test"]);
 	});
 });
+
+describe("fetchCommunityTemplates", () => {
+	beforeEach(() => {
+		localStorage.clear();
+	});
+
+	it("passes search, sort and paging through and returns the items", async () => {
+		localStorage.setItem("printninja-setting:share_service_url", "https://api.test");
+		localStorage.setItem("printninja-setting:share_session_token", "tok");
+		const seen: string[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async (input: RequestInfo | URL) => {
+				const req = input instanceof Request ? input : new Request(input as string);
+				seen.push(req.url);
+				return new Response(JSON.stringify({ items: [{ id: "1" }], has_more: false }), { status: 200 });
+			}),
+		);
+		try {
+			const { fetchCommunityTemplates } = await import("@/lib/share/client");
+			const items = await fetchCommunityTemplates({ q: "  invoice ", sort: "used" });
+			expect(items).toEqual([{ id: "1" }]);
+			const url = new URL(seen[0]);
+			expect(url.pathname).toBe("/v2/community/templates");
+			expect(url.searchParams.get("q")).toBe("invoice");
+			expect(url.searchParams.get("sort")).toBe("used");
+			expect(url.searchParams.get("page")).toBe("1");
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+});

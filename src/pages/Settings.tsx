@@ -196,11 +196,8 @@ export function SettingsPage() {
         const token = await share.getSessionToken();
         if (token && url) {
           try {
-            const res = await fetch(`${url}/v1/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
-            if (res.ok) {
-              const u = await res.json();
-              setShareUser({ handle: u.handle });
-            }
+            const me = await share.fetchMe();
+            setShareUser({ handle: me.handle });
           } catch {}
         }
       } catch {}

@@ -253,6 +253,27 @@ export async function fetchMyRemoteTemplates(): Promise<RemoteTemplateSummary[]>
   );
 }
 
+/** A community template as the v2 service lists it. */
+export type CommunitySummary =
+  paths["/v2/community/templates"]["get"]["responses"][200]["content"]["application/json"]["items"][number];
+
+/** Search and sort the community gallery (one page; the gallery does not paginate yet). */
+export async function fetchCommunityTemplates(options: {
+  q?: string;
+  sort?: "updated" | "used" | "name";
+}): Promise<CommunitySummary[]> {
+  const params = new URLSearchParams();
+  params.set("page", "1");
+  params.set("page_size", "100");
+  if (options.q?.trim()) params.set("q", options.q.trim());
+  if (options.sort) params.set("sort", options.sort);
+  const page = await callApi<{ items: CommunitySummary[] }>(apiDeps(), {
+    method: "GET",
+    path: `/v2/community/templates?${params.toString()}`,
+  });
+  return page.items;
+}
+
 /** The community templates the signed-in user has saved. */
 export async function fetchSavedRemoteTemplates(): Promise<RemoteTemplateSummary[]> {
   return fetchAllPages((page, pageSize) =>

@@ -47,19 +47,7 @@ interface LocalTemplate {
   page_h_mm: number;
 }
 
-interface ServerSummary {
-  id: string;
-  owner_id: string;
-  owner_handle: string;
-  name: string;
-  summary: string;
-  page_w_mm: number;
-  page_h_mm: number;
-  language: string;
-  use_count: number;
-  published_at: string;
-  updated_at: string;
-}
+type ServerSummary = share.CommunitySummary;
 
 export function TemplatesPage() {
   const { t } = useTranslation();
@@ -115,13 +103,7 @@ export function TemplatesPage() {
     setCommunityLoading(true);
     setOffline(false);
     try {
-      const params = new URLSearchParams();
-      if (search.trim()) params.set("q", search.trim());
-      if (sort) params.set("sort", sort);
-      const res = await fetch(`${url}/v1/templates?${params.toString()}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as ServerSummary[];
-      setCommunity(data);
+      setCommunity(await share.fetchCommunityTemplates({ q: search, sort: sort as "updated" | "used" | "name" }));
     } catch {
       setOffline(true);
       setCommunity([]);
@@ -271,11 +253,7 @@ export function TemplatesPage() {
     setPreviewHtml("");
     setPreviewError("");
     try {
-      const url = await share.getServiceUrl();
-      if (!url) throw new Error("Share service not configured");
-      const res = await fetch(`${url}/v1/templates/${tpl.id}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const detail = await res.json();
+      const detail = await share.fetchRemoteTemplate(tpl.id);
       const { renderTemplate } = await import("@/lib/render/renderTemplate");
       const { compileTemplateCss } = await import("@/lib/templates/compileTemplateCss");
       const { css: compiled } = await compileTemplateCss(detail.body ?? "");
