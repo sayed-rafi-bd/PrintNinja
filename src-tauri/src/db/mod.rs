@@ -63,7 +63,8 @@ pub type DbState = Arc<Mutex<Database>>;
 /// Called by `Database::open` and by tests; nothing else may apply schema.
 pub fn init(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(include_str!("schema.sql"))?;
-    ensure_v2_schema(conn)
+    ensure_v2_schema(conn)?;
+    ensure_sync_schema(conn)
 }
 
 /// Check whether a column exists via `PRAGMA table_info` (V2.md §5.1).
@@ -257,5 +258,98 @@ fn ensure_created_by_allows_sync(conn: &Connection) -> rusqlite::Result<()> {
         let _ = conn.execute_batch("PRAGMA foreign_keys = ON;");
     }
     result?;
+    Ok(())
+}
+
+/// Phase 3 sync bookkeeping (REFACTORING.md section 6). Guarded ALTERs
+/// plus a one-time backfill; idempotent like the rest of this file. Must
+/// run after `ensure_v2_schema` (it backfills from `origin`).
+///
+/// - `server_id`: the sync identity, unique across PCs. Existing rows
+///   copy `remote_id`; local-only rows get a fresh v4 UUID.
+/// - `server_revision` / `base_revision`: NULL until the first sync.
+/// - `sync_state`: synced | dirty | deleted_pending | conflict. Rows
+///   that already came from the server start synced; local-only rows
+///   start dirty with no server copy.
+/// - `kind`: own | saved, backfilled from `origin`.
+/// - `owner_handle`: backfilled from `origin_owner` for saved rows.
+/// - `synced_at`: NULL until the first successful pull.
+/// - `sync_state` table: one row with the account id, server URL,
+///   cursor, last pull time and last error.
+pub fn ensure_sync_schema(conn: &Connection) -> rusqlite::Result<()> {
+    if !column_exists(conn, "templates", "server_id")? {
+        conn.execute("ALTER TABLE templates ADD COLUMN server_id TEXT", [])?;
+    }
+    if !column_exists(conn, "templates", "server_revision")? {
+        conn.execute(
+            "ALTER TABLE templates ADD COLUMN server_revision INTEGER",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "templates", "base_revision")? {
+        conn.execute("ALTER TABLE templates ADD COLUMN base_revision INTEGER", [])?;
+    }
+    if !column_exists(conn, "templates", "sync_state")? {
+        conn.execute(
+            "ALTER TABLE templates ADD COLUMN sync_state TEXT NOT NULL DEFAULT 'synced' \
+             CHECK(sync_state IN ('synced', 'dirty', 'deleted_pending', 'conflict'))",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "templates", "kind")? {
+        conn.execute(
+            "ALTER TABLE templates ADD COLUMN kind TEXT NOT NULL DEFAULT 'own' \
+             CHECK(kind IN ('own', 'saved'))",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "templates", "owner_handle")? {
+        conn.execute("ALTER TABLE templates ADD COLUMN owner_handle TEXT", [])?;
+    }
+    if !column_exists(conn, "templates", "synced_at")? {
+        conn.execute("ALTER TABLE templates ADD COLUMN synced_at TEXT", [])?;
+    }
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_templates_server_id ON templates(server_id)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS sync_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            account_handle TEXT,
+            server_url TEXT,
+            cursor TEXT,
+            last_pull_at TEXT,
+            last_error TEXT
+        )",
+        [],
+    )?;
+
+    // Backfill. Every UPDATE is conditional, so a second call is a no-op.
+    conn.execute(
+        "UPDATE templates SET server_id = remote_id WHERE server_id IS NULL AND remote_id IS NOT NULL",
+        [],
+    )?;
+    // Local-only rows: fresh sync identities, dirty, no server copy.
+    let ids: Vec<i64> = {
+        let mut stmt = conn.prepare("SELECT id FROM templates WHERE server_id IS NULL")?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<Vec<i64>>>()?
+    };
+    for id in ids {
+        conn.execute(
+            "UPDATE templates SET server_id = ?1, sync_state = 'dirty' WHERE id = ?2",
+            rusqlite::params![uuid::Uuid::new_v4().to_string(), id],
+        )?;
+    }
+    conn.execute(
+        "UPDATE templates SET kind = 'saved' WHERE origin = 'saved' AND kind <> 'saved'",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE templates SET owner_handle = origin_owner \
+         WHERE kind = 'saved' AND owner_handle IS NULL AND origin_owner IS NOT NULL",
+        [],
+    )?;
     Ok(())
 }

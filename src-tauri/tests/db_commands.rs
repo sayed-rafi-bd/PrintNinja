@@ -398,3 +398,140 @@ fn history_retry_resets_error_and_timestamps() {
     assert!(err.is_none());
     assert!(fin.is_none());
 }
+
+// ───────────────────────────────────────────────────────────────
+// Phase 3 sync bookkeeping (REFACTORING.md section 6)
+// ───────────────────────────────────────────────────────────────
+
+fn template_columns(conn: &Connection) -> Vec<String> {
+    let mut stmt = conn.prepare("PRAGMA table_info(templates)").unwrap();
+    stmt.query_map([], |r| r.get::<_, String>(1))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<String>>>()
+        .unwrap()
+}
+
+#[test]
+fn sync_schema_adds_columns_state_table_and_index() {
+    let (_state, conn) = test_db();
+    printninja_lib::db::ensure_sync_schema(&conn).unwrap();
+
+    let cols = template_columns(&conn);
+    for col in [
+        "server_id",
+        "server_revision",
+        "base_revision",
+        "sync_state",
+        "kind",
+        "owner_handle",
+        "synced_at",
+    ] {
+        assert!(cols.contains(&col.to_string()), "missing {col}: {cols:?}");
+    }
+    let index: Option<String> = conn
+        .query_row(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_templates_server_id'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(index.as_deref(), Some("idx_templates_server_id"));
+    let table: Option<String> = conn
+        .query_row(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sync_state'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(table.as_deref(), Some("sync_state"));
+
+    // Idempotent: a second call changes nothing.
+    let before = template_columns(&conn);
+    printninja_lib::db::ensure_sync_schema(&conn).unwrap();
+    assert_eq!(template_columns(&conn), before);
+}
+
+#[test]
+fn sync_schema_backfills_server_id_and_dirty_local_only_rows() {
+    let (_state, conn) = test_db();
+    // A pre-Phase-3 row: synced once (remote_id set), and a local-only row.
+    conn.execute(
+        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, origin, remote_id, origin_owner)
+         VALUES ('Synced', 210, 297, 'portrait', 'own', 'remote-1', NULL)",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, origin)
+         VALUES ('Local', 210, 297, 'portrait', 'saved')",
+        [],
+    )
+    .unwrap();
+    // A saved row carries its owner's handle in origin_owner.
+    conn.execute(
+        "UPDATE templates SET origin_owner = 'ana' WHERE name = 'Local'",
+        [],
+    )
+    .unwrap();
+
+    printninja_lib::db::ensure_sync_schema(&conn).unwrap();
+
+    let synced: (String, String, Option<i64>, String, Option<String>) = conn
+        .query_row(
+            "SELECT server_id, sync_state, server_revision, kind, owner_handle FROM templates WHERE name = 'Synced'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .unwrap();
+    assert_eq!(synced.0, "remote-1");
+    assert_eq!(synced.1, "synced");
+    assert_eq!(synced.2, None);
+    assert_eq!(synced.3, "own");
+    assert_eq!(synced.4, None);
+
+    let local: (String, String, String, Option<String>) = conn
+        .query_row(
+            "SELECT server_id, sync_state, kind, owner_handle FROM templates WHERE name = 'Local'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    // A fresh v4 UUID, valid and distinct from any remote id.
+    assert!(
+        uuid::Uuid::parse_str(&local.0).is_ok(),
+        "not a UUID: {}",
+        local.0
+    );
+    assert_ne!(local.0, "remote-1");
+    assert_eq!(local.1, "dirty");
+    assert_eq!(local.2, "saved");
+    assert_eq!(local.3, Some("ana".to_string()));
+
+    // Re-running keeps every value (no new UUIDs, no state flips).
+    printninja_lib::db::ensure_sync_schema(&conn).unwrap();
+    let again: (String, String) = conn
+        .query_row(
+            "SELECT server_id, sync_state FROM templates WHERE name = 'Local'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((again.0, again.1), (local.0, local.1));
+}
+
+#[test]
+fn sync_state_table_holds_one_row() {
+    let (_state, conn) = test_db();
+    printninja_lib::db::ensure_sync_schema(&conn).unwrap();
+
+    conn.execute(
+        "INSERT INTO sync_state (id, account_handle, server_url, cursor) VALUES (1, 'rafi', 'https://srv.example', 'MA')",
+        [],
+    )
+    .unwrap();
+    let second = conn.execute(
+        "INSERT INTO sync_state (id, account_handle) VALUES (2, 'ana')",
+        [],
+    );
+    assert!(second.is_err(), "sync_state must stay a single row");
+}
