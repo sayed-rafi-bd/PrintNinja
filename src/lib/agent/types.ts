@@ -174,6 +174,14 @@ export interface FontRow {
 	file_path: string;
 	format: string;
 	created_at: string;
+	/** The sync identity; every row has one. */
+	server_id: string;
+	sync_state: string;
+	/** Hex SHA-256 of the stored bytes; empty until bytes land. */
+	sha256: string;
+	size_bytes: number;
+	/** Download state: pending | ready | error. */
+	state: string;
 }
 
 export interface UploadFontReq {
@@ -184,11 +192,69 @@ export interface UploadFontReq {
 
 export interface ProfileRow {
 	id: number;
-	printer_id: number;
-	template_id: number;
+	/** Local linkage, resolved from the server key. Null when this PC
+	 * has no such printer or template: the row is dormant, not broken. */
+	printer_id: number | null;
+	template_id: number | null;
+	/** The sync identity; every row has one. */
+	server_id: string;
+	template_server_id: string;
+	/** Lowercase printer name: the server key. */
+	printer_name: string;
 	settings_json: string;
 	created_at: string;
 	updated_at: string;
+}
+
+export interface SyncedDatasetRow {
+	id: number;
+	/** The sync identity; every row has one. */
+	server_id: string;
+	name: string;
+	data_json: string;
+	server_revision: number | null;
+	base_revision: number | null;
+	sync_state: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface SaveDatasetReq {
+	id?: number | null;
+	name: string;
+	data_json: string;
+}
+
+export interface DirtyDatasetRow {
+	server_id: string;
+	name: string;
+	data_json: string;
+	base_revision: number | null;
+}
+
+export interface DirtyProfileRow {
+	server_id: string;
+	template_id: string;
+	printer_name: string;
+	settings_json: string;
+	base_revision: number | null;
+}
+
+export interface DirtySettingRow {
+	key: string;
+	value: string;
+	tombstone: boolean;
+}
+
+export interface DirtyFontRow {
+	server_id: string;
+	name: string;
+	base_revision: number | null;
+}
+
+export interface FontDownloadReport {
+	downloaded: number;
+	failed: number;
 }
 
 export interface SaveProfileReq {

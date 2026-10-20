@@ -46,17 +46,6 @@ CREATE TABLE IF NOT EXISTS fonts (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS printer_profiles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    printer_id INTEGER NOT NULL REFERENCES printers(id) ON DELETE CASCADE,
-    template_id INTEGER NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
-    settings_json TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    -- One profile per printer+template pair (PLANNING.md 7.7)
-    UNIQUE (printer_id, template_id)
-);
-
 CREATE TABLE IF NOT EXISTS batches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     template_id INTEGER REFERENCES templates(id) ON DELETE SET NULL,

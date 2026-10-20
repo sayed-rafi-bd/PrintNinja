@@ -105,61 +105,101 @@ fn font_supported_formats_only() {
 }
 
 // ───────────────────────────────────────────────────────────────
-// printer profiles (#10)
+// printer profiles (Phase 4: synced by template and printer name)
 // ───────────────────────────────────────────────────────────────
 
-#[test]
-fn profile_unique_per_printer_template() {
-    let conn = db();
-    let printer = seed_printer(&conn, "Desk");
-    let tpl = seed_template(&conn, "Receipt");
-
-    // The UNIQUE constraint in schema.sql is what makes the upsert work.
+fn seed_synced_template(conn: &Connection, name: &str) -> i64 {
+    let id = seed_template(conn, name);
     conn.execute(
-        "INSERT INTO printer_profiles (printer_id, template_id, settings_json)
-         VALUES (?1, ?2, '{}')",
-        [printer, tpl],
+        "UPDATE templates SET server_id = ?1 WHERE id = ?2",
+        rusqlite::params![uuid::Uuid::new_v4().to_string(), id],
     )
     .unwrap();
+    id
+}
 
-    let dup = conn.execute(
-        "INSERT INTO printer_profiles (printer_id, template_id, settings_json)
-         VALUES (?1, ?2, '{}')",
-        [printer, tpl],
+#[test]
+fn profile_unique_per_template_and_printer_name() {
+    use printninja_lib::commands::profile;
+    let conn = db();
+    let printer = seed_printer(&conn, "Desk");
+    let tpl = seed_synced_template(&conn, "Receipt");
+
+    // The UNIQUE constraint on the server key is what makes the upsert work.
+    let first = profile::store_profile(
+        &conn,
+        profile::SaveProfileRequest {
+            printer_id: printer,
+            template_id: tpl,
+            settings_json: "{}".into(),
+        },
+    )
+    .unwrap();
+    let second = profile::store_profile(
+        &conn,
+        profile::SaveProfileRequest {
+            printer_id: printer,
+            template_id: tpl,
+            settings_json: "{\"copies\":5}".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        first.server_id, second.server_id,
+        "re-saving must not duplicate"
     );
-    assert!(dup.is_err(), "duplicate printer+template must be rejected");
+    assert!(second.settings_json.contains("\"copies\":5"));
+
+    let raw_dup = conn.execute(
+        "INSERT INTO synced_profiles (server_id, template_server_id, printer_name, settings_json)
+         VALUES ('other-id', 'other-template', 'desk', '{}')",
+        [],
+    );
+    assert!(raw_dup.is_ok());
+    let dup = conn.execute(
+        "INSERT INTO synced_profiles (server_id, template_server_id, printer_name, settings_json)
+         VALUES ('third-id', 'other-template', 'desk', '{}')",
+        [],
+    );
+    assert!(
+        dup.is_err(),
+        "duplicate template+printer name must be rejected"
+    );
 }
 
 #[test]
 fn profile_upsert_replaces_settings() {
+    use printninja_lib::commands::profile;
     let conn = db();
     let printer = seed_printer(&conn, "Desk");
-    let tpl = seed_template(&conn, "Receipt");
+    let tpl = seed_synced_template(&conn, "Receipt");
 
-    conn.execute(
-        "INSERT INTO printer_profiles (printer_id, template_id, settings_json)
-         VALUES (?1, ?2, '{\"copies\":1}')",
-        [printer, tpl],
+    profile::store_profile(
+        &conn,
+        profile::SaveProfileRequest {
+            printer_id: printer,
+            template_id: tpl,
+            settings_json: "{\"copies\":1}".into(),
+        },
     )
     .unwrap();
-
-    conn.execute(
-        "INSERT INTO printer_profiles (printer_id, template_id, settings_json)
-         VALUES (?1, ?2, '{\"copies\":5}')
-         ON CONFLICT(printer_id, template_id)
-         DO UPDATE SET settings_json = excluded.settings_json,
-                       updated_at = datetime('now')",
-        [printer, tpl],
+    profile::store_profile(
+        &conn,
+        profile::SaveProfileRequest {
+            printer_id: printer,
+            template_id: tpl,
+            settings_json: "{\"copies\":5}".into(),
+        },
     )
     .unwrap();
 
     let count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM printer_profiles", [], |r| r.get(0))
+        .query_row("SELECT COUNT(*) FROM synced_profiles", [], |r| r.get(0))
         .unwrap();
     assert_eq!(count, 1, "upsert must not create a second row");
 
     let settings: String = conn
-        .query_row("SELECT settings_json FROM printer_profiles", [], |r| {
+        .query_row("SELECT settings_json FROM synced_profiles", [], |r| {
             r.get(0)
         })
         .unwrap();
@@ -167,25 +207,39 @@ fn profile_upsert_replaces_settings() {
 }
 
 #[test]
-fn profile_cascade_deletes_with_printer() {
+fn profile_survives_printer_and_template_delete() {
+    // No foreign keys (cf. E14 for saved templates): a deleted printer
+    // or template leaves the row dormant, and the next pull re-links
+    // whatever still exists.
+    use printninja_lib::commands::profile;
     let conn = db();
     let printer = seed_printer(&conn, "Desk");
-    let tpl = seed_template(&conn, "Receipt");
+    let tpl = seed_synced_template(&conn, "Receipt");
 
-    conn.execute(
-        "INSERT INTO printer_profiles (printer_id, template_id, settings_json)
-         VALUES (?1, ?2, '{}')",
-        [printer, tpl],
+    let saved = profile::store_profile(
+        &conn,
+        profile::SaveProfileRequest {
+            printer_id: printer,
+            template_id: tpl,
+            settings_json: "{}".into(),
+        },
     )
     .unwrap();
 
     conn.execute("DELETE FROM printers WHERE id = ?1", [printer])
         .unwrap();
+    conn.execute("DELETE FROM templates WHERE id = ?1", [tpl])
+        .unwrap();
 
     let n: i64 = conn
-        .query_row("SELECT COUNT(*) FROM printer_profiles", [], |r| r.get(0))
+        .query_row("SELECT COUNT(*) FROM synced_profiles", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(n, 0, "profiles must cascade with their printer");
+    assert_eq!(n, 1, "the server key must survive local deletes");
+    let rows = profile::query_profiles(&conn, None, None).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].server_id, saved.server_id);
+    assert_eq!(rows[0].printer_id, None);
+    assert_eq!(rows[0].template_id, None);
 }
 
 // ───────────────────────────────────────────────────────────────

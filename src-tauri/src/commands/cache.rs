@@ -12,6 +12,11 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use crate::commands::datasets::{apply_dataset_delete, apply_dataset_upsert, DatasetDataIn};
+use crate::commands::font::{apply_font_delete, apply_font_upsert, FontDataIn};
+use crate::commands::profile::{apply_profile_delete, apply_profile_upsert, ProfileDataIn};
+use crate::commands::settings::{apply_setting_delete, apply_setting_upsert, SettingDataIn};
+
 /// One record from `GET /v2/sync/changes`, as the engine passes it in.
 /// `data` stays unparsed until the entity is known, so an unknown entity
 /// fails on its name rather than on its shape.
@@ -77,26 +82,60 @@ pub fn apply_changes(
     for change in changes {
         match change.op.as_str() {
             "upsert" => {
-                if change.entity != "template" {
-                    return Err(AppError::Validation(format!(
-                        "unsupported sync entity '{}'",
-                        change.entity
-                    )));
-                }
                 let data_value = change
                     .data
                     .as_ref()
                     .ok_or_else(|| AppError::Validation("sync upsert without data".to_string()))?;
-                let data: TemplateDataIn = serde_json::from_value(data_value.clone())
-                    .map_err(|e| AppError::Validation(format!("bad sync record: {e}")))?;
-                apply_upsert(&tx, &data, &mut report)?;
+                match change.entity.as_str() {
+                    "template" => {
+                        let data: TemplateDataIn = serde_json::from_value(data_value.clone())
+                            .map_err(|e| AppError::Validation(format!("bad sync record: {e}")))?;
+                        apply_upsert(&tx, &data, &mut report)?;
+                    }
+                    "dataset" => {
+                        let data: DatasetDataIn = serde_json::from_value(data_value.clone())
+                            .map_err(|e| AppError::Validation(format!("bad sync record: {e}")))?;
+                        apply_dataset_upsert(&tx, &data, &mut report)?;
+                    }
+                    "profile" => {
+                        let data: ProfileDataIn = serde_json::from_value(data_value.clone())
+                            .map_err(|e| AppError::Validation(format!("bad sync record: {e}")))?;
+                        apply_profile_upsert(&tx, &data, &mut report)?;
+                    }
+                    "setting" => {
+                        let data: SettingDataIn = serde_json::from_value(data_value.clone())
+                            .map_err(|e| AppError::Validation(format!("bad sync record: {e}")))?;
+                        apply_setting_upsert(&tx, &data, &mut report)?;
+                    }
+                    "font" => {
+                        let data: FontDataIn = serde_json::from_value(data_value.clone())
+                            .map_err(|e| AppError::Validation(format!("bad sync record: {e}")))?;
+                        apply_font_upsert(&tx, &data, &mut report)?;
+                    }
+                    other => {
+                        return Err(AppError::Validation(format!(
+                            "unsupported sync entity '{other}'"
+                        )))
+                    }
+                }
             }
             "delete" => {
                 let id = change
                     .id
                     .as_deref()
                     .ok_or_else(|| AppError::Validation("sync delete without id".to_string()))?;
-                apply_delete(&tx, &change.entity, id, &mut report)?;
+                match change.entity.as_str() {
+                    "template" => apply_delete(&tx, id, &mut report)?,
+                    "dataset" => apply_dataset_delete(&tx, id, &mut report)?,
+                    "profile" => apply_profile_delete(&tx, id, &mut report)?,
+                    "setting" => apply_setting_delete(&tx, id, &mut report)?,
+                    "font" => apply_font_delete(&tx, id, &mut report)?,
+                    other => {
+                        return Err(AppError::Validation(format!(
+                            "unsupported sync entity '{other}'"
+                        )))
+                    }
+                }
             }
             other => {
                 return Err(AppError::Validation(format!(
@@ -280,17 +319,7 @@ fn apply_upsert_new(
     Ok(())
 }
 
-fn apply_delete(
-    tx: &rusqlite::Transaction,
-    entity: &str,
-    id: &str,
-    report: &mut ApplyReport,
-) -> AppResult<()> {
-    if entity != "template" {
-        return Err(AppError::Validation(format!(
-            "unsupported sync entity '{entity}'"
-        )));
-    }
+fn apply_delete(tx: &rusqlite::Transaction, id: &str, report: &mut ApplyReport) -> AppResult<()> {
     let existing: Option<(i64, String)> = tx
         .query_row(
             "SELECT id, sync_state FROM templates WHERE server_id = ?1",
@@ -625,14 +654,26 @@ pub fn list_queued_uses(conn: &Connection) -> AppResult<Vec<QueuedUse>> {
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
-/// Wipes the account cache: every template and version, the sync state
-/// and the queued uses. Device-local tables (printers, jobs, settings)
+/// Wipes the account cache: templates, datasets, profiles, fonts and
+/// versions, the sync state, the queued uses and the account settings
+/// sync flags. Device-local tables (printers, jobs, device settings)
 /// are untouched. The caller warns first when dirty rows would be lost.
 pub fn clear_account(conn: &Connection) -> AppResult<usize> {
     let templates: i64 = conn.query_row("SELECT COUNT(*) FROM templates", [], |r| r.get(0))?;
+    // Font bytes go with their rows (a re-sign-in re-downloads them).
+    let font_paths: Vec<String> = conn
+        .prepare("SELECT file_path FROM fonts WHERE file_path <> ''")?
+        .query_map([], |r| r.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
     conn.execute_batch(
-        "DELETE FROM template_versions; DELETE FROM templates; DELETE FROM sync_state; DELETE FROM queued_uses;",
+        "DELETE FROM template_versions; DELETE FROM templates;
+         DELETE FROM synced_datasets; DELETE FROM synced_profiles; DELETE FROM fonts;
+         DELETE FROM sync_state; DELETE FROM queued_uses;
+         UPDATE settings SET sync_state = 'synced', synced_at = NULL;",
     )?;
+    for path in font_paths {
+        let _ = std::fs::remove_file(path);
+    }
     Ok(templates as usize)
 }
 

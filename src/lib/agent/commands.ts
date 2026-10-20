@@ -7,7 +7,12 @@ import type {
 	ConflictedRow,
 	CreateBatchReq,
 	DeeplinkResult,
+	DirtyDatasetRow,
+	DirtyFontRow,
+	DirtyProfileRow,
 	DirtyRow,
+	DirtySettingRow,
+	FontDownloadReport,
 	FontRow,
 	HistoryJob,
 	PrintHtmlReq,
@@ -15,8 +20,10 @@ import type {
 	PrintResponse,
 	ProfileRow,
 	QueuedUseRow,
+	SaveDatasetReq,
 	SaveProfileReq,
 	SyncStateRow,
+	SyncedDatasetRow,
 	SystemPrinterRow,
 	TemplateRow,
 	TemplateVersionRow,
@@ -112,10 +119,37 @@ export interface AgentCommands {
 	list_fonts: [{}, FontRow[]];
 	upload_font: [UploadFontReq, FontRow];
 	delete_font: [{ id: number }, null];
+	cache_list_dirty_fonts: [{}, DirtyFontRow[]];
+	cache_mark_font_pushed: [{ server_id: string; revision: number }, null];
+	cache_list_tombstoned_fonts: [{}, string[]];
+	cache_list_synced_fonts: [{}, string[]];
+	cache_forget_font: [{ server_id: string }, boolean];
+	cache_read_font_file: [{ server_id: string }, number[]];
+	cache_download_pending_fonts: [{}, FontDownloadReport];
+	// Datasets
+	list_datasets: [{}, SyncedDatasetRow[]];
+	save_dataset: [{ req: SaveDatasetReq }, SyncedDatasetRow];
+	delete_dataset: [{ id: number }, null];
+	cache_list_dirty_datasets: [{}, DirtyDatasetRow[]];
+	cache_mark_dataset_pushed: [{ server_id: string; revision: number }, null];
+	cache_list_tombstoned_datasets: [{}, string[]];
+	cache_list_synced_datasets: [{}, string[]];
+	cache_forget_dataset: [{ server_id: string }, boolean];
 	// Profiles
 	list_profiles: [{ printer_id?: number | null; template_id?: number | null }, ProfileRow[]];
 	save_profile: [{ req: SaveProfileReq }, ProfileRow];
 	delete_profile: [{ id: number }, null];
+	cache_list_dirty_profiles: [{}, DirtyProfileRow[]];
+	cache_mark_profile_pushed: [{ server_id: string; revision: number }, null];
+	cache_list_tombstoned_profiles: [{}, string[]];
+	cache_list_synced_profiles: [{}, string[]];
+	cache_forget_profile: [{ server_id: string }, boolean];
+	// Account preferences
+	cache_list_dirty_settings: [{}, DirtySettingRow[]];
+	cache_mark_setting_pushed: [{ key: string }, null];
+	cache_list_tombstoned_settings: [{}, string[]];
+	cache_list_synced_settings: [{}, string[]];
+	cache_forget_setting: [{ key: string }, boolean];
 	// History and batches
 	list_jobs: [{}, HistoryJob[]];
 	get_job: [{ id: number }, HistoryJob];
