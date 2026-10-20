@@ -1,0 +1,273 @@
+{
+  "$comment": "Shared sync-cache fixtures (REFACTORING.md section 11). The same cases run in Rust (src-tauri/tests/cache_sync.rs) and against the TypeScript fake agent, so the two implementations cannot drift apart. Cursors are opaque base64 strings: MA== is 0, Mg== is 2, NQ== is 5.",
+  "cases": [
+    {
+      "name": "applies upserts and deletes with the cursor, atomically",
+      "given": {
+        "templates": [
+          {
+            "name": "A",
+            "server_id": "srv-a",
+            "sync_state": "synced",
+            "server_revision": 1,
+            "html": "<p>a1</p>",
+            "published_at": null
+          },
+          {
+            "name": "Doomed",
+            "server_id": "srv-doomed",
+            "sync_state": "synced",
+            "server_revision": 1,
+            "html": "<p>bye</p>",
+            "published_at": null
+          }
+        ],
+        "sync_state": {
+          "cursor": "Mg=="
+        }
+      },
+      "changes": [
+        {
+          "seq": 3,
+          "entity": "template",
+          "op": "upsert",
+          "data": {
+            "id": "srv-a",
+            "name": "A renamed",
+            "summary": "",
+            "page_w_mm": 101.6,
+            "page_h_mm": 152.4,
+            "body": "<p>a2</p>",
+            "css": "",
+            "readme": "",
+            "revision": 2,
+            "published_at": null,
+            "updated_at": "2026-10-20T00:00:00Z"
+          }
+        },
+        {
+          "seq": 4,
+          "entity": "template",
+          "op": "upsert",
+          "data": {
+            "id": "srv-b",
+            "name": "B",
+            "summary": "",
+            "page_w_mm": 210,
+            "page_h_mm": 297,
+            "body": "<p>b1</p>",
+            "css": ".b{}",
+            "readme": "R",
+            "revision": 1,
+            "published_at": "2026-10-20T00:00:00Z",
+            "updated_at": "2026-10-20T00:00:00Z"
+          }
+        },
+        {
+          "seq": 5,
+          "entity": "template",
+          "op": "delete",
+          "id": "srv-doomed"
+        }
+      ],
+      "new_cursor": "NQ==",
+      "expect": {
+        "templates": [
+          {
+            "server_id": "srv-a",
+            "name": "A renamed",
+            "sync_state": "synced",
+            "server_revision": 2,
+            "html": "<p>a2</p>"
+          },
+          {
+            "server_id": "srv-b",
+            "name": "B",
+            "sync_state": "synced",
+            "server_revision": 1,
+            "html": "<p>b1</p>",
+            "published_at": "2026-10-20T00:00:00Z"
+          }
+        ],
+        "gone": [
+          "srv-doomed"
+        ],
+        "sync_cursor": "NQ==",
+        "report": {
+          "applied_upserts": 2,
+          "applied_deletes": 1,
+          "skipped_dirty": 0
+        }
+      }
+    },
+    {
+      "name": "a dirty row survives the pull and the cursor still advances",
+      "given": {
+        "templates": [
+          {
+            "name": "Mine",
+            "server_id": "srv-mine",
+            "sync_state": "dirty",
+            "server_revision": 1,
+            "html": "<p>local edit</p>"
+          }
+        ],
+        "sync_state": {
+          "cursor": "Mg=="
+        }
+      },
+      "changes": [
+        {
+          "seq": 3,
+          "entity": "template",
+          "op": "upsert",
+          "data": {
+            "id": "srv-mine",
+            "name": "Mine",
+            "summary": "",
+            "page_w_mm": 210,
+            "page_h_mm": 297,
+            "body": "<p>server edit</p>",
+            "css": "",
+            "readme": "",
+            "revision": 2,
+            "published_at": null,
+            "updated_at": "2026-10-20T00:00:00Z"
+          }
+        }
+      ],
+      "new_cursor": "Mw==",
+      "expect": {
+        "templates": [
+          {
+            "server_id": "srv-mine",
+            "sync_state": "dirty",
+            "server_revision": 1,
+            "html": "<p>local edit</p>"
+          }
+        ],
+        "gone": [],
+        "sync_cursor": "Mw==",
+        "report": {
+          "applied_upserts": 0,
+          "applied_deletes": 0,
+          "skipped_dirty": 1
+        }
+      }
+    },
+    {
+      "name": "a dirty row survives its remote delete",
+      "given": {
+        "templates": [
+          {
+            "name": "Mine",
+            "server_id": "srv-mine",
+            "sync_state": "dirty",
+            "server_revision": 1,
+            "html": "<p>local edit</p>"
+          }
+        ],
+        "sync_state": {
+          "cursor": "Mg=="
+        }
+      },
+      "changes": [
+        {
+          "seq": 3,
+          "entity": "template",
+          "op": "delete",
+          "id": "srv-mine"
+        }
+      ],
+      "new_cursor": "Mw==",
+      "expect": {
+        "templates": [
+          {
+            "server_id": "srv-mine",
+            "sync_state": "dirty",
+            "server_revision": 1
+          }
+        ],
+        "gone": [],
+        "sync_cursor": "Mw==",
+        "report": {
+          "applied_upserts": 0,
+          "applied_deletes": 0,
+          "skipped_dirty": 1
+        }
+      }
+    },
+    {
+      "name": "an unknown entity fails the whole page atomically",
+      "given": {
+        "templates": [],
+        "sync_state": {
+          "cursor": ""
+        }
+      },
+      "changes": [
+        {
+          "seq": 1,
+          "entity": "template",
+          "op": "upsert",
+          "data": {
+            "id": "srv-ok",
+            "name": "Ok",
+            "summary": "",
+            "page_w_mm": 210,
+            "page_h_mm": 297,
+            "body": "<p>ok</p>",
+            "css": "",
+            "readme": "",
+            "revision": 1,
+            "published_at": null,
+            "updated_at": "2026-10-20T00:00:00Z"
+          }
+        },
+        {
+          "seq": 2,
+          "entity": "font",
+          "op": "upsert",
+          "data": {
+            "updated_at": "2026-10-20T00:00:00Z"
+          }
+        }
+      ],
+      "new_cursor": "Mg==",
+      "expect": {
+        "templates": [],
+        "gone": [
+          "srv-ok"
+        ],
+        "sync_cursor": "",
+        "report": null,
+        "error": true
+      }
+    },
+    {
+      "name": "an unknown op fails the whole page atomically",
+      "given": {
+        "templates": [],
+        "sync_state": {
+          "cursor": ""
+        }
+      },
+      "changes": [
+        {
+          "seq": 1,
+          "entity": "template",
+          "op": "rename",
+          "id": "srv-x"
+        }
+      ],
+      "new_cursor": "MQ==",
+      "expect": {
+        "templates": [],
+        "gone": [],
+        "sync_cursor": "",
+        "report": null,
+        "error": true
+      }
+    }
+  ]
+}

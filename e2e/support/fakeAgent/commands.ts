@@ -44,6 +44,12 @@ const acknowledgedStubs: string[] = [
 	"delete_job",
 	"get_trusted_sources",
 	"set_trusted_sources",
+	// Phase 3 cache commands: acknowledged so the agent contract holds;
+	// real in-memory behavior lands with the fake-agent parity work.
+	"cache_apply_changes",
+	"cache_get_sync_state",
+	"cache_list_dirty",
+	"cache_mark_pushed",
 	"print_html",
 	"enumerate_system_printers",
 	"spike_test_print",
