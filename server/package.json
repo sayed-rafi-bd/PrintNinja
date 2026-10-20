@@ -12,6 +12,7 @@
     "test:unit": "vitest run --exclude test/integration",
     "test:int": "vitest run test/integration",
     "test:e2e": "vitest run --config vitest.e2e.config.mts",
+    "test:e2e:stack": "sh scripts/e2e-stack.sh",
     "openapi:generate": "tsx scripts/openapi-generate.ts",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",

@@ -63,7 +63,11 @@ beforeEach(() => {
   } as any);
   sync.downloadToLocal.mockResolvedValue({ id: 9, created: true });
   sync.listAvailableRemoteTemplates.mockResolvedValue({ mine: [], saved: [] });
-  invoke.mockImplementation(async (cmd: string) => (cmd === "list_templates" ? LIST : null));
+  invoke.mockImplementation(async (cmd: string) => {
+    if (cmd === "list_templates") return LIST;
+    if (cmd === "cache_list_conflicted") return [];
+    return null;
+  });
 });
 
 describe("Templates page", () => {
@@ -213,5 +217,109 @@ describe("Templates page", () => {
     renderPage();
     fireEvent.mouseDown(await screen.findByRole("tab", { name: "Community" }));
     expect(await screen.findByText("Share service not set up")).toBeInTheDocument();
+  });
+});
+describe("conflict banner and dialog", () => {
+  const CONFLICT = [{ id: 2, server_id: "r2", name: "Receipt" }];
+  const REMOTE = {
+    id: "r2",
+    owner_id: "u9",
+    owner_handle: "bo",
+    name: "Receipt",
+    summary: "",
+    page_w_mm: 100,
+    page_h_mm: 150,
+    language: "html",
+    body: "<p>server</p>",
+    css: ".s{}",
+    readme: "",
+    use_count: 0,
+    revision: 5,
+    version_count: 3,
+    published_at: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-03-01T00:00:00Z",
+  };
+
+  beforeEach(() => {
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_templates") return LIST;
+      if (cmd === "cache_list_conflicted") return CONFLICT;
+      if (cmd === "list_versions") return [{ html: "<p>local</p>", css: ".l{}" }];
+      return null;
+    });
+    share.fetchRemoteTemplate.mockResolvedValue(REMOTE as never);
+  });
+
+  it("shows a banner and opens the three-way dialog", async () => {
+    renderPage();
+    expect(await screen.findByTestId("conflict-banner")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    expect(await screen.findByTestId("conflict-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("conflict-keep-mine")).toBeInTheDocument();
+    expect(screen.getByTestId("conflict-take-server")).toBeInTheDocument();
+    expect(screen.getByTestId("conflict-keep-both")).toBeInTheDocument();
+  });
+
+  it("Keep mine resolves mine and reloads", async () => {
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_templates") return LIST;
+      if (cmd === "cache_list_conflicted")
+        return invoke.mock.calls.some((c) => c[0] === "cache_resolve_conflict") ? [] : CONFLICT;
+      return null;
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Review" }));
+    fireEvent.click(await screen.findByTestId("conflict-keep-mine"));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("cache_resolve_conflict", {
+        server_id: "r2",
+        resolution: "mine",
+      }),
+    );
+    await waitFor(() => expect(screen.queryByTestId("conflict-banner")).not.toBeInTheDocument());
+  });
+
+  it("Take server applies the server copy", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Review" }));
+    fireEvent.click(await screen.findByTestId("conflict-take-server"));
+    await waitFor(() => expect(share.fetchRemoteTemplate).toHaveBeenCalledWith("r2"));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "cache_resolve_conflict",
+        expect.objectContaining({
+          server_id: "r2",
+          resolution: "theirs",
+          server_copy: expect.objectContaining({ id: "r2", body: "<p>server</p>", revision: 5 }),
+        }),
+      ),
+    );
+  });
+
+  it("Keep both copies the local content to a new template, then takes the server", async () => {
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_templates") return LIST;
+      if (cmd === "cache_list_conflicted") return CONFLICT;
+      if (cmd === "get_template")
+        return { name: "Receipt", page_w_mm: 100, page_h_mm: 150, orientation: "portrait", readme: "", summary: "" };
+      if (cmd === "list_versions") return [{ html: "<p>local</p>", css: ".l{}" }];
+      return null;
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Review" }));
+    fireEvent.click(await screen.findByTestId("conflict-keep-both"));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "create_template",
+        expect.objectContaining({ req: expect.objectContaining({ name: "Receipt (copy)" }) }),
+      ),
+    );
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "cache_resolve_conflict",
+        expect.objectContaining({ server_id: "r2", resolution: "theirs" }),
+      ),
+    );
   });
 });

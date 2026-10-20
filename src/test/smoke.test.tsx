@@ -21,6 +21,7 @@ const TEMPLATE_ROW = { id: 1, name: "Receipt", page_w_mm: 80, page_h_mm: 200, or
 let templateId = 0;
 const nextTemplateId = () => ++templateId;
 const EMPTY_LISTS = new Set([
+  "cache_list_conflicted",
   "enumerate_system_printers",
   "get_trusted_sources",
   "list_batches",

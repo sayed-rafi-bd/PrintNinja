@@ -8,6 +8,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { invoke } from "@/lib/invoke";
 import { Card, CardContent } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ConflictDialog, type ConflictedRow } from "@/components/ConflictDialog";
 import { DataTable } from "@/components/DataTable";
 import { EmptyState } from "@/components/EmptyState";
 import { GetFromServerDialog } from "@/components/GetFromServerDialog";
@@ -82,6 +83,9 @@ export function TemplatesPage() {
   const [offline, setOffline] = useState(false);
   /** Saved copies the server no longer has. The local copy still prints. */
   const [gone, setGone] = useState<Set<number>>(new Set());
+  /** Rows the server refused with 409. The dialog resolves them. */
+  const [conflicts, setConflicts] = useState<ConflictedRow[]>([]);
+  const [conflictOpen, setConflictOpen] = useState(false);
 
   const loadMine = useCallback(async () => {
     try {
@@ -91,6 +95,12 @@ export function TemplatesPage() {
     } catch {
       setMine([]);
       setSaved([]);
+    }
+    try {
+      const rows = await invoke<ConflictedRow[]>("cache_list_conflicted");
+      setConflicts(Array.isArray(rows) ? rows : []);
+    } catch {
+      setConflicts([]);
     }
   }, []);
 
@@ -402,6 +412,21 @@ export function TemplatesPage() {
 
         {/* Mine */}
         <TabsContent value="mine" className="mt-4">
+          {conflicts.length > 0 && (
+            <div
+              data-testid="conflict-banner"
+              className="mb-4 flex items-center justify-between gap-2 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger"
+            >
+              <span>
+                {conflicts.length === 1
+                  ? `“${conflicts[0].name}” changed on another PC.`
+                  : `${conflicts.length} templates changed on another PC.`}
+              </span>
+              <Button variant="outline" size="sm" onClick={() => setConflictOpen(true)}>
+                Review
+              </Button>
+            </div>
+          )}
           <DataTable
             caption="My templates"
             columns={mineColumns}
@@ -498,6 +523,12 @@ export function TemplatesPage() {
         open={getOpen}
         onOpenChange={setGetOpen}
         onDownloaded={() => { void loadMine(); setActiveTab("mine"); }}
+      />
+
+      <ConflictDialog
+        conflict={conflictOpen ? (conflicts[0] ?? null) : null}
+        onOpenChange={setConflictOpen}
+        onResolved={() => { void loadMine(); }}
       />
 
       <ConfirmDialog

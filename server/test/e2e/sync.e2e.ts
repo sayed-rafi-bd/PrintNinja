@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 // E10-E12 and E14 (REFACTORING.md section 11) over HTTP against a
-// running container: `docker compose up -d`, then E2E_BASE_URL=...
+// running container: `pnpm --filter server test:e2e:stack` (clean database, booted stack), then E2E_BASE_URL=...
 // test:e2e. The integration suite pins the same behaviors through
 // inject; these replay them through the real socket and image.
 

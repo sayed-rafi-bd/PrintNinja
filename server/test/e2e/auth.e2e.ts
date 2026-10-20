@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 // E1 + E8 (REFACTORING.md section 11) over HTTP against a running
-// container: `docker compose up -d`, then
+// container: `pnpm --filter server test:e2e:stack` (clean database, booted stack), then
 // `E2E_BASE_URL=http://localhost:3001 pnpm --filter server test:e2e`.
 // Same behaviors the integration suite pins through inject, replayed
 // through the real socket, image and PostgreSQL — the layer that caught
