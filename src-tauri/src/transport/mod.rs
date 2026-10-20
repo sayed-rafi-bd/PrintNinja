@@ -30,6 +30,66 @@ pub enum PrinterLanguage {
     Raster,
 }
 
+/// Parse a stored printer language, e.g. from `printers.language`.
+///
+/// Unknown values fall back to `Pdf` — the language every job used before
+/// dispatch existed — rather than failing a print on bad DB data.
+pub fn parse_printer_language(raw: &str) -> PrinterLanguage {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "escpos" | "esc/pos" | "esc-pos" => PrinterLanguage::Escpos,
+        "tspl" | "tspl2" => PrinterLanguage::Tspl,
+        "zpl" | "zpl2" => PrinterLanguage::Zpl,
+        "cpcl" => PrinterLanguage::Cpcl,
+        "raster" => PrinterLanguage::Raster,
+        // "" or unknown → pdf, the pre-dispatch behaviour.
+        _ => PrinterLanguage::Pdf,
+    }
+}
+
+/// Encode a raster into a printer's own command language (P4).
+///
+/// Returns the bytes to send and their MIME type. `Pdf` is not a command
+/// language: the pipeline renders PDFs directly and never routes them
+/// through here.
+pub fn encode_for_language(
+    language: &PrinterLanguage,
+    image: &crate::render::raster::RasterImage,
+    label_w_mm: f64,
+    label_h_mm: f64,
+    dpi: u32,
+) -> Result<(Vec<u8>, &'static str), String> {
+    // Default media gap for TSPL when the printer row carries none — the
+    // printers table has no gap column (2 mm is the common label gap).
+    const DEFAULT_GAP_MM: f64 = 2.0;
+
+    match language {
+        PrinterLanguage::Pdf => Err(
+            "PDF is not a command language: the document is rendered and sent as PDF bytes"
+                .to_string(),
+        ),
+        PrinterLanguage::Escpos => {
+            let mut data = escpos::EscPosEncoder::init();
+            data.extend_from_slice(&escpos::EscPosEncoder::print_raster(image));
+            Ok((data, "application/octet-stream"))
+        }
+        PrinterLanguage::Tspl => Ok((
+            label_langs::tspl::print_bitmap(image, label_w_mm, label_h_mm, DEFAULT_GAP_MM, dpi),
+            "application/octet-stream",
+        )),
+        PrinterLanguage::Zpl => Ok((
+            label_langs::zpl::print_bitmap(image, label_w_mm, label_h_mm, dpi).into_bytes(),
+            "application/octet-stream",
+        )),
+        PrinterLanguage::Cpcl => Ok((
+            label_langs::cpcl::print_bitmap(image, label_w_mm, dpi).into_bytes(),
+            "application/octet-stream",
+        )),
+        // The bare packed dots, for spoolers and bridges that take a bitmap
+        // and speak no label language of their own.
+        PrinterLanguage::Raster => Ok((image.to_bytes(), "application/octet-stream")),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RenderedJob {
     pub job_id: String,
@@ -240,6 +300,68 @@ mod tests {
             let parsed: PrinterType = id.parse().unwrap();
             assert_eq!(parsed.to_string(), id);
         }
+    }
+
+    /// P4: the language column decides the encoder, and anything the schema
+    /// would not allow (hand-edited row, empty string) behaves like the
+    /// pre-dispatch world: PDF.
+    #[test]
+    fn language_parsing_falls_back_to_pdf() {
+        use PrinterLanguage::*;
+        assert!(matches!(parse_printer_language("zpl"), Zpl));
+        assert!(matches!(parse_printer_language(" ZPL "), Zpl));
+        assert!(matches!(parse_printer_language("esc/pos"), Escpos));
+        assert!(matches!(parse_printer_language("tspl2"), Tspl));
+        assert!(matches!(parse_printer_language("cpcl"), Cpcl));
+        assert!(matches!(parse_printer_language("raster"), Raster));
+        assert!(matches!(parse_printer_language("pdf"), Pdf));
+        assert!(matches!(parse_printer_language("telepathy"), Pdf));
+        assert!(matches!(parse_printer_language(""), Pdf));
+    }
+
+    /// P4: `pdf` is not routed through the raster encoders — the pipeline
+    /// renders PDFs directly and this function refuses them.
+    #[test]
+    fn encoding_a_pdf_from_a_raster_is_an_error() {
+        let image = crate::render::raster::RasterImage::new(8, 1);
+        let err = encode_for_language(&PrinterLanguage::Pdf, &image, 40.0, 30.0, 203)
+            .expect_err("pdf must not be encoded from a raster");
+        assert!(err.contains("PDF"), "{err}");
+    }
+
+    /// P4: every command language carries its own framing around the same
+    /// raster — this is what "each takes its own path" means on the wire.
+    #[test]
+    fn every_command_language_frames_its_raster() {
+        let mut image = crate::render::raster::RasterImage::new(8, 2);
+        image.set_bit(0, 0, true);
+        image.set_bit(7, 1, true);
+
+        let (zpl, _) = encode_for_language(&PrinterLanguage::Zpl, &image, 40.0, 30.0, 203).unwrap();
+        let zpl = String::from_utf8_lossy(&zpl);
+        assert!(zpl.starts_with("^XA"), "{zpl}");
+        assert!(zpl.contains("80"), "hex of the first row (0x80): {zpl}");
+
+        let (tspl, _) =
+            encode_for_language(&PrinterLanguage::Tspl, &image, 40.0, 30.0, 203).unwrap();
+        let tspl = String::from_utf8_lossy(&tspl);
+        assert!(tspl.starts_with("SIZE 40 mm"), "{tspl}");
+        assert!(tspl.contains("BITMAP 0,0,1,2,0"), "{tspl}");
+
+        let (cpcl, _) =
+            encode_for_language(&PrinterLanguage::Cpcl, &image, 40.0, 30.0, 203).unwrap();
+        let cpcl = String::from_utf8_lossy(&cpcl);
+        assert!(cpcl.starts_with("! 0 200 200"), "{cpcl}");
+        assert!(cpcl.contains("PRINT"), "{cpcl}");
+
+        let (escpos, _) =
+            encode_for_language(&PrinterLanguage::Escpos, &image, 40.0, 30.0, 203).unwrap();
+        assert!(escpos.starts_with(&[0x1B, 0x40]));
+        assert!(escpos.windows(4).any(|w| w == [0x1D, 0x76, 0x30, 0x00]));
+
+        let (raster, _) =
+            encode_for_language(&PrinterLanguage::Raster, &image, 40.0, 30.0, 203).unwrap();
+        assert_eq!(raster, image.to_bytes(), "raster is the bare dots");
     }
 
     /// Regression for #19: `discover` used to be a static method with no

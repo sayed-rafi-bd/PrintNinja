@@ -33,15 +33,7 @@ CREATE TABLE IF NOT EXISTS template_versions (
     label TEXT,
     note TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    created_by TEXT NOT NULL DEFAULT 'manual' CHECK(created_by IN ('manual', 'autosave', 'restore'))
-);
-
-CREATE TABLE IF NOT EXISTS sample_datasets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    template_id INTEGER NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    json TEXT NOT NULL,
-    is_default INTEGER NOT NULL DEFAULT 0
+    created_by TEXT NOT NULL DEFAULT 'manual' CHECK(created_by IN ('manual', 'autosave', 'restore', 'sync'))
 );
 
 CREATE TABLE IF NOT EXISTS fonts (
@@ -63,16 +55,6 @@ CREATE TABLE IF NOT EXISTS printer_profiles (
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     -- One profile per printer+template pair (PLANNING.md 7.7)
     UNIQUE (printer_id, template_id)
-);
-
-CREATE TABLE IF NOT EXISTS presets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    printer_id INTEGER REFERENCES printers(id) ON DELETE SET NULL,
-    template_id INTEGER REFERENCES templates(id) ON DELETE SET NULL,
-    url TEXT,
-    settings_json TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS batches (
@@ -101,6 +83,11 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     copies INTEGER NOT NULL DEFAULT 1,
     settings_json TEXT,
     rendered_html TEXT,
+    -- The job's input payload, kept so a queued row can run again (retry,
+    -- reprint, batch records). Run-input, not a history view: it is never
+    -- selected into `PrintJob` (IPC/REST); the displayed artifact,
+    -- `rendered_html`, stays secret-redacted by the pipeline.
+    data_json TEXT,
     idempotency_key TEXT,
     is_test INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -130,5 +117,8 @@ CREATE INDEX IF NOT EXISTS idx_jobs_printer ON print_jobs(printer_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_template ON print_jobs(template_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_batch ON print_jobs(batch_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_created ON print_jobs(created_at);
+-- One row per idempotency key: this index is the atomic reservation that
+-- makes two simultaneous POST /v1/print requests with one key print once
+-- (P12). Multiple NULL keys are fine — SQLite unique indexes allow NULLs.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_print_jobs_idempotency ON print_jobs(idempotency_key);
 CREATE INDEX IF NOT EXISTS idx_versions_template ON template_versions(template_id);
-CREATE INDEX IF NOT EXISTS idx_datasets_template ON sample_datasets(template_id);

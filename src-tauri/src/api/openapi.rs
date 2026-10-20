@@ -49,7 +49,8 @@ impl Default for OpenApiSpec {
                         "summary": "List printers",
                         "responses": {
                             "200": { "description": "Printers, with a `count`" },
-                            "401": { "description": "Missing or invalid API key" }
+                            "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
                         }
                     }
                 },
@@ -58,14 +59,15 @@ impl Default for OpenApiSpec {
                         "summary": "List templates",
                         "responses": {
                             "200": { "description": "Templates, with a `count`" },
-                            "401": { "description": "Missing or invalid API key" }
+                            "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
                         }
                     }
                 },
                 "/v1/print": {
                     "post": {
                         "summary": "Render a template and print it",
-                        "description": "## Renders, then prints.\n\n`template` is required — the API has no inline HTML body, so there is\nnothing to render without one. The response reports the real outcome:\n\n* `200` — printed, with the job id and duration.\n* `400` — missing `template`.\n* `404` — printer or template not found, or the template has no current version.\n* `500` — the transport failed (printer offline, unsupported platform, …).\n\nSend `Idempotency-Key` on a retryable request. A replayed key returns\n`200` without printing a second copy.\n\nThis runs the same pipeline as the desktop UI and serialises on the\ntarget printer, so an API job and a UI job cannot interleave on one head.",
+                        "description": "## Renders, then prints.\n\n`template` is required — the API has no inline HTML body, so there is\nnothing to render without one. `data` is optional. The response reports\nthe real outcome:\n\n* `200` — printed, with the job id and duration.\n* `400` — missing `template`, or a `callback_url` was sent (callbacks are not implemented; poll `GET /v1/jobs/{id}` for the outcome).\n* `404` — printer or template not found, or the template has no current version.\n* `500` — the transport failed (printer offline, unsupported platform, …).\n\nSend `Idempotency-Key` on a retryable request. A replayed key returns\n`200` without printing a second copy.\n\nThis runs the same pipeline as the desktop UI and serialises on the\ntarget printer, so an API job and a UI job cannot interleave on one head.",
                         "parameters": [
                             { "name": "Authorization", "in": "header", "required": true,
                               "schema": { "type": "string" },
@@ -80,12 +82,12 @@ impl Default for OpenApiSpec {
                                 "application/json": {
                                     "schema": {
                                         "type": "object",
-                                        "required": ["template", "printer", "data"],
+                                        "required": ["template", "printer"],
                                         "properties": {
                                             "template": { "type": "string", "description": "Template name (case-insensitive)" },
                                             "printer": { "type": "string", "description": "Printer name (case-insensitive)" },
-                                            "data": { "type": "object", "description": "Context merged into the template" },
-                                            "data_url": { "type": "string", "description": "Fetch this URL and use the JSON as `data` instead" },
+                                            "data": { "type": "object", "description": "Context merged into the template; optional — an empty context prints, like the preview" },
+                                            "data_url": { "type": "string", "description": "Fetch this URL and use the JSON as `data` instead; `http`/`https` only, public addresses only" },
                                             "test": { "type": "boolean", "default": false },
                                             "settings": {
                                                 "type": "object",
@@ -101,20 +103,56 @@ impl Default for OpenApiSpec {
                             }
                         },
                         "responses": {
-                            "200": { "description": "Printed: `{ job_id, status, duration_ms }`" },
-                            "400": { "description": "`template` is required" },
+                            "200": { "description": "Printed: `{ job_id, status, duration_ms }`; also the `duplicate` body for a replayed `Idempotency-Key`" },
+                            "400": { "description": "`template` is required, or `callback_url` was sent (not supported)" },
                             "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" },
                             "404": { "description": "Printer, template, or current version not found" },
+                            "415": { "description": "Wrong or missing `Content-Type`" },
+                            "422": { "description": "Malformed JSON, or `printer` missing" },
                             "500": { "description": "The transport failed" }
                         }
                     }
                 },
                 "/v1/print/batch": {
                     "post": {
-                        "summary": "Create a batch print",
+                        "summary": "Queue a batch print",
+                        "description": "Queues one row per record (`per_record`, the default) or one row for the whole array (`single_job`), stores each row's payload so retry/reprint can run it again, and wakes the worker that prints it. `202` reports the batch the worker will take — the print itself happens in the background.",
+                        "requestBody": {
+                            "required": true,
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "required": ["template", "printer", "data"],
+                                        "properties": {
+                                            "template": { "type": "string", "description": "Template name (case-insensitive)" },
+                                            "printer": { "type": "string", "description": "Printer name (case-insensitive)" },
+                                            "data": { "type": "array", "description": "1 to 5,000 records", "minItems": 1, "maxItems": 5000 },
+                                            "mode": { "type": "string", "enum": ["per_record", "single_job"], "default": "per_record" }
+                                        }
+                                    }
+                                }
+                            }
+                        },
                         "responses": {
-                            "200": { "description": "Batch created" },
-                            "401": { "description": "Missing or invalid API key" }
+                            "202": { "description": "Batch queued: `{ batch_id, status, records, mode }`; the worker prints it" },
+                            "400": { "description": "`data` is not an array, is empty, exceeds 5,000 records, `mode` is invalid, or `template` is missing" },
+                            "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" },
+                            "404": { "description": "Printer or template not found" },
+                            "415": { "description": "Wrong or missing `Content-Type`" },
+                            "422": { "description": "Malformed JSON, or `printer`/`data` missing" }
+                        }
+                    }
+                },
+                "/v1/jobs": {
+                    "get": {
+                        "summary": "List jobs",
+                        "responses": {
+                            "200": { "description": "Jobs, with a `count`" },
+                            "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
                         }
                     }
                 },
@@ -123,23 +161,43 @@ impl Default for OpenApiSpec {
                         "summary": "Get job status",
                         "responses": {
                             "200": { "description": "Job record" },
-                            "401": { "description": "Missing or invalid API key" }
+                            "400": { "description": "`id` is not an integer" },
+                            "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" },
+                            "404": { "description": "No such job" }
                         }
                     },
                     "delete": {
-                        "summary": "Cancel job",
+                        "summary": "Cancel a queued job",
+                        "description": "Only a `queued` job can be cancelled; the row ends `cancelled`.",
                         "responses": {
-                            "200": { "description": "Job cancelled" },
-                            "401": { "description": "Missing or invalid API key" }
+                            "204": { "description": "Cancelled (no body)" },
+                            "400": { "description": "`id` is not an integer, or the job is missing or not cancellable (already started or finished)" },
+                            "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
                         }
                     }
                 },
                 "/v1/jobs/{id}/retry": {
                     "post": {
-                        "summary": "Retry failed job",
+                        "summary": "Re-queue a failed or cancelled job",
+                        "description": "Only a terminal row (`failed`, `cancelled`) is re-queued — a running or queued row is refused, so the worker can never print twice. The worker prints the re-queued row.",
                         "responses": {
-                            "200": { "description": "Job retried" },
-                            "401": { "description": "Missing or invalid API key" }
+                            "200": { "description": "Re-queued: `{ job_id, status }`" },
+                            "400": { "description": "`id` is not an integer, or the job is not failed/cancelled" },
+                            "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" },
+                            "404": { "description": "No such job" }
+                        }
+                    }
+                },
+                "/v1/openapi.json": {
+                    "get": {
+                        "summary": "This document",
+                        "responses": {
+                            "200": { "description": "The OpenAPI description of this API" },
+                            "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
                         }
                     }
                 }

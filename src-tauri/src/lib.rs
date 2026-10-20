@@ -8,11 +8,10 @@ pub mod queue;
 pub mod readme;
 pub mod render;
 pub mod transport;
+pub mod worker;
 
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
-use tauri_plugin_sql::Migration;
-use tauri_plugin_sql::MigrationKind;
 
 pub use db::DbState;
 pub use error::{AppError, AppResult};
@@ -40,55 +39,43 @@ pub fn run() {
         )
         .init();
 
-    let migrations = vec![Migration {
-        version: 1,
-        description: "initial_schema",
-        sql: include_str!("db/schema.sql"),
-        kind: MigrationKind::Up,
-    }];
-
     tauri::Builder::default()
-        .plugin(
-            tauri_plugin_sql::Builder::default()
-                .add_migrations("sqlite:printninja.db", migrations)
-                .build(),
-        )
         .setup(|app| {
             let db_path = app.path().app_data_dir()?.join("printninja.db");
             if let Some(parent) = db_path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
 
-            // Eager rusqlite schema + lazy tauri-plugin-sql migrations.
-            // The plugin migrates on first `get` (lazy), but `rusqlite`
-            // commands need tables immediately on setup. `IF NOT EXISTS` in
-            // `schema.sql` makes the double-apply safe.
-            let mut conn = rusqlite::Connection::open(&db_path)?;
-            conn.execute_batch(include_str!("db/schema.sql"))?;
-            db::ensure_v2_schema(&mut conn)?;
-            drop(conn);
-
+            // One schema path (P11): `Database::open` applies `schema.sql`
+            // and the guarded migrations itself, so nothing else (plugin,
+            // tests, setup) may apply schema on its own. It also enables WAL
+            // and a busy timeout on the one reused connection.
             let db_url = format!("sqlite:{}", db_path.display());
-            app.manage(Arc::new(Mutex::new(db::Database { url: db_url })));
+            let database = db::Database::open(&db_url)?;
+            let db_state: DbState = Arc::new(Mutex::new(database));
+            app.manage(db_state.clone());
 
             // One shared print queue for the whole app, so the Tauri command
             // handlers, the REST API routes, and batch jobs all serialise
             // per printer instead of interleaving bytes on a thermal head.
-            let (queue, mut rx) = queue::PrintQueue::new();
-            app.manage(queue);
+            let queue = queue::PrintQueue::new();
+            app.manage(queue.clone());
 
-            // `PrintQueue::submit` is an admission gate and fails with
-            // "channel closed" as soon as the receiver is dropped. The old
-            // `_rx` binding was dropped at the end of this closure, so every
-            // print was rejected. Nothing consumes jobs from the channel yet
-            // (sending happens inline under the per-printer permit), so keep
-            // the receiver alive and drain it. Without a drain the channel
-            // would also fill up after QUEUE_CAPACITY jobs and block submits.
-            tauri::async_runtime::spawn(async move {
-                while let Some(job) = rx.recv().await {
-                    tracing::debug!(job_id = %job.job_id, printer = %job.printer_id, "queue job admitted");
-                }
-            });
+            // One worker consumes the queued rows reprint, retry, batch and
+            // `POST /v1/print/batch` write (P3). It replaced a channel whose
+            // receiver only logged what it admitted (P8): the database is
+            // the queue, the worker is the consumer, and `queue.kick()`
+            // wakes it the moment rows appear.
+            let cache_dir = app.path().app_cache_dir()?;
+            // Profiles left in the cache dir by earlier runs (a render killed
+            // mid-flight) carry certificate material that looked like the app
+            // wrote a `.pem` file. Nothing is in flight yet — the worker
+            // spawns below — so stale ones can go now.
+            render::sweep_leftover_edge_profiles(
+                &cache_dir,
+                std::time::Duration::from_secs(60 * 30),
+            );
+            worker::spawn(db_state, queue, cache_dir);
             Ok(())
         })
         .invoke_handler(with_ipc_logging(tauri::generate_handler![

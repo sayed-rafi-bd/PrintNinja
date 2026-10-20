@@ -2,7 +2,7 @@
 name = "printninja-server"
 version = "0.1.0"
 edition = "2021"
-description = "PrintNinja share service (Turso-backed)"
+description = "PrintNinja share service (SQLite-backed)"
 
 [[bin]]
 name = "printninja-server"

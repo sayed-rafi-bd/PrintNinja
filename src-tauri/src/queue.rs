@@ -1,4 +1,4 @@
-//! Print queue: per-printer serialisation and job admission.
+//! Print queue: per-printer serialisation plus worker wake-ups.
 //!
 //! # Why a queue at all
 //!
@@ -8,7 +8,7 @@
 //! printer must be serialised behind that printer's semaphore.
 //!
 //! Jobs to *different* printers must still run in parallel, which is why the
-//! semaphores are keyed by printer id rather than being a single global lock.
+//! semaphores are keyed by printer rather than being a single global lock.
 //!
 //! # Why `&self` everywhere
 //!
@@ -18,90 +18,64 @@
 //! to share between the Tauri command handlers, the REST API routes, and a
 //! background worker. The map now lives behind an `Arc<Mutex<..>>` so the
 //! whole queue is `Clone` + `Send` + `Sync` and every method takes `&self`.
+//!
+//! # What replaced the channel (Phase 0, P8)
+//!
+//! The queue used to own an mpsc channel whose receiver only logged the jobs
+//! it admitted: `submit` was back-pressure theatre, because nothing was ever
+//! consumed from it. Queued work now lives in the database — a row with
+//! `status = 'queued'` — and [`crate::worker::Worker`] is the one place that
+//! consumes it. What the queue keeps is the part that was always real (the
+//! per-printer semaphores, now also bounding global in-flight sends) plus
+//! the one thing a database queue still needs from a shared object: a way to
+//! wake the worker the moment rows appear.
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::{mpsc, Mutex, Semaphore};
+use tokio::sync::{Mutex, Notify, Semaphore};
 
-/// Upper bound on queued jobs before `submit` starts applying back-pressure.
-pub const QUEUE_CAPACITY: usize = 100;
+/// Upper bound on sends in flight across all printers. Two jobs for the
+/// same printer are already serialised by that printer's semaphore; this
+/// keeps a burst of prints (a big batch drained at once) from growing
+/// without limit.
+pub const MAX_IN_FLIGHT_SENDS: usize = 100;
 
-/// How long `submit` waits for room in the channel before giving up.
-const SUBMIT_TIMEOUT_SECS: u64 = 30;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct QueueJob {
-    pub job_id: String,
-    pub printer_id: String,
-    pub data: Vec<u8>,
-    pub mime_type: String,
-    pub copies: u32,
-}
-
-/// Per-printer serialisation plus a bounded admission channel.
+/// Per-printer serialisation, a global in-flight bound, and a wake-up
+/// channel for the print worker.
 ///
-/// Clone is cheap: every clone shares the same semaphore map and the same
-/// channel, so all senders observe the same queue depth.
+/// Clone is cheap: every clone shares the same semaphore map, the same
+/// in-flight budget and the same wake-up target.
 #[derive(Clone)]
 pub struct PrintQueue {
     semaphores: Arc<Mutex<HashMap<String, Arc<Semaphore>>>>,
-    tx: mpsc::Sender<QueueJob>,
-    submit_timeout: Arc<Duration>,
+    in_flight: Arc<Semaphore>,
+    work: Arc<Notify>,
 }
 
 impl std::fmt::Debug for PrintQueue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PrintQueue")
-            .field("capacity", &QUEUE_CAPACITY)
+            .field("max_in_flight", &MAX_IN_FLIGHT_SENDS)
             .finish_non_exhaustive()
     }
 }
 
 impl PrintQueue {
-    pub fn new() -> (Self, mpsc::Receiver<QueueJob>) {
-        Self::build(QUEUE_CAPACITY, Duration::from_secs(SUBMIT_TIMEOUT_SECS))
-    }
-
-    /// Build a queue with a custom capacity and back-pressure timeout.
-    ///
-    /// Exposed so tests can exercise the "queue is full" path without
-    /// waiting out the production timeout.
-    pub fn build(capacity: usize, submit_timeout: Duration) -> (Self, mpsc::Receiver<QueueJob>) {
-        let (tx, rx) = mpsc::channel(capacity);
-        let queue = Self {
+    pub fn new() -> Self {
+        Self {
             semaphores: Arc::new(Mutex::new(HashMap::new())),
-            tx,
-            submit_timeout: Arc::new(submit_timeout),
-        };
-        (queue, rx)
-    }
-
-    /// Enqueue a job.
-    ///
-    /// Applies back-pressure rather than blocking forever: if the channel is
-    /// full for longer than the submit timeout this fails instead of parking
-    /// a Tauri command task indefinitely.
-    pub async fn submit(&self, job: QueueJob) -> Result<(), String> {
-        let job_id = job.job_id.clone();
-        match tokio::time::timeout(*self.submit_timeout, self.tx.send(job)).await {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(e)) => Err(format!("Queue rejected job {job_id}: {e}")),
-            Err(_) => Err(format!(
-                "Queue is full ({} jobs); job {job_id} timed out waiting for room",
-                self.tx.max_capacity()
-            )),
+            in_flight: Arc::new(Semaphore::new(MAX_IN_FLIGHT_SENDS)),
+            work: Arc::new(Notify::new()),
         }
     }
 
-    /// Jobs waiting to be picked up by a worker.
-    pub fn pending(&self) -> usize {
-        self.tx.max_capacity() - self.tx.capacity()
-    }
-
-    /// True once every receiver has been dropped.
-    pub fn is_closed(&self) -> bool {
-        self.tx.is_closed()
+    /// The key a printer's permit is stored under.
+    ///
+    /// Case- and padding-insensitive (P8): "Desk" and "desk" are one
+    /// physical printer and must share one lock, exactly like the printer
+    /// lookup itself, which is `COLLATE NOCASE`.
+    fn printer_key(printer_id: &str) -> String {
+        printer_id.trim().to_ascii_lowercase()
     }
 
     /// The permit gate for a printer, created on first use.
@@ -112,28 +86,50 @@ impl PrintQueue {
     /// the serialisation actually work.
     pub async fn semaphore(&self, printer_id: &str) -> Arc<Semaphore> {
         let mut map = self.semaphores.lock().await;
-        map.entry(printer_id.to_string())
+        map.entry(Self::printer_key(printer_id))
             .or_insert_with(|| Arc::new(Semaphore::new(1)))
             .clone()
     }
 
-    /// Run `f` while holding `printer_id`'s permit.
+    /// Run `f` while holding the printer's permit and one slot of the global
+    /// in-flight budget.
     ///
     /// This is the API callers should use: it makes it impossible to send
     /// without serialising, because you cannot get at the printer any other
-    /// way from inside the queue.
+    /// way from inside the queue. Permits are always acquired in one order —
+    /// global, then per-printer — so two held permits can never deadlock.
     pub async fn with_permit<F, T>(&self, printer_id: &str, f: F) -> Result<T, String>
     where
         F: std::future::Future<Output = Result<T, String>>,
     {
+        let global = self
+            .in_flight
+            .acquire()
+            .await
+            .map_err(|e| format!("Print queue closed: {e}"))?;
         let sem = self.semaphore(printer_id).await;
-        let permit = sem
+        let printer = sem
             .acquire()
             .await
             .map_err(|e| format!("Printer semaphore closed for {printer_id}: {e}"))?;
         let out = f.await;
-        drop(permit);
+        drop(printer);
+        drop(global);
         out
+    }
+
+    /// Wake the worker: rows were queued (or re-queued) in the database.
+    ///
+    /// `Notify` stores one permit when no worker is waiting, so a wake that
+    /// lands mid-drain is not lost — the worker scans the queue when it next
+    /// waits.
+    pub fn kick(&self) {
+        self.work.notify_one();
+    }
+
+    /// Wait for the next [`Self::kick`].
+    pub async fn wait_for_work(&self) {
+        self.work.notified().await;
     }
 
     /// Number of printers currently tracked. Exposed for tests/metrics.
@@ -144,7 +140,7 @@ impl PrintQueue {
 
 impl Default for PrintQueue {
     fn default() -> Self {
-        Self::new().0
+        Self::new()
     }
 }
 
@@ -153,44 +149,12 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc as StdArc;
-
-    fn job(id: &str, printer: &str) -> QueueJob {
-        QueueJob {
-            job_id: id.into(),
-            printer_id: printer.into(),
-            data: vec![1, 2, 3],
-            mime_type: "application/pdf".into(),
-            copies: 1,
-        }
-    }
-
-    #[test]
-    fn submit_then_receive() {
-        runtime().block_on(async {
-            let (q, mut rx) = PrintQueue::new();
-            q.submit(job("a", "p1")).await.unwrap();
-            let got = rx.recv().await.unwrap();
-            assert_eq!(got.job_id, "a");
-            assert_eq!(got.printer_id, "p1");
-        });
-    }
-
-    #[test]
-    fn pending_tracks_depth() {
-        runtime().block_on(async {
-            let (q, mut rx) = PrintQueue::new();
-            assert_eq!(q.pending(), 0);
-            q.submit(job("a", "p1")).await.unwrap();
-            assert_eq!(q.pending(), 1);
-            let _ = rx.recv().await;
-            assert_eq!(q.pending(), 0);
-        });
-    }
+    use std::time::Duration;
 
     #[test]
     fn semaphore_is_stable_per_printer() {
         runtime().block_on(async {
-            let (q, _rx) = PrintQueue::new();
+            let q = PrintQueue::new();
             let a = q.semaphore("p1").await;
             let b = q.semaphore("p1").await;
             // Same Arc => a permit held via `a` blocks a caller holding `b`.
@@ -199,10 +163,26 @@ mod tests {
         });
     }
 
+    /// P8: the permit key used to be the printer name as typed, so "Desk"
+    /// and "desk" got separate locks and two jobs could overlap on one
+    /// printer. Lookups ignore case; the queue key must too.
+    #[test]
+    fn the_printer_key_ignores_case_and_padding() {
+        runtime().block_on(async {
+            let q = PrintQueue::new();
+            let a = q.semaphore("Desk").await;
+            let b = q.semaphore("desk").await;
+            let c = q.semaphore("  DESK  ").await;
+            assert!(Arc::ptr_eq(&a, &b), "Desk and desk share one lock");
+            assert!(Arc::ptr_eq(&a, &c), "padding is trimmed");
+            assert_eq!(q.tracked_printers().await, 1);
+        });
+    }
+
     #[test]
     fn different_printers_get_different_semaphores() {
         runtime().block_on(async {
-            let (q, _rx) = PrintQueue::new();
+            let q = PrintQueue::new();
             let a = q.semaphore("p1").await;
             let b = q.semaphore("p2").await;
             assert!(!Arc::ptr_eq(&a, &b));
@@ -215,7 +195,7 @@ mod tests {
     /// concurrent tasks, each getting the same gate.
     #[tokio::test]
     async fn semaphore_is_concurrency_safe() {
-        let (q, _rx) = PrintQueue::new();
+        let q = PrintQueue::new();
         let handles: Vec<_> = (0..16)
             .map(|_| {
                 let q = q.clone();
@@ -237,7 +217,7 @@ mod tests {
     /// overlap, or the bytes interleave and the label is garbled.
     #[tokio::test]
     async fn jobs_to_one_printer_are_serialised() {
-        let (q, _rx) = PrintQueue::new();
+        let q = PrintQueue::new();
         let inflight = StdArc::new(AtomicUsize::new(0));
         let peak = StdArc::new(AtomicUsize::new(0));
 
@@ -270,7 +250,7 @@ mod tests {
     /// Serialising must not turn the queue into a global lock.
     #[tokio::test]
     async fn jobs_to_different_printers_run_in_parallel() {
-        let (q, _rx) = PrintQueue::new();
+        let q = PrintQueue::new();
         let barrier = StdArc::new(tokio::sync::Barrier::new(2));
 
         let mut tasks = Vec::new();
@@ -298,7 +278,7 @@ mod tests {
 
     #[tokio::test]
     async fn permit_is_released_when_the_work_fails() {
-        let (q, _rx) = PrintQueue::new();
+        let q = PrintQueue::new();
         let first = q.with_permit("p1", async {
             Err::<(), String>("printer offline".to_string())
         });
@@ -310,38 +290,44 @@ mod tests {
             .unwrap();
     }
 
-    #[tokio::test]
-    async fn submit_reports_a_closed_queue() {
-        let (q, rx) = PrintQueue::new();
-        drop(rx);
-        assert!(q.is_closed());
-        let err = q.submit(job("a", "p1")).await.unwrap_err();
-        assert!(err.contains("rejected"), "{err}");
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn submit_times_out_instead_of_hanging_forever() {
-        // A 1-slot channel with a live-but-not-draining receiver: the second
-        // submit blocks. It must give up with a clear error, not park a
-        // Tauri command forever.
-        let (q, _rx) = PrintQueue::build(1, Duration::from_millis(200));
-        q.submit(job("first", "p1")).await.unwrap();
-
-        let err = q
-            .submit(job("second", "p1"))
-            .await
-            .expect_err("must not block past the submit timeout");
-        assert!(err.contains("Queue is full"), "{err}");
-        assert!(err.contains("second"), "{err}");
-    }
-
+    /// Clones are one queue: they share printer gates and the wake-up, so a
+    /// kick from any clone wakes the worker waiting on another.
     #[tokio::test]
     async fn clone_shares_one_queue() {
-        let (q, mut rx) = PrintQueue::new();
-        let q2 = q.clone();
-        q2.submit(job("from-clone", "p1")).await.unwrap();
-        assert_eq!(q.pending(), 1);
-        assert_eq!(rx.recv().await.unwrap().job_id, "from-clone");
+        let q1 = PrintQueue::new();
+        let q2 = q1.clone();
+
+        let a = q1.semaphore("p1").await;
+        let b = q2.semaphore("p1").await;
+        assert!(Arc::ptr_eq(&a, &b), "clones share printer gates");
+        assert_eq!(q2.tracked_printers().await, 1);
+
+        let waiting = q2.wait_for_work();
+        q1.kick();
+        tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .expect("a kick from any clone wakes the worker");
+    }
+
+    /// A kick wakes a waiting worker — and one that lands while the worker
+    /// is busy is not lost, because `Notify` keeps a permit.
+    #[tokio::test]
+    async fn a_kick_wakes_the_worker() {
+        let q = PrintQueue::new();
+        let waiting = q.wait_for_work();
+        q.kick();
+        tokio::time::timeout(Duration::from_secs(1), waiting)
+            .await
+            .expect("a kick wakes a waiter");
+    }
+
+    #[tokio::test]
+    async fn a_kick_that_lands_early_is_not_lost() {
+        let q = PrintQueue::new();
+        q.kick();
+        tokio::time::timeout(Duration::from_secs(1), q.wait_for_work())
+            .await
+            .expect("a stored permit wakes the next waiter");
     }
 
     /// Minimal single-threaded runtime for the `#[test]` cases that need to

@@ -1,5 +1,7 @@
 use crate::db::DbState;
 use crate::error::{AppError, AppResult};
+use crate::queue::PrintQueue;
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -25,19 +27,17 @@ pub struct PrintJob {
     pub duration_ms: Option<i64>,
 }
 
+// The command bodies live in `*_conn` functions that take the shared
+// connection, so integration tests can call them directly — the IPC wrappers
+// only take the lock (Phase 0: P1's `WHERE`-after-`ORDER BY` bug survived
+// because no test could reach these functions).
+
 #[tauri::command]
 pub fn list_jobs(db: State<DbState>) -> AppResult<Vec<PrintJob>> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
-
-    let mut stmt = conn.prepare(SELECT_JOB_COLUMNS)?;
-    let jobs = stmt
-        .query_map([], map_job)?
-        .collect::<Result<Vec<_>, _>>()?;
-
-    Ok(jobs)
+    list_jobs_conn(guard.connection())
 }
 
 #[tauri::command]
@@ -45,43 +45,89 @@ pub fn get_job(db: State<DbState>, id: i64) -> AppResult<PrintJob> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    get_job_conn(guard.connection(), id)
+}
 
-    let sql = format!("{} WHERE id = ?1", SELECT_JOB_COLUMNS);
-    let job = conn.query_row(&sql, [id], map_job)?;
-
+#[tauri::command]
+pub fn reprint_job(db: State<DbState>, queue: State<PrintQueue>, id: i64) -> AppResult<PrintJob> {
+    let job = {
+        let guard = db
+            .lock()
+            .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+        reprint_job_conn(guard.connection(), id)?
+    };
+    // The clone is a `queued` row; wake the worker that prints it (P3).
+    queue.kick();
     Ok(job)
 }
 
 #[tauri::command]
-pub fn reprint_job(db: State<DbState>, id: i64) -> AppResult<PrintJob> {
+pub fn retry_job(db: State<DbState>, queue: State<PrintQueue>, id: i64) -> AppResult<PrintJob> {
+    let job = {
+        let guard = db
+            .lock()
+            .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+        retry_job_conn(guard.connection(), id)?
+    };
+    // The row is `queued` again; wake the worker that prints it (P3).
+    queue.kick();
+    Ok(job)
+}
+
+#[tauri::command]
+pub fn delete_job(db: State<DbState>, id: i64) -> AppResult<()> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    delete_job_conn(guard.connection(), id)
+}
 
-    // Reprint must clone the ORIGINAL job so the exact template version,
-    // settings and copies are reproduced (PLANNING.md 4).
+pub fn list_jobs_conn(conn: &Connection) -> AppResult<Vec<PrintJob>> {
+    // ORDER BY lives here, not in the shared column list: `get_job`,
+    // `reprint_job` and `retry_job` append `WHERE id = ?1`, which after an
+    // `ORDER BY` is a syntax error (P1).
+    let sql = format!("{} ORDER BY id DESC", SELECT_JOB_COLUMNS);
+    let mut stmt = conn.prepare(&sql)?;
+    let jobs = stmt
+        .query_map([], map_job)?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(jobs)
+}
+
+pub fn get_job_conn(conn: &Connection, id: i64) -> AppResult<PrintJob> {
     let sql = format!("{} WHERE id = ?1", SELECT_JOB_COLUMNS);
-    let original = conn.query_row(&sql, [id], map_job)?;
+    conn.query_row(&sql, [id], map_job).map_err(|e| match e {
+        // Consistent with retry_job/delete_job and the REST 404 (P1 follow-up).
+        rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Job {} not found", id)),
+        other => other.into(),
+    })
+}
 
+pub fn reprint_job_conn(conn: &Connection, id: i64) -> AppResult<PrintJob> {
+    // Reprint must clone the ORIGINAL job so the exact template version,
+    // settings and copies are reproduced (PLANNING.md 4). Read the original
+    // first: a missing one is a 404, and `INSERT .. SELECT` with no row
+    // would otherwise silently clone nothing.
+    let sql = format!("{} WHERE id = ?1", SELECT_JOB_COLUMNS);
+    let _original = conn.query_row(&sql, [id], map_job).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => AppError::NotFound(format!("Job {} not found", id)),
+        other => other.into(),
+    })?;
+
+    // Clone the row itself — including its stored input payload
+    // (`data_json`), which the worker replays when it prints the clone
+    // (P3). The fresh row is `queued`; nothing but the worker prints it.
     conn.execute(
         "INSERT INTO print_jobs
-           (batch_id, record_index, template_id, template_version_id, printer_id,
-            source, source_url, status, error, copies, settings_json, rendered_html,
-            idempotency_key, is_test)
-         VALUES (NULL, NULL, ?1, ?2, ?3, ?4, ?5, 'queued', NULL, ?6, ?7, ?8, NULL, ?9)",
-        rusqlite::params![
-            original.template_id,
-            original.template_version_id,
-            original.printer_id,
-            original.source,
-            original.source_url,
-            original.copies,
-            original.settings_json,
-            original.rendered_html,
-            original.is_test,
-        ],
+            (batch_id, record_index, template_id, template_version_id, printer_id,
+             source, source_url, status, error, copies, settings_json, rendered_html,
+             idempotency_key, is_test, data_json)
+         SELECT NULL, NULL, template_id, template_version_id, printer_id,
+                source, source_url, 'queued', NULL, copies, settings_json, rendered_html,
+                NULL, is_test, data_json
+         FROM print_jobs WHERE id = ?1",
+        [id],
     )?;
 
     let new_id = conn.last_insert_rowid();
@@ -89,13 +135,7 @@ pub fn reprint_job(db: State<DbState>, id: i64) -> AppResult<PrintJob> {
     Ok(conn.query_row(&sql, [new_id], map_job)?)
 }
 
-#[tauri::command]
-pub fn retry_job(db: State<DbState>, id: i64) -> AppResult<PrintJob> {
-    let guard = db
-        .lock()
-        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
-
+pub fn retry_job_conn(conn: &Connection, id: i64) -> AppResult<PrintJob> {
     let exists: i64 =
         conn.query_row("SELECT COUNT(*) FROM print_jobs WHERE id = ?1", [id], |r| {
             r.get(0)
@@ -104,25 +144,28 @@ pub fn retry_job(db: State<DbState>, id: i64) -> AppResult<PrintJob> {
         return Err(AppError::NotFound(format!("Job {} not found", id)));
     }
 
-    conn.execute(
+    // Only a terminal row may be re-queued. Re-queuing a `printing` row
+    // would let the worker claim it while the direct pipeline still runs
+    // it — one physical print for two owners — and re-queuing a `queued`
+    // row would print it twice. A finished row reprints instead (P3).
+    let affected = conn.execute(
         "UPDATE print_jobs
          SET status = 'queued', error = NULL, started_at = NULL,
              finished_at = NULL, duration_ms = NULL
-         WHERE id = ?1",
+         WHERE id = ?1 AND status IN ('failed', 'cancelled')",
         [id],
     )?;
+    if affected == 0 {
+        return Err(AppError::Validation(
+            "Only a failed or cancelled job can be retried; a finished job reprints instead".into(),
+        ));
+    }
 
     let sql = format!("{} WHERE id = ?1", SELECT_JOB_COLUMNS);
     Ok(conn.query_row(&sql, [id], map_job)?)
 }
 
-#[tauri::command]
-pub fn delete_job(db: State<DbState>, id: i64) -> AppResult<()> {
-    let guard = db
-        .lock()
-        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
-
+pub fn delete_job_conn(conn: &Connection, id: i64) -> AppResult<()> {
     let affected = conn.execute("DELETE FROM print_jobs WHERE id = ?1", [id])?;
     if affected == 0 {
         return Err(AppError::NotFound(format!("Job {} not found", id)));
@@ -134,8 +177,7 @@ const SELECT_JOB_COLUMNS: &str = "SELECT id, batch_id, record_index, template_id
             template_version_id, printer_id, source, source_url, status, error,
             copies, settings_json, rendered_html, idempotency_key, is_test,
             started_at, finished_at, duration_ms
-     FROM print_jobs
-     ORDER BY id DESC";
+     FROM print_jobs";
 
 fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrintJob> {
     Ok(PrintJob {

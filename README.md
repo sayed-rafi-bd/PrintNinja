@@ -22,14 +22,14 @@ Silent print for Windows and Android — design HTML templates, fetch JSON data,
 |---|---|
 | App shell | Tauri 2 (Windows + Android) |
 | UI | React 18 + Vite 6 + TypeScript 5 + Tailwind 3 + shadcn/ui + Zustand + TanStack Query/Table, IBM Plex via `@fontsource` |
-| DB | SQLite (`tauri-plugin-sql` migrations + `rusqlite` commands) — 11 tables |
+| DB | SQLite (`tauri-plugin-sql` migrations + `rusqlite` commands) — 9 tables |
 | Template | Handlebars (singleton registry), each template version stores its own Tailwind CSS (`compiled_css`), compiled in the app by Tailwind v4 `compile()` from the classes the template uses; `buildTemplateCss` inlines it after a small base layer |
 | Barcodes | `bwip-js` `toSVG()` (inline SVG, no canvas data-URI) |
 | Markdown | `react-markdown` + `remark-gfm` (no `rehype-raw` → XSS as text, links `http/https/mailto` only) |
 | Sanitize | `sanitize.ts` + `handlebars.rs` strip `<script>`/`on*`, `find_remote_refs` → `data: URIs`, CSP `default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:`, `sandbox=""` iframes |
-| API | `axum` + `tower-http` (local `127.0.0.1:17717` + share `server/` at `share_service_url`) |
+| API | `axum` + `tower-http` (local `127.0.0.1:17717` — API-key scopes and, when set, an IP allowlist are enforced — plus share `server/` at `share_service_url`) |
 | Share service | `server/` (`axum`, `rusqlite`/SQLite, `scrypt` + sha256 sessions, throttle) |
-| Secrets | `keyring` (redacted from `print_jobs` / diagnostics) |
+| Secrets | No keyring: the share-session token is plain text in the local `settings` table (moving it to an OS key store is a follow-up). `rendered_html` is secret-redacted before it is stored in `print_jobs` |
 | Android | Kotlin plugins: WebView → PDF, `UsbManager`, RFCOMM |
 
 ## Architecture
@@ -47,7 +47,7 @@ Batch ─────┘
 
 ## Data Model
 
-App SQLite (`src-tauri/src/db/schema.sql` + `db::ensure_v2_schema`): `printers` · `templates` (`readme`, `summary`, `remote_id` UUID, `published_at`, `origin` `own`/`saved`, `origin_owner`, `withdrawn`, `idx_templates_remote`) + `template_versions` · `sample_datasets` · `fonts` · `printer_profiles` · `presets` · `batches` · `print_jobs` · `api_clients` · `settings` (`share_service_url`, `share_session_token`, `onboarding_done` etc.).
+App SQLite (`src-tauri/src/db/schema.sql` + `db::ensure_v2_schema`): `printers` · `templates` (`readme`, `summary`, `remote_id` UUID, `published_at`, `origin` `own`/`saved`, `origin_owner`, `withdrawn`, `idx_templates_remote`) + `template_versions` · `fonts` · `printer_profiles` · `batches` · `print_jobs` · `api_clients` · `settings` (`share_service_url`, `share_session_token`, `onboarding_done` etc.). Two tables the code never used — `sample_datasets` and `presets` — are gone; an upgrade drops them (they were always empty). The `retention_days` preference is stored but not implemented: history is never pruned.
 
 Server SQLite file (`server/src/db.rs`, path from `DATABASE_URL`): `users` (`handle` `UNIQUE COLLATE NOCASE`, `password_hash` scrypt) · `sessions` (`token_hash` sha256, `expires_at`) · `templates` (`id` UUID PK, `owner_id`, `name`, `summary`, `page_w_mm`, `page_h_mm`, `language`, `body` 512K, `readme` 64K, `use_count`, `published_at`, `updated_at`, `idx_tpl_owner/updated`) · `saved_templates` (`user_id`, `template_id` PK).
 

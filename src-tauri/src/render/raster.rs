@@ -133,3 +133,29 @@ pub fn dot_width_for_paper(paper_mm: usize) -> usize {
         _ => 384,
     }
 }
+
+/// Convert a physical dimension to printer dots at `dpi` (P4).
+///
+/// The browser is asked to rasterize at exactly this resolution, so 1 px
+/// = 1 dot on the head.
+pub fn dots_for_mm(mm: f64, dpi: u32) -> usize {
+    ((mm * f64::from(dpi)) / 25.4).round().max(1.0) as usize
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// P4: 40 × 30 mm at the common 203 dpi thermal head is 320 × 240
+    /// dots (319.69 × 239.76 rounded) — what the dispatch asks the
+    /// rasterizer for.
+    #[test]
+    fn dots_for_mm_matches_thermal_head_resolutions() {
+        assert_eq!(dots_for_mm(40.0, 203), 320);
+        assert_eq!(dots_for_mm(30.0, 203), 240);
+        assert_eq!(dots_for_mm(58.0, 203), 464);
+        assert_eq!(dots_for_mm(100.0, 300), 1181);
+        // Degenerate sizes still produce one dot, never zero.
+        assert_eq!(dots_for_mm(0.0, 203), 1);
+    }
+}

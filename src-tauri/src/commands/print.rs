@@ -65,6 +65,65 @@ pub struct PrintResponse {
     pub error: Option<String>,
 }
 
+/// The render stage of the print pipeline, as a trait.
+///
+/// Integration tests substitute it so a job can reach the real queue permit,
+/// transport and history without a browser, or hold mid-render to observe the
+/// `printing` row (P7, P15). Production passes the [`PdfRenderer`]; nothing
+/// else in the pipeline is substitutable.
+#[async_trait::async_trait]
+pub trait JobRenderer: Send + Sync {
+    async fn render(
+        &self,
+        final_html: &str,
+        w_mm: f64,
+        h_mm: f64,
+        orientation: &str,
+    ) -> anyhow::Result<Vec<u8>>;
+
+    /// Rasterize `final_html` at exactly `w_px` × `h_px` dots (P4), for
+    /// printers that speak a command language instead of taking a PDF.
+    ///
+    /// The default refuses: a renderer that cannot rasterize must fail the
+    /// job loudly, never fall back to PDF bytes on a printer that would drop
+    /// them. [`PdfRenderer`] overrides this with the browser-backed
+    /// screenshot path; integration tests can substitute their own.
+    async fn rasterize(
+        &self,
+        final_html: &str,
+        w_px: usize,
+        h_px: usize,
+    ) -> anyhow::Result<crate::render::raster::RasterImage> {
+        let _ = (final_html, w_px, h_px);
+        Err(anyhow::anyhow!(
+            "this renderer cannot rasterize HTML to dots; command-language printers \
+             need the browser-backed renderer"
+        ))
+    }
+}
+
+#[async_trait::async_trait]
+impl JobRenderer for PdfRenderer {
+    async fn render(
+        &self,
+        final_html: &str,
+        w_mm: f64,
+        h_mm: f64,
+        orientation: &str,
+    ) -> anyhow::Result<Vec<u8>> {
+        self.html_to_pdf(final_html, w_mm, h_mm, orientation).await
+    }
+
+    async fn rasterize(
+        &self,
+        final_html: &str,
+        w_px: usize,
+        h_px: usize,
+    ) -> anyhow::Result<crate::render::raster::RasterImage> {
+        self.html_to_raster(final_html, w_px, h_px).await
+    }
+}
+
 /// Load template HTML/CSS for a job (pinned version, or current version).
 /// The tuple is `(html, css, compiled_css, version_id, width_mm, height_mm)`.
 fn resolve_template(
@@ -247,6 +306,18 @@ pub async fn run_print(
     queue: &PrintQueue,
     req: PrintRequest,
 ) -> AppResult<PrintResponse> {
+    let renderer = PdfRenderer::new(cache_dir.to_path_buf());
+    run_print_with(cache_dir, db, queue, req, &renderer).await
+}
+
+/// The pipeline with the render step injected (see [`JobRenderer`]).
+pub async fn run_print_with(
+    cache_dir: &std::path::Path,
+    db: &DbState,
+    queue: &PrintQueue,
+    req: PrintRequest,
+    renderer: &dyn JobRenderer,
+) -> AppResult<PrintResponse> {
     let start = Instant::now();
 
     if req.printer_name.trim().is_empty() {
@@ -255,14 +326,145 @@ pub async fn run_print(
     let copies = req.copies.unwrap_or(1).max(1);
 
     // ── 1. Resolve content ───────────────────────────────────────────
-    let (mut html, css, template_version_id, mut w_mm, mut h_mm) = match req.template_id {
+    let content = resolve_content(db, &req)?;
+
+    // P15: the row exists before anything that can take time, in `printing`
+    // state with the real start time. Later stages only update it, so a
+    // running job is visible in History and every failure path — fetch,
+    // render, send — leaves a row that already carries its own id.
+    let job_id = begin_job(
+        db,
+        &req,
+        content.template_version_id,
+        copies as i64,
+        (content.w_mm, content.h_mm),
+    )?;
+
+    run_stages(
+        cache_dir,
+        db,
+        queue,
+        req,
+        renderer,
+        JobRun {
+            job_id,
+            started: start,
+        },
+        content,
+    )
+    .await
+}
+
+/// Run a row the worker already claimed (`queued` → `printing`) — the P3
+/// path that reprint, retry, batch and `POST /v1/print/batch` all queue
+/// into.
+///
+/// The request comes from the row, not from a caller: the printer it was
+/// queued for, the pinned template version, the copies and settings, and
+/// the payload in `data_json`. A row that also carries `rendered_html`
+/// replays that HTML exactly as it printed the first time; a row with a
+/// template re-renders it from the stored payload. Every failure ends the
+/// row `failed` with the reason — a claimed row is never left `printing`.
+pub async fn run_claimed_job(
+    cache_dir: &std::path::Path,
+    db: &DbState,
+    queue: &PrintQueue,
+    job_id: i64,
+    renderer: &dyn JobRenderer,
+) -> AppResult<PrintResponse> {
+    let start = Instant::now();
+
+    let (req, replay) = match load_job_request(db, job_id) {
+        Ok(v) => v,
+        Err(e) => {
+            close_job(db, job_id, "failed", Some(e.to_string()), "", &[], 0)?;
+            return Ok(PrintResponse {
+                success: false,
+                job_id: job_id.to_string(),
+                duration_ms: 0,
+                error: Some(e.to_string()),
+            });
+        }
+    };
+
+    let content = match replay {
+        Some(rendered) => ResolvedContent {
+            html: rendered,
+            css: String::new(),
+            w_mm: req.page_width_mm.unwrap_or(100.0),
+            h_mm: req.page_height_mm.unwrap_or(150.0),
+            template_version_id: req.template_version_id,
+            render_template: false,
+        },
+        None => match resolve_content(db, &req) {
+            Ok(c) => c,
+            Err(e) => {
+                let msg = e.to_string();
+                close_job(
+                    db,
+                    job_id,
+                    "failed",
+                    Some(msg.clone()),
+                    "",
+                    &secrets_of(&req),
+                    0,
+                )?;
+                return Ok(PrintResponse {
+                    success: false,
+                    job_id: job_id.to_string(),
+                    duration_ms: 0,
+                    error: Some(msg),
+                });
+            }
+        },
+    };
+
+    run_stages(
+        cache_dir,
+        db,
+        queue,
+        req,
+        renderer,
+        JobRun {
+            job_id,
+            started: start,
+        },
+        content,
+    )
+    .await
+}
+
+/// The document a job prints: markup, stylesheet, page size — plus which
+/// template version produced it and whether the engine still has to run.
+/// `render_template` is false for a replayed job (P3): its HTML already
+/// went through the engine when it first printed, and running it again
+/// could mangle literal braces that came from the data.
+struct ResolvedContent {
+    html: String,
+    css: String,
+    w_mm: f64,
+    h_mm: f64,
+    template_version_id: Option<i64>,
+    render_template: bool,
+}
+
+/// One job's run: the row it writes (P15) and when it started.
+struct JobRun {
+    job_id: i64,
+    started: Instant,
+}
+
+/// Step 1: the document to print — the pinned template version's HTML and
+/// CSS, or the request's own HTML — plus the page size it prints at.
+fn resolve_content(db: &DbState, req: &PrintRequest) -> AppResult<ResolvedContent> {
+    let (html, css, template_version_id, mut w_mm, mut h_mm) = match req.template_id {
         Some(tid) => {
             let guard = db
                 .lock()
                 .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-            let conn = guard.connection()?;
+            let conn = guard.connection();
             let (h, c, compiled, vid, tw, th) =
-                resolve_template(&conn, tid, req.template_version_id)?;
+                resolve_template(conn, tid, req.template_version_id)?;
             (h, build_template_css(&c, &compiled), Some(vid), tw, th)
         }
         None => (
@@ -281,6 +483,41 @@ pub async fn run_print(
         }
     }
 
+    Ok(ResolvedContent {
+        html,
+        css,
+        w_mm,
+        h_mm,
+        template_version_id,
+        render_template: true,
+    })
+}
+
+/// Everything after the job row exists: fetch, template render, layout,
+/// PDF, the per-printer permit, the send and the history write.
+async fn run_stages(
+    cache_dir: &std::path::Path,
+    db: &DbState,
+    queue: &PrintQueue,
+    req: PrintRequest,
+    renderer: &dyn JobRenderer,
+    run: JobRun,
+    content: ResolvedContent,
+) -> AppResult<PrintResponse> {
+    let JobRun {
+        job_id,
+        started: start,
+    } = run;
+    let ResolvedContent {
+        mut html,
+        css,
+        w_mm,
+        h_mm,
+        render_template,
+        ..
+    } = content;
+    let copies = req.copies.unwrap_or(1).max(1);
+
     // Fetch live data when a URL is supplied and test mode is off.
     let mut fetched: Option<serde_json::Value> = req.data.clone();
     if !req.test.unwrap_or(false) {
@@ -297,15 +534,16 @@ pub async fn run_print(
                 match crate::data::fetcher::DataFetcher::new().fetch(&opts).await {
                     Ok(v) => fetched = Some(v),
                     Err(e) => {
-                        record_job(
+                        // Nothing was rendered yet, so there is nothing to
+                        // replay: store empty HTML (P3) and fail the row.
+                        finish_job(
                             db,
-                            &req,
+                            job_id,
                             "failed",
                             Some(e.to_string()),
-                            &html,
-                            None,
-                            copies as i64,
-                            start,
+                            "",
+                            &req,
+                            start.elapsed().as_millis() as i64,
                         )?;
                         return Err(AppError::Internal(format!("Data fetch failed: {}", e)));
                     }
@@ -315,43 +553,107 @@ pub async fn run_print(
     }
 
     // ── 2. Template render ──────────────────────────────────────────
-    if let Some(data) = fetched {
+    // P14: always run the engine — with the job's data, or an empty context
+    // when it has none, exactly like the preview (handlebars.js). It used to
+    // be skipped without data and to swallow errors with `unwrap_or(html)`,
+    // printing the raw template source instead of failing. A replayed job is
+    // the exception: its HTML already went through the engine once.
+    if render_template {
+        let context = fetched.unwrap_or_else(|| serde_json::json!({}));
         let engine = TemplateEngine::new();
-        html = engine.render(&html, &data).unwrap_or(html);
+        html = match engine.render(&html, &context) {
+            Ok(rendered) => rendered,
+            Err(e) => {
+                let msg = format!("Template render failed: {e}");
+                // No rendered content to replay (P3): store none.
+                finish_job(
+                    db,
+                    job_id,
+                    "failed",
+                    Some(msg.clone()),
+                    "",
+                    &req,
+                    start.elapsed().as_millis() as i64,
+                )?;
+                return Ok(PrintResponse {
+                    success: false,
+                    job_id: job_id.to_string(),
+                    duration_ms: start.elapsed().as_millis(),
+                    error: Some(msg),
+                });
+            }
+        };
     }
 
     // ── 3. Layout ───────────────────────────────────────────────────
     let final_html = apply_layout(&html, &css, w_mm, h_mm, &req);
 
-    // ── 4. PDF ──────────────────────────────────────────────────────
+    // ── 4. Render ────────────────────────────────────────────────────
+    // What the printer takes is a property of its stored row: a PDF printer
+    // gets document bytes, a command-language printer (escpos/tspl/zpl/
+    // cpcl/raster) gets a raster rasterized at its head's own resolution
+    // and encoded for its dialect (P4). Look the row up *before* rendering:
+    // the language decides which renderer call is even made. A printer that
+    // is not in the DB still prints — language falls back to Pdf, exactly
+    // the pre-dispatch behaviour.
     std::fs::create_dir_all(cache_dir)
         .map_err(|e| AppError::Internal(format!("Cannot create {}: {e}", cache_dir.display())))?;
-    let renderer = PdfRenderer::new(cache_dir.to_path_buf());
-    let pdf_bytes = match renderer
-        .html_to_pdf(
-            &final_html,
-            w_mm,
-            h_mm,
-            req.orientation.as_deref().unwrap_or("portrait"),
-        )
-        .await
-    {
-        Ok(b) => b,
+    let printer = lookup_printer(db, &req.printer_name);
+    let language = printer
+        .as_ref()
+        .map_or(crate::transport::PrinterLanguage::Pdf, |p| {
+            crate::transport::parse_printer_language(&p.language)
+        });
+    // `printers.dpi` defaults to 203 (the common thermal head); the clamp
+    // only bites on a hand-edited row.
+    let dpi = printer
+        .as_ref()
+        .and_then(|p| p.dpi)
+        .unwrap_or(203)
+        .clamp(1, 1200) as u32;
+
+    let rendered: anyhow::Result<(Vec<u8>, &'static str)> = match language {
+        crate::transport::PrinterLanguage::Pdf => renderer
+            .render(
+                &final_html,
+                w_mm,
+                h_mm,
+                req.orientation.as_deref().unwrap_or("portrait"),
+            )
+            .await
+            .map(|b| (b, "application/pdf")),
+        ref lang => {
+            // 1 CSS px = 1 printer dot: ask for exactly the label's dots so
+            // nothing is resampled on the way to the head.
+            let (w_px, h_px) = (
+                crate::render::raster::dots_for_mm(w_mm, dpi),
+                crate::render::raster::dots_for_mm(h_mm, dpi),
+            );
+            renderer
+                .rasterize(&final_html, w_px, h_px)
+                .await
+                .and_then(|raster| {
+                    crate::transport::encode_for_language(lang, &raster, w_mm, h_mm, dpi)
+                        .map_err(|e| anyhow::anyhow!(e))
+                })
+        }
+    };
+    let (payload, mime_type) = match rendered {
+        Ok(v) => v,
         Err(e) => {
             let msg = e.to_string();
-            record_job(
+            finish_job(
                 db,
-                &req,
+                job_id,
                 "failed",
                 Some(msg.clone()),
                 &html,
-                None,
-                copies as i64,
-                start,
+                &req,
+                start.elapsed().as_millis() as i64,
             )?;
             return Ok(PrintResponse {
                 success: false,
-                job_id: String::new(),
+                job_id: job_id.to_string(),
                 duration_ms: start.elapsed().as_millis(),
                 error: Some(msg),
             });
@@ -359,18 +661,18 @@ pub async fn run_print(
     };
 
     // ── 5. Send ─────────────────────────────────────────────────────
-    // Resolve the stored printer row so the right transport is used and so
-    // the queue can serialise on a stable key. A printer that is not in the
-    // DB still prints, via the platform default.
-    let printer = lookup_printer(db, &req.printer_name);
-
-    let printer_type =
-        crate::transport::parse_printer_type(printer.as_ref().map_or("", |p| p.0.as_str()));
-    let address = printer.as_ref().map_or("", |p| p.1.as_str());
+    // The row resolved above also picks the transport and the queue key.
+    let printer_type = crate::transport::parse_printer_type(
+        printer.as_ref().map_or("", |p| p.printer_type.as_str()),
+    );
+    let address = printer.as_ref().map_or("", |p| p.address.as_str());
     tracing::info!(
         printer = %req.printer_name,
         ?printer_type,
+        ?language,
         %address,
+        dpi,
+        paper_width_mm = ?printer.as_ref().and_then(|p| p.paper_width_mm),
         found = printer.is_some(),
         "sending print job"
     );
@@ -381,18 +683,6 @@ pub async fn run_print(
     // unaffected — the semaphore is keyed per printer id.
     let result = queue
         .with_permit(&req.printer_name, async {
-            // Admit the job so a full queue reports back-pressure instead of
-            // silently dropping it.
-            queue
-                .submit(crate::queue::QueueJob {
-                    job_id: format!("pending-{}", uuid::Uuid::new_v4()),
-                    printer_id: req.printer_name.clone(),
-                    data: pdf_bytes.clone(),
-                    mime_type: "application/pdf".to_string(),
-                    copies,
-                })
-                .await?;
-
             // `copies` used to be ignored entirely: exactly one copy reached
             // the printer no matter what the operator selected.
             for copy in 0..copies {
@@ -403,8 +693,8 @@ pub async fn run_print(
                     crate::transport::RenderedJob {
                         job_id: format!("{}-{}", req.printer_name, copy + 1),
                         printer_id: req.printer_name.clone(),
-                        data: pdf_bytes.clone(),
-                        mime_type: "application/pdf".to_string(),
+                        data: payload.clone(),
+                        mime_type: mime_type.to_string(),
                         copies: 1,
                     },
                 )
@@ -431,36 +721,60 @@ pub async fn run_print(
     };
 
     // ── 6. History ──────────────────────────────────────────────────
-    let job_id = record_job(
+    finish_job(
         db,
-        &req,
+        job_id,
         status,
         err.clone(),
         &html,
-        template_version_id,
-        copies as i64,
-        start,
+        &req,
+        duration as i64,
     )?;
 
     Ok(PrintResponse {
         success: status == "success",
-        job_id,
+        job_id: job_id.to_string(),
         duration_ms: duration,
         error: err,
     })
 }
 
-/// Look up a printer's stored `(printer_type, address)` by name.
+/// The printer columns the print pipeline needs after render (P4).
+///
+/// `lookup_printer` used to return `(type, address)`; dispatch needs the
+/// language and the head resolution too (the send log also wants the media
+/// width), and every stage must consult the *same* row.
+#[derive(Debug, Clone)]
+pub struct StoredPrinter {
+    pub printer_type: String,
+    pub address: String,
+    pub language: String,
+    pub paper_width_mm: Option<i64>,
+    pub dpi: Option<i64>,
+}
+
+/// Look up a printer's stored row by name.
 ///
 /// Returns `None` when the printer is not in the DB, which is legal: the
-/// caller falls back to the platform default transport.
-pub fn lookup_printer(db: &DbState, name: &str) -> Option<(String, String)> {
+/// caller falls back to the platform default — type `system`, language
+/// `pdf` — exactly as before dispatch existed.
+pub fn lookup_printer(db: &DbState, name: &str) -> Option<StoredPrinter> {
     let guard = db.lock().ok()?;
-    let conn = guard.connection().ok()?;
+    let conn = guard.connection();
     conn.query_row(
-        "SELECT type, COALESCE(address, '') FROM printers WHERE name = ?1 COLLATE NOCASE",
+        "SELECT type, COALESCE(address, ''), COALESCE(language, 'pdf'), \
+                paper_width_mm, dpi \
+         FROM printers WHERE name = ?1 COLLATE NOCASE",
         [name],
-        |r| Ok((r.get(0)?, r.get(1)?)),
+        |r| {
+            Ok(StoredPrinter {
+                printer_type: r.get(0)?,
+                address: r.get(1)?,
+                language: r.get(2)?,
+                paper_width_mm: r.get(3)?,
+                dpi: r.get(4)?,
+            })
+        },
     )
     .ok()
 }
@@ -502,37 +816,42 @@ fn collect_secrets(value: &serde_json::Value, out: &mut Vec<String>) {
     }
 }
 
-fn redact_rendered_html(html: &str, req: &PrintRequest) -> String {
-    let mut secrets = Vec::new();
-    if let Some(data) = &req.data {
-        collect_secrets(data, &mut secrets);
-    }
+/// Replace every occurrence of a job's secret values with `***`.
+fn redact_with_secrets(html: &str, secrets: &[String]) -> String {
     if secrets.is_empty() {
         return html.to_string();
     }
     let mut redacted = html.to_string();
     for s in secrets {
         // Avoid replacing short or common substrings; secrets are at least 4 chars.
-        redacted = redacted.replace(&s, "***");
+        redacted = redacted.replace(s, "***");
     }
     redacted
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn record_job(
+/// Insert the job row as `printing` with the real start time (P15).
+///
+/// Called once, after the request resolves and before any stage that can take
+/// time or fail, so a running print is visible in History and the `job_id`
+/// reported by a failure is the row's own id. The row used to be written
+/// only *after* printing ended, with `started_at` equal to `finished_at`
+/// (both stamped at the same moment) and a running job invisible.
+///
+/// Also the atomic reservation of the request's idempotency key (P12): the
+/// unique index on `idempotency_key` makes this INSERT the point where the
+/// key is taken — before render and before send — so two simultaneous
+/// requests with one key insert once and print once.
+fn begin_job(
     db: &DbState,
     req: &PrintRequest,
-    status: &str,
-    error: Option<String>,
-    rendered_html: &str,
     template_version_id: Option<i64>,
     copies: i64,
-    start: Instant,
-) -> AppResult<String> {
+    page_mm: (f64, f64),
+) -> AppResult<i64> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     let printer_id: Option<i64> = conn
         .query_row(
@@ -550,37 +869,258 @@ pub fn record_job(
             "top": req.margin_top, "right": req.margin_right,
             "bottom": req.margin_bottom, "left": req.margin_left,
         },
+        "page": {"width_mm": page_mm.0, "height_mm": page_mm.1},
     });
 
-    // Redact secrets from history: tokens/passwords that were in `data`
-    // must not be persisted verbatim (PLANNING.md keyring/redaction).
-    let redacted_html = redact_rendered_html(rendered_html, req);
+    // The job's input payload, kept so a queued row can run again — retry
+    // and reprint are rows the worker replays (P3). This is run-input, not
+    // a history view: it is never selected into `PrintJob` (IPC/REST), and
+    // the displayed artifact, `rendered_html`, stays secret-redacted below.
+    let data_json = req
+        .data
+        .as_ref()
+        .and_then(|d| serde_json::to_string(d).ok());
 
-    conn.execute(
+    match conn.execute(
         "INSERT INTO print_jobs
            (template_id, template_version_id, printer_id, source, source_url,
-            status, error, copies, settings_json, rendered_html, is_test,
-            started_at, finished_at, duration_ms, idempotency_key)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-                 datetime('now'), datetime('now'), ?12, ?13)",
+            status, copies, settings_json, rendered_html, is_test,
+            started_at, idempotency_key, data_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'printing', ?6, ?7, '', ?8,
+                 datetime('now'), ?9, ?10)",
         rusqlite::params![
             req.template_id,
             template_version_id,
             printer_id,
             req.source.clone().unwrap_or_else(|| "ui".into()),
             req.data_url,
-            status,
-            error,
             copies,
             settings.to_string(),
-            redacted_html,
             i64::from(req.test.unwrap_or(false)),
-            start.elapsed().as_millis() as i64,
             req.idempotency_key,
+            data_json,
         ],
+    ) {
+        Ok(_) => Ok(conn.last_insert_rowid()),
+        // The unique index on `idempotency_key` makes this insert the atomic
+        // reservation of the key (P12): two simultaneous requests with one
+        // key insert once, so they print once — and both record the key
+        // before any send. Only the key can collide (the id is
+        // autoincrement), and the loser gets the winner's job id to report
+        // as the duplicate response.
+        Err(rusqlite::Error::SqliteFailure(e, _))
+            if e.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE
+                || e.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_PRIMARYKEY =>
+        {
+            let existing: Option<i64> = req.idempotency_key.as_ref().and_then(|key| {
+                conn.query_row(
+                    "SELECT id FROM print_jobs WHERE idempotency_key = ?1",
+                    [key],
+                    |r| r.get(0),
+                )
+                .ok()
+            });
+            match existing {
+                Some(id) => Err(AppError::DuplicateJob(id)),
+                None => Err(AppError::Database(
+                    "job insert hit an unexpected unique constraint".into(),
+                )),
+            }
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Close a job opened by [`begin_job`]: terminal status, error, the
+/// (secret-redacted) HTML, the finish time and the real duration.
+fn finish_job(
+    db: &DbState,
+    job_id: i64,
+    status: &str,
+    error: Option<String>,
+    rendered_html: &str,
+    req: &PrintRequest,
+    duration_ms: i64,
+) -> AppResult<()> {
+    close_job(
+        db,
+        job_id,
+        status,
+        error,
+        rendered_html,
+        &secrets_of(req),
+        duration_ms,
+    )
+}
+
+/// The secret values a job's `data` carries, for redaction from history.
+fn secrets_of(req: &PrintRequest) -> Vec<String> {
+    let mut secrets = Vec::new();
+    if let Some(data) = &req.data {
+        collect_secrets(data, &mut secrets);
+    }
+    secrets
+}
+
+/// Close a claimed job row: terminal status, error, the (secret-redacted)
+/// HTML, the finish time and the real duration. Shared by the direct
+/// pipeline ([`finish_job`]) and the worker's claimed-job path.
+///
+/// The `status = 'printing'` guard keeps a row that was already terminal —
+/// cancelled out from under a running print — from being resurrected; such a
+/// row keeps its state.
+fn close_job(
+    db: &DbState,
+    job_id: i64,
+    status: &str,
+    error: Option<String>,
+    rendered_html: &str,
+    secrets: &[String],
+    duration_ms: i64,
+) -> AppResult<()> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    let conn = guard.connection();
+
+    // Redact secrets from history: tokens/passwords that were in `data`
+    // must not be persisted verbatim (PLANNING.md keyring/redaction).
+    let redacted_html = redact_with_secrets(rendered_html, secrets);
+
+    conn.execute(
+        "UPDATE print_jobs
+         SET status = ?2, error = ?3, rendered_html = ?4,
+             finished_at = datetime('now'), duration_ms = ?5
+         WHERE id = ?1 AND status = 'printing'",
+        rusqlite::params![job_id, status, error, redacted_html, duration_ms],
     )?;
 
-    Ok(conn.last_insert_rowid().to_string())
+    Ok(())
+}
+
+/// Rebuild the print request a queued row describes (P3).
+///
+/// The row is the job: the printer it was queued for, the pinned template
+/// version, the copies and settings, and the input payload batches store in
+/// `data_json`. A row that also carries `rendered_html` replays that HTML
+/// as-is — the content it printed the first time — and needs neither
+/// template nor data; its `data_url` is dropped so a replay cannot fail on
+/// a fetch it does not need. A row with neither fails here, and the worker
+/// ends it `failed` with this error.
+/// The columns [`load_job_request`] reads to rebuild a queued job.
+struct JobRow {
+    printer_id: Option<i64>,
+    printer_name: Option<String>,
+    template_id: Option<i64>,
+    template_version_id: Option<i64>,
+    source: String,
+    source_url: Option<String>,
+    copies: i64,
+    settings_json: Option<String>,
+    rendered_html: Option<String>,
+    is_test: i64,
+    data_json: Option<String>,
+}
+
+fn load_job_request(db: &DbState, job_id: i64) -> AppResult<(PrintRequest, Option<String>)> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    let conn = guard.connection();
+
+    let JobRow {
+        printer_id,
+        printer_name,
+        template_id,
+        template_version_id,
+        source,
+        source_url,
+        copies,
+        settings_json,
+        rendered_html,
+        is_test,
+        data_json,
+    } = conn.query_row(
+        "SELECT j.printer_id, p.name, j.template_id, j.template_version_id, j.source,
+                j.source_url, j.copies, j.settings_json, j.rendered_html, j.is_test,
+                j.data_json
+         FROM print_jobs j LEFT JOIN printers p ON p.id = j.printer_id
+         WHERE j.id = ?1",
+        [job_id],
+        |r| {
+            Ok(JobRow {
+                printer_id: r.get(0)?,
+                printer_name: r.get(1)?,
+                template_id: r.get(2)?,
+                template_version_id: r.get(3)?,
+                source: r.get(4)?,
+                source_url: r.get(5)?,
+                copies: r.get(6)?,
+                settings_json: r.get(7)?,
+                rendered_html: r.get(8)?,
+                is_test: r.get(9)?,
+                data_json: r.get(10)?,
+            })
+        },
+    )?;
+
+    let printer_name = printer_name.ok_or_else(|| {
+        AppError::Validation(format!(
+            "the printer this job was queued for (printer id {printer_id:?}) no longer exists"
+        ))
+    })?;
+
+    let replay = rendered_html.filter(|h| !h.trim().is_empty());
+
+    let data: Option<serde_json::Value> = match data_json {
+        Some(s) if !s.trim().is_empty() => Some(serde_json::from_str(&s).map_err(|e| {
+            AppError::Internal(format!("stored data for job {job_id} is unreadable: {e}"))
+        })?),
+        _ => None,
+    };
+
+    if replay.is_none() && template_id.is_none() {
+        return Err(AppError::Validation(
+            "this job has nothing to print: no stored HTML and no template".into(),
+        ));
+    }
+
+    let settings: serde_json::Value = settings_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or(serde_json::json!({}));
+    let margins = settings.get("margins");
+    let page = settings.get("page");
+
+    let req = PrintRequest {
+        printer_name,
+        // Content comes from the row's replay or its template, never here.
+        html: String::new(),
+        page_width_mm: page.and_then(|p| p.get("width_mm").and_then(|v| v.as_f64())),
+        page_height_mm: page.and_then(|p| p.get("height_mm").and_then(|v| v.as_f64())),
+        orientation: settings
+            .get("orientation")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        copies: Some(copies.max(1) as u32),
+        margin_top: margins.and_then(|m| m.get("top").and_then(|v| v.as_f64())),
+        margin_right: margins.and_then(|m| m.get("right").and_then(|v| v.as_f64())),
+        margin_bottom: margins.and_then(|m| m.get("bottom").and_then(|v| v.as_f64())),
+        margin_left: margins.and_then(|m| m.get("left").and_then(|v| v.as_f64())),
+        fit_mode: settings
+            .get("fit")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        template_id,
+        template_version_id,
+        data,
+        // A replay prints the HTML on the row; it needs no live data.
+        data_url: if replay.is_some() { None } else { source_url },
+        test: Some(is_test != 0),
+        source: Some(source),
+        idempotency_key: None,
+    };
+    Ok((req, replay))
 }
 
 /// Enumerate system printers
@@ -810,7 +1350,7 @@ mod tests {
         let mut r = req();
         r.data = Some(serde_json::json!({"token": "sk-live-12345", "name": "Alice"}));
         let html = "<p>sk-live-12345 by Alice</p>";
-        let out = redact_rendered_html(html, &r);
+        let out = redact_with_secrets(html, &secrets_of(&r));
         assert!(!out.contains("sk-live-12345"), "{}", out);
         assert!(out.contains("***"), "{}", out);
         assert!(out.contains("Alice"), "{}", out);
@@ -824,7 +1364,7 @@ mod tests {
             "api_key": "key-999"
         }));
         let html = "hunter2 a@b.com key-999";
-        let out = redact_rendered_html(html, &r);
+        let out = redact_with_secrets(html, &secrets_of(&r));
         assert!(!out.contains("hunter2"), "{}", out);
         assert!(!out.contains("key-999"), "{}", out);
         assert!(out.contains("a@b.com"), "{}", out);
@@ -835,7 +1375,7 @@ mod tests {
         let mut r = req();
         r.data = Some(serde_json::json!({"Token": "ABC123", "order_id": "XYZ"}));
         let html = "ABC123 XYZ";
-        let out = redact_rendered_html(html, &r);
+        let out = redact_with_secrets(html, &secrets_of(&r));
         assert!(!out.contains("ABC123"), "{}", out);
         assert!(out.contains("XYZ"), "{}", out);
     }
@@ -844,7 +1384,7 @@ mod tests {
     fn redact_does_nothing_without_secrets() {
         let r = req();
         let html = "<p>hello</p>";
-        assert_eq!(redact_rendered_html(html, &r), html);
+        assert_eq!(redact_with_secrets(html, &secrets_of(&r)), html);
     }
 
     #[test]

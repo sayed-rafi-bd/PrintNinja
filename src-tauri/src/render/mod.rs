@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::path::PathBuf;
 
 pub mod handlebars;
@@ -13,6 +13,31 @@ impl PdfRenderer {
         Self { cache_dir }
     }
 
+    /// Write one job's HTML to a **uniquely named** file and return the path.
+    ///
+    /// Every job shares this cache directory and jobs for different printers
+    /// render in parallel, so the fixed `render.html` this used to write let
+    /// one job hand its document to another printer (P6).
+    pub async fn write_job_html(&self, html: &str) -> Result<PathBuf> {
+        let path = self
+            .cache_dir
+            .join(format!("render-{}.html", uuid::Uuid::new_v4()));
+        tokio::fs::write(&path, html).await?;
+        // Keep the newest input next to `last-render.pdf` for debugging;
+        // it is an artifact, never read back by a render.
+        let _ = tokio::fs::copy(&path, self.cache_dir.join("last-render.html")).await;
+        Ok(path)
+    }
+
+    /// Render `html` to a PDF.
+    ///
+    /// Page size and orientation arrive in the document's `@page` rule
+    /// (`apply_layout`), so the parameters here are for the log line.
+    ///
+    /// Failure is an error, never a placeholder (P5). When Edge was missing
+    /// or failed — and on every non-Windows platform — this used to return a
+    /// stub PDF containing the word "PrintNinja" and the job reported success,
+    /// so the operator saw a printed page instead of their label.
     pub async fn html_to_pdf(
         &self,
         html: &str,
@@ -20,29 +45,26 @@ impl PdfRenderer {
         page_height_mm: f64,
         orientation: &str,
     ) -> Result<Vec<u8>> {
-        let html_path = self.cache_dir.join("render.html");
-        tokio::fs::write(&html_path, html).await?;
+        tracing::debug!(page_width_mm, page_height_mm, orientation, "rendering PDF");
+        let html_path = self.write_job_html(html).await?;
 
         #[cfg(windows)]
-        {
-            self.webview2_print_to_pdf(&html_path, page_width_mm, page_height_mm, orientation)
-                .await
-        }
+        let result = self.webview2_print_to_pdf(&html_path).await;
 
         #[cfg(not(windows))]
-        {
-            self.fallback_pdf(page_width_mm, page_height_mm, orientation)
-        }
+        let result = Err(anyhow!(
+            "no PDF renderer on this platform (printing needs Windows with Edge/WebView2); \
+             refusing to send a placeholder instead of the document"
+        ));
+
+        // Per-job file: removed whether the render worked or not, so the
+        // cache dir does not grow a file per print.
+        let _ = tokio::fs::remove_file(&html_path).await;
+        result
     }
 
     #[cfg(windows)]
-    async fn webview2_print_to_pdf(
-        &self,
-        html_path: &PathBuf,
-        page_width_mm: f64,
-        page_height_mm: f64,
-        orientation: &str,
-    ) -> Result<Vec<u8>> {
+    async fn webview2_print_to_pdf(&self, html_path: &PathBuf) -> Result<Vec<u8>> {
         use std::os::windows::process::CommandExt;
         use std::process::Command;
         use windows::Win32::System::Threading::CREATE_NO_WINDOW;
@@ -55,87 +77,418 @@ impl PdfRenderer {
         // A throwaway profile makes headless Edge start its own process
         // instead of delegating to the user's already-open Edge window.
         let profile_dir = self.cache_dir.join(format!("edge-profile-{job}"));
-        let width_in = page_width_mm / 25.4;
-        let height_in = page_height_mm / 25.4;
-        let (w, h) = if orientation == "landscape" {
-            (height_in, width_in)
-        } else {
-            (width_in, height_in)
-        };
 
         let edge_paths = [
             r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
             r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
         ];
 
-        let edge_path = edge_paths.iter().find(|p| std::path::Path::new(p).exists());
+        let edge_path = edge_paths
+            .iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .ok_or_else(|| {
+                anyhow!(
+                    "Microsoft Edge not found (looked in {}) — PDF rendering needs \
+                     Edge/WebView2; the job cannot print without it",
+                    edge_paths.join(", ")
+                )
+            })?;
 
-        if let Some(edge) = edge_path {
-            let html_url = format!("file:///{}", html_path.to_string_lossy().replace('\\', "/"));
-            let output = Command::new(edge)
-                .args(&[
-                    "--headless",
-                    "--disable-gpu",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "--print-to-pdf-no-header",
-                    "--no-pdf-header-footer",
-                    &format!("--user-data-dir={}", profile_dir.to_string_lossy()),
-                    &format!("--print-to-pdf={}", pdf_path.to_string_lossy()),
-                    &html_url,
-                ])
-                .creation_flags(CREATE_NO_WINDOW.0)
-                .output()?;
+        let html_url = format!("file:///{}", html_path.to_string_lossy().replace('\\', "/"));
+        let output = Command::new(edge_path)
+            .args(&[
+                "--headless",
+                "--disable-gpu",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--print-to-pdf-no-header",
+                "--no-pdf-header-footer",
+                &format!("--user-data-dir={}", profile_dir.to_string_lossy()),
+                &format!("--print-to-pdf={}", pdf_path.to_string_lossy()),
+                &html_url,
+            ])
+            .creation_flags(CREATE_NO_WINDOW.0)
+            .output()?;
 
-            let _ = std::fs::remove_dir_all(&profile_dir);
+        remove_edge_profile(&profile_dir).await;
 
-            if output.status.success() && pdf_path.exists() {
-                let bytes = tokio::fs::read(&pdf_path).await;
-                // Keep the newest render next to render.html so it can be
-                // opened directly to tell "Edge output is unstyled" apart
-                // from "styling is lost later in the print path".
-                let last = self.cache_dir.join("last-render.pdf");
-                let _ = std::fs::copy(&pdf_path, &last);
-                let _ = std::fs::remove_file(&pdf_path);
-                tracing::info!(
-                    html = %html_url,
-                    pdf = %last.display(),
-                    bytes = bytes.as_ref().map_or(0, |b| b.len()),
-                    "rendered PDF with Edge"
-                );
-                return bytes.map_err(Into::into);
-            }
-
-            tracing::warn!(
-                status = ?output.status,
-                pdf_written = pdf_path.exists(),
-                stderr = %String::from_utf8_lossy(&output.stderr),
-                "Edge print-to-pdf did not produce a PDF"
+        if output.status.success() && pdf_path.exists() {
+            let bytes = tokio::fs::read(&pdf_path).await;
+            // Keep the newest render next to last-render.html so it can be
+            // opened directly to tell "Edge output is unstyled" apart from
+            // "styling is lost later in the print path".
+            let last = self.cache_dir.join("last-render.pdf");
+            let _ = std::fs::copy(&pdf_path, &last);
+            let _ = std::fs::remove_file(&pdf_path);
+            tracing::info!(
+                html = %html_url,
+                pdf = %last.display(),
+                bytes = bytes.as_ref().map_or(0, |b| b.len()),
+                "rendered PDF with Edge"
             );
+            return bytes.map_err(Into::into);
         }
 
-        tracing::warn!("Edge print-to-pdf failed or msedge.exe not found; using placeholder PDF");
-        self.fallback_pdf(w * 25.4, h * 25.4, orientation)
+        // Edge failed or wrote nothing. Report it; do not fall back to a
+        // placeholder (P5).
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let _ = std::fs::remove_file(&pdf_path);
+        Err(anyhow!(
+            "Edge print-to-pdf did not produce a PDF (status {}, stderr: {})",
+            output.status,
+            stderr.trim()
+        ))
     }
 
-    fn fallback_pdf(
+    /// Render `html` to a 1-bit raster at the printer's own resolution (P4).
+    ///
+    /// Headless Edge screenshots the page at exactly the window size the
+    /// label prints at (1 CSS px = 1 printer dot), and the PNG is
+    /// thresholded to dots. Same Edge dependency as [`Self::html_to_pdf`] —
+    /// and the same rule: failure is an error, never a placeholder.
+    pub async fn html_to_raster(
         &self,
-        page_width_mm: f64,
-        page_height_mm: f64,
-        orientation: &str,
-    ) -> Result<Vec<u8>> {
-        let width_pt = page_width_mm * 2.83465;
-        let height_pt = page_height_mm * 2.83465;
-        let (final_width, final_height) = if orientation == "landscape" {
-            (height_pt, width_pt)
-        } else {
-            (width_pt, height_pt)
-        };
+        html: &str,
+        w_px: usize,
+        h_px: usize,
+    ) -> Result<crate::render::raster::RasterImage> {
+        tracing::debug!(w_px, h_px, "rasterizing for a command-language printer");
+        let html_path = self.write_job_html(html).await?;
 
-        let pdf = format!(
-            "%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {:.2} {:.2}] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n4 0 obj\n<< /Length 44 >>\nstream\nBT /F1 12 Tf 100 700 Td (PrintNinja) Tj ET\nendstream\nendobj\n5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\nxref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000266 00000 n \n0000000360 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n437\n%%EOF",
-            final_width, final_height
+        #[cfg(windows)]
+        let result = self.webview2_screenshot(&html_path, w_px, h_px).await;
+
+        #[cfg(not(windows))]
+        let result = Err(anyhow!(
+            "no raster renderer on this platform (command-language printing needs \
+             Windows with Edge/WebView2); refusing to send a placeholder instead of the label"
+        ));
+
+        // Per-job file: removed whether the render worked or not, so the
+        // cache dir does not grow a file per print.
+        let _ = tokio::fs::remove_file(&html_path).await;
+        result
+    }
+
+    /// Headless Edge `--screenshot` at `w_px`×`h_px`, thresholded to dots.
+    #[cfg(windows)]
+    async fn webview2_screenshot(
+        &self,
+        html_path: &PathBuf,
+        w_px: usize,
+        h_px: usize,
+    ) -> Result<crate::render::raster::RasterImage> {
+        use std::os::windows::process::CommandExt;
+        use std::process::Command;
+        use windows::Win32::System::Threading::CREATE_NO_WINDOW;
+
+        // Unique per job, like the PDF path: no shared screenshot target,
+        // no stale hand-offs between concurrent jobs.
+        let job = uuid::Uuid::new_v4();
+        let png_path = self.cache_dir.join(format!("shot-{job}.png"));
+        let profile_dir = self.cache_dir.join(format!("edge-profile-{job}"));
+
+        let edge_paths = [
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        ];
+
+        let edge_path = edge_paths
+            .iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .ok_or_else(|| {
+                anyhow!(
+                    "Microsoft Edge not found (looked in {}) — raster printing needs \
+                     Edge/WebView2; the job cannot print without it",
+                    edge_paths.join(", ")
+                )
+            })?;
+
+        let html_url = format!("file:///{}", html_path.to_string_lossy().replace('\\', "/"));
+        let output = Command::new(edge_path)
+            .args(&[
+                "--headless",
+                "--disable-gpu",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--hide-scrollbars",
+                // 1 CSS px = 1 printer dot: the PNG comes out exactly the
+                // label in dots — no HiDPI scaling, no scrollbar gutters.
+                "--force-device-scale-factor=1",
+                &format!("--window-size={w_px},{h_px}"),
+                &format!("--user-data-dir={}", profile_dir.to_string_lossy()),
+                &format!("--screenshot={}", png_path.to_string_lossy()),
+                &html_url,
+            ])
+            .creation_flags(CREATE_NO_WINDOW.0)
+            .output()?;
+
+        remove_edge_profile(&profile_dir).await;
+
+        if !(output.status.success() && png_path.exists()) {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let _ = tokio::fs::remove_file(&png_path).await;
+            return Err(anyhow!(
+                "Edge screenshot did not produce a PNG (status {}, stderr: {})",
+                output.status,
+                stderr.trim()
+            ));
+        }
+
+        let raster = png_to_raster(&png_path).map_err(|e| anyhow!("screenshot decode: {e}"))?;
+
+        // Keep the newest screenshot next to last-render.pdf for debugging
+        // the hardware checklist; the per-job file is removed either way.
+        let _ = tokio::fs::copy(&png_path, self.cache_dir.join("last-render.png")).await;
+        let _ = tokio::fs::remove_file(&png_path).await;
+        Ok(raster)
+    }
+}
+
+/// Startup sweep: remove throwaway Edge profiles left behind by earlier
+/// runs (P17 follow-up — the stray `.pem` next to `last-render.pdf`).
+///
+/// Every print makes a fresh `edge-profile-{uuid}` dir and removes it after
+/// the render (with retries — see the helper below). A run killed mid-render
+/// still leaves its profile in the cache dir, certificate-transparency
+/// material included, which looked like the app had written a key file.
+///
+/// Called once from app setup **before the worker spawns**, so nothing in
+/// flight owns these directories. `min_age` guards the one remaining race —
+/// a second app instance starting while a render runs: profiles are seconds
+/// old during a render, crashed leftovers are not.
+pub fn sweep_leftover_edge_profiles(dir: &std::path::Path, min_age: std::time::Duration) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        // Cache dir does not exist yet (first run) — nothing to sweep.
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !name.starts_with("edge-profile-") {
+            continue;
+        }
+        // Unknown age → leave it alone; only clearly stale profiles go.
+        let Some(age) = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+        else {
+            continue;
+        };
+        if age < min_age {
+            continue;
+        }
+        match std::fs::remove_dir_all(entry.path()) {
+            Ok(()) => tracing::info!(
+                dir = name,
+                age_secs = age.as_secs(),
+                "removed an Edge profile left behind by an earlier run"
+            ),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                tracing::warn!(dir = name, error = %e, "could not remove a leftover Edge profile")
+            }
+        }
+    }
+}
+
+/// Best-effort removal of a throwaway Edge profile, with retries.
+///
+/// Edge can still hold handles briefly after it exits; a single
+/// fire-and-forget `remove_dir_all` then left the whole profile in the
+/// cache dir — its certificate-transparency and trust material showed up
+/// as a stray `.pem` next to `last-render.pdf`, looking like the app had
+/// written a key file. Retry, and log if the profile really cannot go.
+#[cfg(windows)]
+async fn remove_edge_profile(dir: &std::path::Path) {
+    for attempt in 0..5u32 {
+        match tokio::fs::remove_dir_all(dir).await {
+            Ok(()) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Err(e) if attempt < 4 => {
+                tracing::debug!(error = %e, "Edge still holds its profile; retrying removal");
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    80 * u64::from(attempt + 1),
+                ))
+                .await;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    dir = %dir.display(),
+                    error = %e,
+                    "leftover Edge profile could not be removed; it holds no secrets \
+                     but should not accumulate in the cache dir"
+                );
+            }
+        }
+    }
+}
+
+/// Decode a screenshot PNG and threshold it to 1-bit dots.
+///
+/// `EXPAND | STRIP_16` normalises every colour type to 8 bits. Text is
+/// anti-aliased grey, so a midpoint threshold turns dark pixels into dots.
+/// Rows are walked via `line_size`, so any row padding is respected.
+///
+/// Pure PNG logic, so `cfg(any(windows, test))`: the Windows print path
+/// calls it, and the unit tests exercise it on every platform.
+#[cfg(any(windows, test))]
+fn png_to_raster(path: &std::path::Path) -> Result<crate::render::raster::RasterImage> {
+    use crate::render::raster::RasterImage;
+
+    let file = std::fs::File::open(path)?;
+    let mut decoder = png::Decoder::new(std::io::BufReader::new(file));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info()?;
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf)?;
+
+    let width = info.width as usize;
+    let height = info.height as usize;
+    let line = info.line_size;
+
+    let mut gray = vec![0u8; width * height];
+    for y in 0..height {
+        let row = &buf[y * line..];
+        for x in 0..width {
+            let lum = match info.color_type {
+                png::ColorType::Grayscale => row[x],
+                png::ColorType::GrayscaleAlpha => row[x * 2],
+                png::ColorType::Rgb | png::ColorType::Rgba => {
+                    let step = if info.color_type == png::ColorType::Rgba {
+                        4
+                    } else {
+                        3
+                    };
+                    let (r, g, b) = (row[x * step], row[x * step + 1], row[x * step + 2]);
+                    (0.299 * f64::from(r) + 0.587 * f64::from(g) + 0.114 * f64::from(b)).round()
+                        as u8
+                }
+                other => return Err(anyhow!("unexpected PNG colour type {other:?}")),
+            };
+            gray[y * width + x] = lum;
+        }
+    }
+
+    let mut raster = RasterImage::new(width, height);
+    raster.threshold(&gray, width, height, 128);
+    Ok(raster)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Encode pixel data as a PNG file, as Edge's `--screenshot` would.
+    fn write_png(
+        dir: &std::path::Path,
+        color: png::ColorType,
+        width: u32,
+        height: u32,
+        data: &[u8],
+    ) -> std::path::PathBuf {
+        let path = dir.join(format!("shot-{}.png", uuid::Uuid::new_v4()));
+        let mut encoder = png::Encoder::new(std::fs::File::create(&path).unwrap(), width, height);
+        encoder.set_color(color);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(data)
+            .unwrap();
+        path
+    }
+
+    /// Startup sweep: only `edge-profile-*` dirs go, and only when they are
+    /// old enough — a fresh one may belong to a render in flight (e.g. a
+    /// second app instance starting mid-print).
+    #[test]
+    fn the_startup_sweep_only_takes_stale_edge_profiles() {
+        let dir = std::env::temp_dir().join(format!("pn-sweep-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join("edge-profile-crashed")).unwrap();
+        std::fs::write(dir.join("edge-profile-crashed").join("junk.pem"), b"cert").unwrap();
+        std::fs::create_dir_all(dir.join("edge-profile-live")).unwrap();
+        // Content is irrelevant to the sweep; deliberately not a PDF header
+        // magic: `print_correctness`'s P5 tripwire greps this whole file and
+        // only placeholder-PDF bytes may not appear in it.
+        std::fs::write(dir.join("last-render.pdf"), b"render artifact").unwrap();
+
+        // Younger than an hour: may belong to a running render — keep both.
+        sweep_leftover_edge_profiles(&dir, std::time::Duration::from_secs(60 * 60));
+        assert!(dir.join("edge-profile-crashed").exists());
+        assert!(dir.join("edge-profile-live").exists());
+
+        // No age limit: the stale profile goes — its junk `.pem` with it —
+        // and everything that is not an Edge profile stays put.
+        sweep_leftover_edge_profiles(&dir, std::time::Duration::ZERO);
+        assert!(!dir.join("edge-profile-crashed").exists());
+        assert!(!dir.join("edge-profile-live").exists());
+        assert!(dir.join("last-render.pdf").exists());
+
+        // A cache dir that does not exist yet (first run) is a no-op.
+        sweep_leftover_edge_profiles(&dir.join("missing"), std::time::Duration::ZERO);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// P4: the decode path a Windows print takes — a screenshot PNG becomes
+    /// exactly the thresholded dots, at the screenshot's own size.
+    #[test]
+    fn an_rgb_screenshot_becomes_thresholded_dots() {
+        let dir = std::env::temp_dir();
+        // 2×1: black then white — the two ends of the midpoint cut.
+        let path = write_png(&dir, png::ColorType::Rgb, 2, 1, &[0, 0, 0, 255, 255, 255]);
+        let raster = png_to_raster(&path).expect("decode");
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!((raster.width, raster.height), (2, 1));
+        assert!(raster.get_bit(0, 0), "black must become a dot");
+        assert!(!raster.get_bit(1, 0), "white must stay blank");
+    }
+
+    /// Every colour type Edge might hand back (post-`EXPAND`) is handled,
+    /// including the alpha variants, whose alpha must not darken anything.
+    #[test]
+    fn grayscale_and_alpha_screenshots_decode() {
+        let dir = std::env::temp_dir();
+
+        // Grayscale: 64 → dot, 200 → no dot.
+        let path = write_png(&dir, png::ColorType::Grayscale, 2, 1, &[64, 200]);
+        let raster = png_to_raster(&path).expect("decode gray");
+        let _ = std::fs::remove_file(&path);
+        assert!(raster.get_bit(0, 0) && !raster.get_bit(1, 0));
+
+        // GrayscaleAlpha: the opaque/d transparent second pixels decide by
+        // luminance only — full transparency must not flip the other way.
+        let path = write_png(
+            &dir,
+            png::ColorType::GrayscaleAlpha,
+            2,
+            1,
+            &[64, 255, 200, 0],
         );
-        Ok(pdf.into_bytes())
+        let raster = png_to_raster(&path).expect("decode gray+alpha");
+        let _ = std::fs::remove_file(&path);
+        assert!(raster.get_bit(0, 0) && !raster.get_bit(1, 0));
+
+        // RGBA: red-ish text is *dark* under the luminance weights
+        // (0.299·200 + 0.587·50 + 0.114·50 ≈ 95 < 128), so it prints.
+        let path = write_png(
+            &dir,
+            png::ColorType::Rgba,
+            2,
+            1,
+            &[200, 50, 50, 255, 255, 255, 255, 0],
+        );
+        let raster = png_to_raster(&path).expect("decode rgba");
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            raster.get_bit(0, 0),
+            "coloured text must threshold to a dot"
+        );
+        assert!(!raster.get_bit(1, 0));
     }
 }

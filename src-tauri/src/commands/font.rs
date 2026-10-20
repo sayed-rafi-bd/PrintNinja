@@ -22,7 +22,7 @@ pub fn list_fonts(db: State<DbState>) -> AppResult<Vec<FontInfo>> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     let mut stmt = conn.prepare(
         "SELECT id, family, style, weight, file_path, format, created_at
@@ -97,7 +97,7 @@ pub async fn upload_font(
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     conn.execute(
         "INSERT INTO fonts (family, style, weight, file_path, format)
@@ -127,7 +127,7 @@ pub fn delete_font(db: State<DbState>, id: i64) -> AppResult<()> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     let path: Option<String> = conn
         .query_row("SELECT file_path FROM fonts WHERE id = ?1", [id], |r| {
