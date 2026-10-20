@@ -5,9 +5,7 @@ import { testids } from "../support/testids";
 
 // The Phase 1 smoke spec (REFACTORING.md Phase 1): the app starts, the
 // gate shows gate-unreachable when the API is down and signin-form when
-// it is up. The full F-series arrives with the app switch in Phase 3,
-// because the app still speaks /v1 and /health (no /v2 prefix) until
-// then — so the "up" case answers the gate's /health probe with
+// it is up. The "up" case answers the gate's /v2/health probe with
 // route.fulfill (the documented suite technique), pinning the boot path,
 // the agent settings path and the gate's rendering rather than the
 // socket. The "down" case is fully real: a dead port, a refused
