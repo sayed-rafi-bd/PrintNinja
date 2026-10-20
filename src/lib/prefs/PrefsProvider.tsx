@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { readCachedSetting, readSetting, writeSetting } from "@/lib/settings";
+import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
 import {
   DEFAULT_APP_NAME,
   SETTING_KEYS,
@@ -90,17 +91,21 @@ export function PrefsProvider({ children }: { children: React.ReactNode }) {
   const setDensity = useCallback(async (d: Density) => {
     setDensityState(d);
     await writeSetting(SETTING_KEYS.density, d);
+    // An account preference: push it soon so the other PC pulls it.
+    notifyLocalEdit();
   }, []);
   const setAppName = useCallback(async (name: string) => {
     const clean = sanitizeAppName(name);
     setAppNameState(clean);
     // Store empty for the default so "reset" really clears the override.
     await writeSetting(SETTING_KEYS.appName, clean === DEFAULT_APP_NAME ? "" : clean);
+    notifyLocalEdit();
   }, []);
   const setLogo = useCallback(async (dataUrl: string | null) => {
     const next = isValidLogoDataUrl(dataUrl) ? dataUrl : null;
     setLogoState(next);
     await writeSetting(SETTING_KEYS.logo, next ?? "");
+    notifyLocalEdit();
   }, []);
 
   const value = useMemo(

@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { SetupChecklist } from "@/components/SetupChecklist";
 import { parseSection, type SettingsSection } from "@/lib/setup/checklist";
 import { agent } from "@/lib/agent/commands";
+import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
 import type { ApiStatus, FontRow } from "@/lib/agent/types";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -277,6 +278,8 @@ export function SettingsPage() {
       });
       toast.success(`Uploaded ${file.name}`);
       await loadFonts();
+      // A font upload is a local edit: push it soon so it syncs.
+      notifyLocalEdit();
     } catch (e) {
       // The wrong content (a non-font with a font extension) must read
       // inline, not just in a toast (F10).
@@ -456,6 +459,7 @@ export function SettingsPage() {
                         try {
                           await agent("delete_font", { id: f.id });
                           await loadFonts();
+                          notifyLocalEdit();
                           toast.success(`Removed ${f.family}`);
                         } catch (e) {
                           toast.error(`Failed: ${e}`);

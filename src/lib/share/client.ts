@@ -376,13 +376,19 @@ export type RemoteDataset =
 export interface PutRemoteDatasetInput {
   id: string;
   name: string;
-  dataJson?: string;
+  data_json?: string;
   if_revision?: number;
 }
 
 /** Create or update a dataset by client UUID. Updates need if_revision. */
 export async function putRemoteDataset(input: PutRemoteDatasetInput): Promise<RemoteDataset> {
-  return callApi<RemoteDataset>(apiDeps(), { method: "PUT", path: `/v2/datasets/${input.id}`, body: input });
+  // The write schema takes camelCase; everything app-side stays snake_case.
+  const { data_json, ...rest } = input;
+  return callApi<RemoteDataset>(apiDeps(), {
+    method: "PUT",
+    path: `/v2/datasets/${input.id}`,
+    body: data_json === undefined ? rest : { ...rest, dataJson: data_json },
+  });
 }
 
 /** Delete a dataset. The engine treats 404 as already gone. */

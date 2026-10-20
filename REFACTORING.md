@@ -772,18 +772,22 @@ Small by construction: ids and revisions only, bounded by the 1,000-item saved c
 ### Library types (Phase 4)
 
 ```ts
-interface SampleDataset { id: Uuid; template_id: Uuid; name: string; json: string; is_default: boolean; revision: number }
-interface PutDatasetRequest { template_id: Uuid; name: string; json: string; is_default?: boolean; if_revision?: number }   // json up to 256 KiB
-interface PrinterProfile { id: Uuid; template_id: Uuid; printer_key: string; settings_json: string; revision: number }
-interface PutProfileRequest { template_id: Uuid; printer_key: string; settings_json: string; if_revision?: number }       // one per user, template and printer_key
+// As implemented: datasets are account-level (no template link), the
+// write field is dataJson (reads are data_json), the profile key is
+// printer_name, and fonts carry a display name (family/style/weight
+// stay local-only). A font with empty sha256/format has no bytes yet.
+interface SampleDataset { id: Uuid; name: string; data_json: string; revision: number }
+interface PutDatasetRequest { name: string; dataJson?: string; if_revision?: number }   // dataJson up to 256 KiB
+interface PrinterProfile { id: Uuid; template_id: Uuid; printer_name: string; settings_json: string; revision: number }
+interface PutProfileRequest { template_id: Uuid; printer_name: string; settings_json?: string; if_revision?: number }   // one per user, template and printer_name
 interface Setting { key: string; value: string; revision: number }
-interface Font { id: Uuid; family: string; style: string; weight: string; format: "ttf" | "otf" | "woff" | "woff2"; size_bytes: number; sha256: string | null; revision: number }
-interface PutFontRequest { family: string; style?: string; weight?: string; format: "ttf" | "otf" | "woff" | "woff2" }
+interface Font { id: Uuid; name: string; format: string; size_bytes: number; sha256: string; revision: number }
+interface PutFontRequest { name: string; if_revision?: number }
 ```
 
 - **Settings allow-list.** The server accepts only keys it lists (`ui_density`, `brand_name`, `brand_logo` to start). Anything else is `400`, so a device setting can never be stored by accident.
 - **Fonts.** Metadata and bytes are two calls, so a failed upload leaves a font with `sha256: null`, which the app shows as not ready and retries. The server checks the first bytes against the declared format, rejects files over 5 MiB (`FONT_MAX_BYTES`), and computes the SHA-256. Fonts are private to their owner and are never part of a published template.
-- **Profiles.** `printer_key` is the lowercase printer name, matching how the local API finds printers (question 20, answered).
+- **Profiles.** `printer_name` is the lowercase printer name, matching how the local API finds printers (question 20, answered).
 
 ### Version types
 

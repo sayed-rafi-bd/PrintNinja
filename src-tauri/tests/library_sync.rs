@@ -579,6 +579,17 @@ fn seed_font(conn: &Connection, family: &str, sha: &str) -> (i64, String) {
 }
 
 #[test]
+fn font_upload_refuses_the_wrong_content() {
+    // Extension alone is not enough: magic bytes must match the format.
+    assert!(font::check_upload_bytes("body.ttf", &[0x00, 0x01, 0x00, 0x00, 0x01]).is_ok());
+    assert!(font::check_upload_bytes("body.otf", b"OTTOjunk").is_ok());
+    assert!(font::check_upload_bytes("evil.ttf", b"%PDF-1.4 nope").is_err());
+    assert!(font::check_upload_bytes("evil.woff2", &[0x00, 0x01, 0x00, 0x00]).is_err());
+    assert!(font::check_upload_bytes("nope.exe", &[0x00, 0x01, 0x00, 0x00]).is_err());
+    assert!(font::check_upload_bytes("empty.ttf", &[]).is_err());
+}
+
+#[test]
 fn font_store_verifies_the_hash() {
     let conn = db();
     let dir = font::fonts_dir_for_tests();

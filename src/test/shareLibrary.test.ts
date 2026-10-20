@@ -50,7 +50,7 @@ describe("library client", () => {
 		);
 		const { putRemoteDataset, deleteRemoteDataset } = await import("@/lib/share/client");
 
-		const created = await putRemoteDataset({ id: "d1", name: "Orders", dataJson: "{}" });
+		const created = await putRemoteDataset({ id: "d1", name: "Orders", data_json: "{}" });
 		expect(created).toMatchObject({ id: "d1", revision: 1 });
 		expect(seen[0]).toBe("PUT /v2/datasets/d1");
 		expect(seenBodies[0]).toContain('"dataJson":"{}"');

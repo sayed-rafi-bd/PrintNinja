@@ -6,7 +6,7 @@
 // brand_logo); device keys are never dirty.
 
 import { getSetting, setSetting } from "./store.js";
-import type { ApplyReport, DirtyRow } from "./cache.js";
+import type { ApplyReport } from "./cache.js";
 
 export const ACCOUNT_SETTING_KEYS = ["ui_density", "brand_name", "brand_logo"];
 
@@ -263,19 +263,13 @@ export function createFakeLibrary(deps: {
 			row.sync_state = "deleted_pending";
 			persistAll();
 		},
-		listDirtyDatasets(): DirtyRow[] {
+		listDirtyDatasets(): Array<{ server_id: string; name: string; data_json: string; base_revision: number | null }> {
 			return [...datasets.values()]
 				.filter((r) => r.sync_state === "dirty")
 				.map((r) => ({
-					id: r.id,
 					server_id: r.server_id,
 					name: r.name,
-					summary: "",
-					page_w_mm: 0,
-					page_h_mm: 0,
-					readme: "",
-					html: r.data_json,
-					css: "",
+					data_json: r.data_json,
 					base_revision: r.base_revision,
 				}));
 		},
@@ -411,6 +405,18 @@ export function createFakeLibrary(deps: {
 				throw new Error(`Unsupported font format '${ext}'`);
 			}
 			if (req.file_data.length < 4) throw new Error("Font file is empty");
+			// Mirror Rust: refuse the wrong content at upload (magic bytes),
+			// so the engine never pushes a renamed non-font.
+			const magic: Record<string, number[]> = {
+				ttf: [0x00, 0x01, 0x00, 0x00],
+				otf: [0x4f, 0x54, 0x54, 0x4f],
+				woff: [0x77, 0x4f, 0x46, 0x46],
+				woff2: [0x77, 0x4f, 0x46, 0x32],
+			};
+			const want = magic[ext] ?? [];
+			if (!want.every((b, i) => req.file_data[i] === b)) {
+				throw new Error(`Font file is not ${ext} content (magic bytes mismatch)`);
+			}
 			const family = req.family?.trim() || base.replace(new RegExp(`\\.${ext}$`), "");
 			const sha = await sha256Hex(new Uint8Array(req.file_data));
 			const row: FakeFontRow = {

@@ -60,6 +60,54 @@ pub struct DirtyFont {
 
 const VALID_FORMATS: &[&str] = &["ttf", "otf", "woff", "woff2"];
 
+/// Validates the upload payload before anything touches the disk:
+/// known extension, non-empty, and magic bytes matching the format.
+pub fn check_upload_bytes(file_name: &str, file_data: &[u8]) -> AppResult<(String, String)> {
+    // Sanitize: only take the basename so a caller cannot traverse paths.
+    let base = file_name
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(file_name)
+        .to_string();
+
+    if base.is_empty() {
+        return Err(AppError::Validation("Font file name required".into()));
+    }
+
+    let ext = base.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    if !VALID_FORMATS.contains(&ext.as_str()) {
+        return Err(AppError::Validation(format!(
+            "Unsupported font format '{ext}'. Expected one of {VALID_FORMATS:?}"
+        )));
+    }
+
+    if file_data.len() < 4 {
+        return Err(AppError::Validation("Font file is empty".into()));
+    }
+
+    // Fail fast on the wrong content (a renamed non-font): the server
+    // re-checks the same magic on upload.
+    if let Some(magic) = magic_for(&ext) {
+        if file_data.len() < magic.len() || &file_data[..magic.len()] != magic {
+            return Err(AppError::Validation(format!(
+                "Font file is not {ext} content (magic bytes mismatch)"
+            )));
+        }
+    }
+    Ok((base, ext))
+}
+
+/// Magic bytes per format, mirroring the server check.
+fn magic_for(format: &str) -> Option<&'static [u8]> {
+    match format {
+        "ttf" => Some(&[0x00, 0x01, 0x00, 0x00]),
+        "otf" => Some(b"OTTO"),
+        "woff" => Some(b"wOFF"),
+        "woff2" => Some(b"wOF2"),
+        _ => None,
+    }
+}
+
 /// The device-local download state key for one font.
 pub fn font_state_key(server_id: &str) -> String {
     format!("font-state-{server_id}")
@@ -154,27 +202,7 @@ async fn store_upload(
     family: Option<String>,
     db: &State<'_, DbState>,
 ) -> AppResult<FontInfo> {
-    // Sanitize: only take the basename so a caller cannot traverse paths.
-    let base = file_name
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(file_name)
-        .to_string();
-
-    if base.is_empty() {
-        return Err(AppError::Validation("Font file name required".into()));
-    }
-
-    let ext = base.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-    if !VALID_FORMATS.contains(&ext.as_str()) {
-        return Err(AppError::Validation(format!(
-            "Unsupported font format '{ext}'. Expected one of {VALID_FORMATS:?}"
-        )));
-    }
-
-    if file_data.len() < 4 {
-        return Err(AppError::Validation("Font file is empty".into()));
-    }
+    let (base, ext) = check_upload_bytes(file_name, file_data)?;
 
     std::fs::create_dir_all(fonts_dir)?;
 

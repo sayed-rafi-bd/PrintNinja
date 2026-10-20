@@ -105,6 +105,22 @@ export function apiVersions(token: string, id: string): Promise<{ items: ApiVers
 	return request<{ items: ApiVersion[] }>("GET", `/v2/templates/${id}/versions?page=1&page_size=5`, { token });
 }
 
+export interface ApiSyncChange {
+	seq: string;
+	entity: string;
+	op: string;
+	data?: { id?: string; key?: string };
+	id?: string;
+}
+
+/** The delta stream, for specs that wait on a push to land server-side. */
+export function apiSyncChanges(
+	token: string,
+	types = "template,dataset,profile,setting,font",
+): Promise<{ changes: ApiSyncChange[]; next_cursor: string; has_more: boolean; reset: boolean }> {
+	return request("GET", `/v2/sync/changes?limit=100&types=${types}`, { token });
+}
+
 export function apiVersion(token: string, id: string, n: number): Promise<{ body: string }> {
 	return request<{ body: string }>("GET", `/v2/templates/${id}/versions/${n}`, { token });
 }
