@@ -153,6 +153,8 @@ What Phase 3 did, and where it differs from the list above:
 
 ### Phase 4: Verify
 
+Progress: the `designer.test.tsx` item is done (component-level tests for the accordion, the editor tabs and the removed tabs and Properties section being absent; page-level checks are in `designerPage.test.tsx`). Screenshots and the real-browser checks are not done.
+
 - Update `src/test/designer.test.tsx` (139 lines; it does not reference tab names, so little should change). Add tests for the accordion, the editor tabs, and the removed tabs being absent.
 - Capture screenshots at 1920, 1440, 1366 and 390 px using the headless-browser approach from the mobile check. Confirm no horizontal overflow and tap targets of at least 44 px on touch.
 - Done when: `pnpm test`, `tsc`, and Biome are clean, and the screenshots match section 2.

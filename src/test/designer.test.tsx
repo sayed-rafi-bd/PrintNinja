@@ -175,6 +175,35 @@ describe("ControlsAccordion", () => {
     fireEvent.click(screen.getByRole("button", { name: "Diff v1 to v2" }));
     expect(p.openDiff).toHaveBeenCalledWith(versions[1], versions[0]);
   });
+
+  it("renders each section header as an h2, so heading order stays under the page h1", () => {
+    render(<ControlsAccordion {...props()} defaultOpen={ALL_OPEN} sampleData={<p>x</p>} />);
+    const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(headings).toEqual(["Templates", "Page Setup", "Sample data", "Versions", "Helpers"]);
+    expect(screen.queryByRole("heading", { level: 3, name: /Templates|Page Setup|Versions|Helpers/ })).not.toBeInTheDocument();
+  });
+
+  it("has no Properties, Visual or Preview section, since those were removed", () => {
+    render(<ControlsAccordion {...props()} defaultOpen={ALL_OPEN} sampleData={<p>x</p>} />);
+    for (const name of ["Properties", "Visual", "Visual Canvas", "Preview", "Variables"]) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByText("Properties")).not.toBeInTheDocument();
+  });
+
+  it("reports page size, orientation and zoom only once, in Page Setup", () => {
+    render(<ControlsAccordion {...props()} defaultOpen={ALL_OPEN} />);
+    expect(screen.getAllByLabelText("Width (mm)")).toHaveLength(1);
+    expect(screen.getAllByLabelText("Height (mm)")).toHaveLength(1);
+    expect(screen.getAllByRole("combobox", { name: "Orientation" })).toHaveLength(1);
+    expect(screen.queryByText(/zoom/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps a closed section's contents out of the page", () => {
+    render(<ControlsAccordion {...props()} defaultOpen={[]} />);
+    expect(screen.queryByLabelText("Width (mm)")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restore version 1" })).not.toBeInTheDocument();
+  });
 });
 
 describe("ClassWarnings", () => {
@@ -362,6 +391,41 @@ describe("EditorPane", () => {
     expect(screen.getByText("watch out")).toBeInTheDocument();
     openTab("README");
     expect(screen.queryByText("watch out")).not.toBeInTheDocument();
+  });
+
+  it("offers exactly HTML, CSS and README, and none of the removed tabs", () => {
+    render(<EditorPane {...props()} />);
+    const list = screen.getByRole("tablist", { name: "Editor files" });
+    expect(Array.from(list.querySelectorAll('[role="tab"]')).map((t) => t.textContent)).toEqual(["HTML", "CSS", "README"]);
+    for (const name of ["Visual", "Preview", "Canvas", "Code", "Variables", "Sample data"]) {
+      expect(screen.queryByRole("tab", { name })).not.toBeInTheDocument();
+    }
+  });
+
+  it("shows one panel at a time, though both code editors stay in the DOM", () => {
+    render(<EditorPane {...props()} />);
+    const html = screen.getByLabelText("HTML editor");
+    const css = screen.getByLabelText("CSS editor");
+    const panel = (el: HTMLElement) => el.closest('[role="tabpanel"]') as HTMLElement;
+    expect(panel(html)).toHaveAttribute("data-state", "active");
+    expect(panel(css)).toHaveAttribute("data-state", "inactive");
+    openTab("CSS");
+    expect(panel(html)).toHaveAttribute("data-state", "inactive");
+    expect(panel(css)).toHaveAttribute("data-state", "active");
+    expect(screen.queryByText(/README — Label/)).not.toBeInTheDocument();
+  });
+
+  it("shows the template name beside the tabs", () => {
+    render(<EditorPane {...props()} />);
+    expect(screen.getByTitle("Label")).toHaveTextContent("Label");
+  });
+
+  it("renders the initial HTML and CSS without reporting a change", () => {
+    const p = props();
+    render(<EditorPane {...p} />);
+    expect(screen.getByLabelText("HTML editor")).toHaveTextContent("<b>x</b>");
+    expect(screen.getByLabelText("CSS editor")).toHaveTextContent("b{}");
+    expect(p.onHtmlChange).not.toHaveBeenCalled();
   });
 });
 
