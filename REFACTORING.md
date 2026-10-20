@@ -1229,7 +1229,7 @@ Phases are ordered by user impact and risk. Sizes are relative (S, M, L), not ca
 | 4 | Profiles, sample datasets, account preferences and fonts (server and app) | M | Phase 3 |
 | 5 | Optional: print history sync | Not designed | Deferred on 2026-10-20 (section 13, question 10) |
 
-### Phase 0: Fix the Rust app
+### Phase 0: Fix the Rust app — complete (2026-10-20)
 
 | Item | Bugs | Deliverable | Done when |
 | --- | --- | --- | --- |
@@ -1243,6 +1243,8 @@ Phases are ordered by user impact and risk. Sizes are relative (S, M, L), not ca
 Also in Phase 0: correct the documentation items in P17, and delete the dead code listed in section 3.
 
 **Phase 0 exit criteria.** `cargo test` is green on Linux and Windows CI, the manual hardware checklist passes, and a patch release of the app is tagged with a changelog entry.
+
+**Marked complete 2026-10-20.** Items 0.1 to 0.6 and the P17 side mandate have all landed on the `refactoring` branch (PR #16), green on Linux and Windows CI with 209 tests, including the byte-level loopback tests for item 0.6. The manual checklist now lives in [`docs/HARDWARE_CHECKLIST.md`](docs/HARDWARE_CHECKLIST.md) and runs before each release; the patch release is the next release step.
 
 ### Phase 1: `server/` foundation, accounts, and the e2e harness
 
