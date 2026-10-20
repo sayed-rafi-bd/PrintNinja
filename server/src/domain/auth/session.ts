@@ -37,3 +37,14 @@ export async function logoutUser(
 	}
 	await deps.sessions.deleteByTokenHash(deps.tokens.hash(token));
 }
+
+/**
+ * Deletes sessions expired at or before now. Runs at startup and on the
+ * hourly timer (no job queue); tombstones are Phase 2's stream, so
+ * sessions are all this pass touches.
+ */
+export async function purgeExpiredSessions(
+	deps: Pick<AuthDeps, "sessions" | "clock">,
+): Promise<number> {
+	return deps.sessions.deleteExpired(deps.clock.now());
+}

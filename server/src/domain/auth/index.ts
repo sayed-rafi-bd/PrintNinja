@@ -2,7 +2,7 @@ export { registerUser } from "./register.js";
 export type { RegisterInput, RegisterResult } from "./register.js";
 export { loginUser } from "./login.js";
 export type { LoginInput, LoginResult } from "./login.js";
-export { logoutUser, validateSession } from "./session.js";
+export { logoutUser, purgeExpiredSessions, validateSession } from "./session.js";
 export type { SessionResult } from "./session.js";
 export {
 	HANDLE_MAX_LENGTH,

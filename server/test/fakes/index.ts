@@ -74,6 +74,16 @@ export function createFakeSessions(users: {
 		async deleteByTokenHash(tokenHash) {
 			byHash.delete(tokenHash);
 		},
+		async deleteExpired(now) {
+			let count = 0;
+			for (const [hash, session] of byHash) {
+				if (session.expiresAt <= now) {
+					byHash.delete(hash);
+					count += 1;
+				}
+			}
+			return count;
+		},
 	};
 }
 

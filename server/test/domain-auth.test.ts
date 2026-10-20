@@ -10,6 +10,7 @@ import {
 import {
 	loginUser,
 	logoutUser,
+	purgeExpiredSessions,
 	registerUser,
 	validateSession,
 } from "../src/domain/auth/index.js";
@@ -194,5 +195,29 @@ describe("logoutUser and validateSession", () => {
 		await expect(validateSession(d, token)).rejects.toBeInstanceOf(
 			UnauthorizedError,
 		);
+	});
+});
+
+describe("purgeExpiredSessions", () => {
+	it("deletes only the expired sessions and reports the count", async () => {
+		const d = deps();
+		const { token, user } = await registered(d);
+		await d.sessions.create({
+			tokenHash: "expired-hash",
+			userId: user.id,
+			expiresAt: new Date("2020-01-01T00:00:00Z"),
+		});
+
+		expect(await purgeExpiredSessions(d)).toBe(1);
+		await expect(validateSession(d, token)).resolves.toMatchObject({
+			user: { id: user.id },
+		});
+	});
+
+	it("reports zero when nothing is expired", async () => {
+		const d = deps();
+		await registered(d);
+
+		expect(await purgeExpiredSessions(d)).toBe(0);
 	});
 });

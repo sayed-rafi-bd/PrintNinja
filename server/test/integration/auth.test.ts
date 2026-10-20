@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../../src/app.js";
+import { purgeExpiredSessions } from "../../src/domain/auth/index.js";
 import { testConfig } from "../helpers.js";
 import { realDeps, startTestDatabase, truncateAll, type TestStack } from "./db.js";
 
@@ -207,5 +208,24 @@ describe("v2 endpoint contracts", () => {
 			result.status === "fulfilled" ? result.value.status : "rejected",
 		);
 		expect(statuses.sort()).toEqual([201, 409]);
+	});
+
+	it("purges expired sessions and keeps the live ones", async () => {
+		const reg = await register("henry", "password123");
+		await stack.db.session.create({
+			data: {
+				tokenHash: "dead".repeat(16),
+				userId: reg.body.user.id,
+				expiresAt: new Date("2020-01-01T00:00:00Z"),
+			},
+		});
+
+		expect(await purgeExpiredSessions(realDeps(stack.db))).toBe(1);
+
+		const remaining = await stack.db.session.findMany();
+		expect(remaining).toHaveLength(1);
+		expect(remaining[0]?.tokenHash).toBe(
+			createHash("sha256").update(reg.body.token, "utf8").digest("hex"),
+		);
 	});
 });

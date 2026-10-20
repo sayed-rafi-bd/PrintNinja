@@ -44,6 +44,8 @@ export interface SessionRepository {
 	): Promise<{ session: SessionRecord; user: UserRecord } | null>;
 	/** Logout is idempotent: unknown tokens delete nothing and still succeed. */
 	deleteByTokenHash(tokenHash: string): Promise<void>;
+	/** Deletes sessions expired at or before now. Returns the count. */
+	deleteExpired(now: Date): Promise<number>;
 }
 
 export interface PasswordHasher {

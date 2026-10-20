@@ -32,6 +32,13 @@ export function createSessionRepository(db: DbClient): SessionRepository {
 		async deleteByTokenHash(tokenHash: string): Promise<void> {
 			await db.session.deleteMany({ where: { tokenHash } });
 		},
+
+		async deleteExpired(now: Date): Promise<number> {
+			const result = await db.session.deleteMany({
+				where: { expiresAt: { lte: now } },
+			});
+			return result.count;
+		},
 	};
 }
 
