@@ -326,14 +326,18 @@ pub fn get_sync_state(conn: &Connection) -> AppResult<SyncState> {
     }
 }
 
-/// Rows waiting to be pushed: id, server id (null when never pushed),
-/// name and the current version's HTML/CSS plus the base revision the
-/// next push must send as `if_revision`.
+/// Rows waiting to be pushed: everything the PUT needs plus the base
+/// revision the next push must send as `if_revision` (null for rows
+/// that never reached the server).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DirtyTemplate {
     pub id: i64,
     pub server_id: Option<String>,
     pub name: String,
+    pub summary: String,
+    pub page_w_mm: i64,
+    pub page_h_mm: i64,
+    pub readme: String,
     pub html: String,
     pub css: String,
     pub base_revision: Option<i64>,
@@ -341,7 +345,8 @@ pub struct DirtyTemplate {
 
 pub fn list_dirty(conn: &Connection) -> AppResult<Vec<DirtyTemplate>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.server_id, t.name, v.html, v.css, t.base_revision
+        "SELECT t.id, t.server_id, t.name, t.summary, t.page_w_mm, t.page_h_mm, t.readme,
+                v.html, v.css, t.base_revision
          FROM templates t LEFT JOIN template_versions v ON v.id = t.current_version_id
          WHERE t.sync_state = 'dirty'
          ORDER BY t.id",
@@ -351,9 +356,13 @@ pub fn list_dirty(conn: &Connection) -> AppResult<Vec<DirtyTemplate>> {
             id: r.get(0)?,
             server_id: r.get(1)?,
             name: r.get(2)?,
-            html: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
-            css: r.get::<_, Option<String>>(4)?.unwrap_or_default(),
-            base_revision: r.get(5)?,
+            summary: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            page_w_mm: r.get(4)?,
+            page_h_mm: r.get(5)?,
+            readme: r.get::<_, Option<String>>(6)?.unwrap_or_default(),
+            html: r.get::<_, Option<String>>(7)?.unwrap_or_default(),
+            css: r.get::<_, Option<String>>(8)?.unwrap_or_default(),
+            base_revision: r.get(9)?,
         })
     })?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
