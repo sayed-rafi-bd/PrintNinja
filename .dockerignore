@@ -1,0 +1,15 @@
+# Docker build context is the repository root (the image needs the
+# workspace lockfile). Exclude everything the build does not read.
+.git/
+node_modules/
+src-tauri/target/
+server-legacy/target/
+server/dist/
+server/node_modules/
+server/src/infra/prisma/generated/
+e2e/node_modules/
+test-results/
+playwright-report/
+coverage/
+*.tsbuildinfo
+.env

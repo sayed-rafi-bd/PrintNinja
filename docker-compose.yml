@@ -1,0 +1,46 @@
+# PrintNinja v2 stack (REFACTORING.md Phase 1, packaging): the TypeScript
+# service plus PostgreSQL. First boot migrates the database itself (see
+# server/docker-entrypoint.sh), so `docker compose up` lands healthy.
+name: printninja
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: printninja
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (see env.example)}
+      POSTGRES_DB: printninja
+    volumes:
+      # Deliberately NOT the legacy volume: printninja_printninja-data
+      # holds the old SQLite file (the Phase 2 import reads it), and
+      # mounting it at a PGDATA path would break initdb.
+      - printninja-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U printninja"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Same variable name as the legacy service, different meaning:
+      # the v2 service wants a PostgreSQL URL, not a SQLite path.
+      DATABASE_URL: postgresql://printninja:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (see env.example)}@db:5432/printninja
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:1420}
+      HOST: 0.0.0.0
+      PORT: 3001
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DOCS_ENABLED: ${DOCS_ENABLED:-true}
+    ports:
+      - "${SERVER_PORT:-3001}:3001"
+
+volumes:
+  printninja-pgdata:
