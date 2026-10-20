@@ -57,12 +57,18 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 32,
-                    "pattern": "^[A-Za-z0-9_-]+$"
+                    "pattern": "^[A-Za-z0-9_-]+$",
+                    "examples": [
+                      "Rafi"
+                    ]
                   },
                   "password": {
                     "type": "string",
                     "minLength": 8,
-                    "maxLength": 128
+                    "maxLength": 128,
+                    "examples": [
+                      "correct horse battery"
+                    ]
                   }
                 },
                 "required": [
@@ -352,12 +358,18 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 32,
-                    "pattern": "^[A-Za-z0-9_-]+$"
+                    "pattern": "^[A-Za-z0-9_-]+$",
+                    "examples": [
+                      "Rafi"
+                    ]
                   },
                   "password": {
                     "type": "string",
                     "minLength": 8,
-                    "maxLength": 128
+                    "maxLength": 128,
+                    "examples": [
+                      "correct horse battery"
+                    ]
                   }
                 },
                 "required": [
@@ -974,7 +986,10 @@
                   "name": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 120
+                    "maxLength": 120,
+                    "examples": [
+                      "Shipping Label 4x6"
+                    ]
                   },
                   "summary": {
                     "type": "string",
@@ -983,12 +998,18 @@
                   "page_w_mm": {
                     "type": "number",
                     "exclusiveMinimum": 0,
-                    "maximum": 2000
+                    "maximum": 2000,
+                    "examples": [
+                      101.6
+                    ]
                   },
                   "page_h_mm": {
                     "type": "number",
                     "exclusiveMinimum": 0,
-                    "maximum": 2000
+                    "maximum": 2000,
+                    "examples": [
+                      152.4
+                    ]
                   },
                   "language": {
                     "type": "string",
@@ -997,7 +1018,10 @@
                     ]
                   },
                   "body": {
-                    "type": "string"
+                    "type": "string",
+                    "examples": [
+                      "<div>{{order.id}}</div>"
+                    ]
                   },
                   "css": {
                     "type": "string"
@@ -1006,6 +1030,9 @@
                     "type": "string"
                   },
                   "if_revision": {
+                    "examples": [
+                      3
+                    ],
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 9007199254740991

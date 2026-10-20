@@ -64,7 +64,9 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
+                        /** @example Rafi */
                         handle: string;
+                        /** @example correct horse battery */
                         password: string;
                     };
                 };
@@ -178,7 +180,9 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
+                        /** @example Rafi */
                         handle: string;
+                        /** @example correct horse battery */
                         password: string;
                     };
                 };
@@ -540,15 +544,20 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
+                        /** @example Shipping Label 4x6 */
                         name: string;
                         summary?: string;
+                        /** @example 101.6 */
                         page_w_mm: number;
+                        /** @example 152.4 */
                         page_h_mm: number;
                         /** @enum {string} */
                         language?: "html";
+                        /** @example <div>{{order.id}}</div> */
                         body: string;
                         css?: string;
                         readme?: string;
+                        /** @example 3 */
                         if_revision?: number;
                         version?: {
                             /** @enum {string} */

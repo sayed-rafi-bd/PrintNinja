@@ -19,8 +19,11 @@ export const authCredentials = z.object({
 		.trim()
 		.min(HANDLE_MIN_LENGTH)
 		.max(HANDLE_MAX_LENGTH)
-		.regex(HANDLE_PATTERN, "Handle must be 1-32 of A-Z a-z 0-9 _ -"),
-	password: z.string().min(PASSWORD_MIN_LENGTH).max(PASSWORD_MAX_LENGTH),
+		.regex(HANDLE_PATTERN, "Handle must be 1-32 of A-Z a-z 0-9 _ -")
+		.meta({ examples: ["Rafi"] }),
+	password: z.string().min(PASSWORD_MIN_LENGTH).max(PASSWORD_MAX_LENGTH).meta({
+		examples: ["correct horse battery"],
+	}),
 });
 
 export const userSchema = z.object({

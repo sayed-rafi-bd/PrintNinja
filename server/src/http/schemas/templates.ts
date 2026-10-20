@@ -13,15 +13,15 @@ import { errorBody } from "./error.js";
 // string passes .max() yet exceeds the cap — pinned by tests).
 
 export const putTemplateRequest = z.object({
-	name: z.string().trim().min(1).max(TEMPLATE_NAME_MAX),
+	name: z.string().trim().min(1).max(TEMPLATE_NAME_MAX).meta({ examples: ["Shipping Label 4x6"] }),
 	summary: z.string().trim().max(TEMPLATE_SUMMARY_MAX).optional(),
-	page_w_mm: z.number().gt(PAGE_MM_MIN).max(PAGE_MM_MAX),
-	page_h_mm: z.number().gt(PAGE_MM_MIN).max(PAGE_MM_MAX),
+	page_w_mm: z.number().gt(PAGE_MM_MIN).max(PAGE_MM_MAX).meta({ examples: [101.6] }),
+	page_h_mm: z.number().gt(PAGE_MM_MIN).max(PAGE_MM_MAX).meta({ examples: [152.4] }),
 	language: z.literal("html").optional(),
-	body: z.string(),
+	body: z.string().meta({ examples: ["<div>{{order.id}}</div>"] }),
 	css: z.string().optional(),
 	readme: z.string().optional(),
-	if_revision: z.number().int().min(1).optional(),
+	if_revision: z.number().int().min(1).optional().meta({ examples: [3] }),
 	version: z
 		.object({
 			created_by: z.enum(["manual", "autosave"]).optional(),
