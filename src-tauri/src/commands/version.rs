@@ -1,5 +1,6 @@
 use crate::db::DbState;
 use crate::error::{AppError, AppResult};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -51,7 +52,7 @@ pub fn list_versions(db: State<DbState>, template_id: i64) -> AppResult<Vec<Temp
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     let mut stmt = conn.prepare(
         &format!("SELECT {VERSION_COLUMNS} FROM template_versions WHERE template_id = ?1 ORDER BY version_no DESC"),
@@ -80,6 +81,18 @@ pub struct CreateVersionRequest {
 
 #[tauri::command]
 pub fn create_version(db: State<DbState>, req: CreateVersionRequest) -> AppResult<TemplateVersion> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    create_version_conn(guard.connection(), req)
+}
+
+/// Body of `create_version`, taking the shared connection so integration
+/// tests can drive it without a Tauri `State` (Phase 0, P2).
+pub fn create_version_conn(
+    conn: &Connection,
+    req: CreateVersionRequest,
+) -> AppResult<TemplateVersion> {
     let created_by = req.created_by.unwrap_or_else(|| "manual".to_string());
     if !VALID_CREATED_BY.contains(&created_by.as_str()) {
         return Err(AppError::Validation(format!(
@@ -94,11 +107,7 @@ pub fn create_version(db: State<DbState>, req: CreateVersionRequest) -> AppResul
         )));
     }
 
-    let guard = db
-        .lock()
-        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let mut conn = guard.connection()?;
-    let tx = conn.transaction()?;
+    let tx = conn.unchecked_transaction()?;
 
     let template_exists: i64 = tx.query_row(
         "SELECT COUNT(*) FROM templates WHERE id = ?1",
@@ -161,8 +170,8 @@ pub fn restore_version(db: State<DbState>, id: i64) -> AppResult<TemplateVersion
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let mut conn = guard.connection()?;
-    let tx = conn.transaction()?;
+    let conn = guard.connection();
+    let tx = conn.unchecked_transaction()?;
 
     let (template_id, html, css, compiled_css, compiled_key): (
         i64,
@@ -222,7 +231,7 @@ pub fn delete_version(db: State<DbState>, id: i64) -> AppResult<()> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     let affected = conn.execute("DELETE FROM template_versions WHERE id = ?1", [id])?;
     if affected == 0 {
@@ -251,7 +260,7 @@ pub fn diff_versions(db: State<DbState>, from_id: i64, to_id: i64) -> AppResult<
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     let load = |id: i64| -> rusqlite::Result<(i64, i64, String, String)> {
         conn.query_row(

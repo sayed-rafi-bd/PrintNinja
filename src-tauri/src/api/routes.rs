@@ -141,9 +141,7 @@ fn check_auth(
     let Ok(guard) = auth.db.lock() else {
         return AuthDecision::Unavailable;
     };
-    let Ok(conn) = guard.connection() else {
-        return AuthDecision::Unavailable;
-    };
+    let conn = guard.connection();
 
     // Idempotency replay must not print twice (PLANNING.md 7.1).
     if let Some(key) = idempotency.and_then(|v| v.to_str().ok()) {
@@ -159,7 +157,7 @@ fn check_auth(
         }
     }
 
-    if crate::commands::api::verify_stored_key(&conn, token) {
+    if crate::commands::api::verify_stored_key(conn, token) {
         AuthDecision::Allow
     } else {
         AuthDecision::Unauthorized
@@ -187,7 +185,7 @@ async fn health() -> Json<Value> {
 async fn list_printers(State(state): State<ApiState>) -> Result<Json<Value>, ApiRejection> {
     let db = state.db;
     let guard = db.lock().map_err(ApiRejection::from)?;
-    let conn = guard.connection().map_err(ApiRejection::from)?;
+    let conn = guard.connection();
 
     let mut stmt = conn
         .prepare("SELECT id, name, type, address, language FROM printers ORDER BY name")
@@ -214,7 +212,7 @@ async fn list_printers(State(state): State<ApiState>) -> Result<Json<Value>, Api
 async fn list_templates(State(state): State<ApiState>) -> Result<Json<Value>, ApiRejection> {
     let db = state.db;
     let guard = db.lock().map_err(ApiRejection::from)?;
-    let conn = guard.connection().map_err(ApiRejection::from)?;
+    let conn = guard.connection();
 
     let mut stmt = conn
         .prepare(
@@ -281,7 +279,7 @@ async fn print_job(
     // command, and the pipeline takes the lock again for its history write.
     let (template_id, version_id) = {
         let guard = db.lock().map_err(ApiRejection::from)?;
-        let conn = guard.connection().map_err(ApiRejection::from)?;
+        let conn = guard.connection();
 
         let template_id: Option<i64> = match &req.template {
             Some(name) if !name.is_empty() => Some(
@@ -401,9 +399,29 @@ async fn batch_print(
         .as_array()
         .ok_or_else(|| ApiRejection::BadRequest("data must be a JSON array".into()))?;
 
+    // Validate the request shape before touching the database (P3): an
+    // empty batch queues nothing to print, and a 5,000-record cap is what
+    // the IPC batch command enforces too.
+    if records.is_empty() {
+        return Err(ApiRejection::BadRequest(
+            "data must contain at least one record".into(),
+        ));
+    }
+    if records.len() > crate::commands::batch::DEFAULT_MAX_RECORDS {
+        return Err(ApiRejection::BadRequest(format!(
+            "batch too large: {} records (max {})",
+            records.len(),
+            crate::commands::batch::DEFAULT_MAX_RECORDS
+        )));
+    }
+    let mode = req.mode.unwrap_or_else(|| "per_record".into());
+    if !["single_job", "per_record"].contains(&mode.as_str()) {
+        return Err(ApiRejection::BadRequest(format!("invalid mode '{}'", mode)));
+    }
+
     let guard = db.lock().map_err(ApiRejection::from)?;
-    let mut conn = guard.connection().map_err(ApiRejection::from)?;
-    let tx = conn.transaction().map_err(ApiRejection::from)?;
+    let conn = guard.connection();
+    let tx = conn.unchecked_transaction().map_err(ApiRejection::from)?;
 
     let template_id: i64 = match &req.template {
         Some(n) if !n.is_empty() => tx
@@ -424,11 +442,6 @@ async fn batch_print(
         )
         .map_err(|_| ApiRejection::NotFound(format!("Printer '{}' not found", req.printer)))?;
 
-    let mode = req.mode.unwrap_or_else(|| "per_record".into());
-    if !["single_job", "per_record"].contains(&mode.as_str()) {
-        return Err(ApiRejection::BadRequest(format!("invalid mode '{}'", mode)));
-    }
-
     tx.execute(
         "INSERT INTO batches (template_id, printer_id, total, mode, status)
          VALUES (?1, ?2, ?3, ?4, 'queued')",
@@ -447,22 +460,33 @@ async fn batch_print(
         .flatten();
 
     if mode == "per_record" {
-        for (i, _) in records.iter().enumerate() {
+        // Each record's own payload rides on its row in `data_json` —
+        // without it the worker would have nothing to render (P3).
+        for (i, record) in records.iter().enumerate() {
             tx.execute(
                 "INSERT INTO print_jobs
                    (batch_id, record_index, template_id, template_version_id,
-                    printer_id, source, status, copies, is_test)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'api', 'queued', 1, 0)",
-                rusqlite::params![batch_id, i as i64, template_id, version_id, printer_id],
+                    printer_id, source, status, copies, is_test, data_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'api', 'queued', 1, 0, ?6)",
+                rusqlite::params![
+                    batch_id,
+                    i as i64,
+                    template_id,
+                    version_id,
+                    printer_id,
+                    record.to_string()
+                ],
             )
             .map_err(ApiRejection::from)?;
         }
     } else {
+        // Single job: the whole array is one row's payload, rendered once
+        // by the template as an array context.
         tx.execute(
             "INSERT INTO print_jobs
                (batch_id, record_index, template_id, template_version_id,
-                printer_id, source, status, copies, rendered_html, is_test)
-             VALUES (?1, 0, ?2, ?3, ?4, 'api', 'queued', 1, ?5, 0)",
+                printer_id, source, status, copies, is_test, data_json)
+             VALUES (?1, 0, ?2, ?3, ?4, 'api', 'queued', 1, 0, ?5)",
             rusqlite::params![
                 batch_id,
                 template_id,
@@ -475,6 +499,10 @@ async fn batch_print(
     }
 
     tx.commit().map_err(ApiRejection::from)?;
+    drop(guard);
+
+    // The rows are `queued`; wake the worker that prints them (P3).
+    state.queue.kick();
 
     Ok((
         StatusCode::ACCEPTED,
@@ -493,7 +521,7 @@ async fn get_job(
 ) -> Result<Json<Value>, ApiRejection> {
     let db = state.db.clone();
     let guard = db.lock().map_err(ApiRejection::from)?;
-    let conn = guard.connection().map_err(ApiRejection::from)?;
+    let conn = guard.connection();
 
     let mut stmt = conn
         .prepare(
@@ -522,7 +550,7 @@ async fn get_job(
 async fn list_jobs(State(state): State<ApiState>) -> Result<Json<Value>, ApiRejection> {
     let db = state.db;
     let guard = db.lock().map_err(ApiRejection::from)?;
-    let conn = guard.connection().map_err(ApiRejection::from)?;
+    let conn = guard.connection();
 
     let mut stmt = conn
         .prepare(
@@ -554,20 +582,37 @@ async fn retry_job(
 ) -> Result<Json<Value>, ApiRejection> {
     let db = state.db.clone();
     let guard = db.lock().map_err(ApiRejection::from)?;
-    let conn = guard.connection().map_err(ApiRejection::from)?;
+    let conn = guard.connection();
 
+    // Only a terminal row may be re-queued: re-queuing a `printing` row
+    // would let the worker claim it while the direct pipeline still runs
+    // it, and re-queuing a `queued` row would print it twice (P3).
     let affected = conn
         .execute(
             "UPDATE print_jobs SET status='queued', error=NULL, started_at=NULL,
                     finished_at=NULL, duration_ms=NULL
-             WHERE id = ?1",
+             WHERE id = ?1 AND status IN ('failed', 'cancelled')",
             [id],
         )
         .map_err(ApiRejection::from)?;
 
     if affected == 0 {
-        return Err(ApiRejection::NotFound(format!("Job {} not found", id)));
+        let exists: i64 = conn
+            .query_row("SELECT COUNT(*) FROM print_jobs WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap_or(0);
+        if exists == 0 {
+            return Err(ApiRejection::NotFound(format!("Job {} not found", id)));
+        }
+        return Err(ApiRejection::BadRequest(
+            "Only a failed or cancelled job can be retried; a finished job reprints instead".into(),
+        ));
     }
+    drop(guard);
+
+    // The row is `queued` again; wake the worker that prints it (P3).
+    state.queue.kick();
 
     Ok(Json(
         json!({ "job_id": id.to_string(), "status": "queued" }),
@@ -580,7 +625,7 @@ async fn cancel_job(
 ) -> Result<StatusCode, ApiRejection> {
     let db = state.db.clone();
     let guard = db.lock().map_err(ApiRejection::from)?;
-    let conn = guard.connection().map_err(ApiRejection::from)?;
+    let conn = guard.connection();
 
     let affected = conn
         .execute(

@@ -8,7 +8,7 @@ pub fn get_trusted_sources(db: State<DbState>) -> AppResult<Vec<String>> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     let raw: Option<String> = conn
         .query_row(
@@ -41,7 +41,7 @@ pub fn set_trusted_sources(db: State<DbState>, sources: Vec<String>) -> AppResul
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     conn.execute(
         "INSERT INTO settings (key, value) VALUES ('trusted_sources', ?1)
@@ -57,7 +57,7 @@ pub fn get_setting(db: State<DbState>, key: String) -> AppResult<Option<String>>
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;
     let mut rows = stmt.query([&key])?;
@@ -78,7 +78,7 @@ pub fn set_setting(db: State<DbState>, key: String, value: String) -> AppResult<
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     conn.execute(
         "INSERT INTO settings (key, value) VALUES (?1, ?2)

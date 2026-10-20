@@ -5,16 +5,68 @@ use std::time::Duration;
 /// IPP (Internet Printing Protocol) sender for Wi-Fi/LAN printers
 pub struct IppPrinter {
     pub name: String,
+    /// The address exactly as stored in `printers.address`; [`IppPrinter::new`]
+    /// parses it into `endpoint`.
     pub address: String,
-    pub port: u16,
+    endpoint: IppEndpoint,
+}
+
+/// Where a job is POSTed and which `printer-uri` to declare, parsed from the
+/// stored address. The path used to be hard-coded to port 631 and
+/// `/ipp/print` (P7); anything omitted here takes the IPP default.
+///
+/// Accepted forms:
+/// - `192.168.1.10`                  → `http://192.168.1.10:631/ipp/print`
+/// - `printer.local:8080/ipp/files` → `http://printer.local:8080/ipp/files`
+/// - `ipp://host/ipp/print`          → `http://host:631/ipp/print`
+/// - `https://host/printers/1`       → `https://host:443/printers/1`
+#[derive(Debug, Clone)]
+struct IppEndpoint {
+    /// Absolute HTTP(S) URL the document is POSTed to.
+    url: String,
+    /// `printer-uri` attribute for the request body (an `ipp(s)://` URI).
+    printer_uri: String,
+}
+
+fn parse_endpoint(address: &str) -> IppEndpoint {
+    let address = address.trim();
+    let (scheme, rest) = match address.find("://") {
+        Some(i) => (&address[..i], &address[i + 3..]),
+        None => ("http", address),
+    };
+    let (authority, path) = match rest.find('/') {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, ""),
+    };
+    let path = if path.is_empty() { "/ipp/print" } else { path };
+    let tls = matches!(scheme, "https" | "ipps");
+
+    // A trailing `:<number>` is a port. This also tells a bare `[::1]` apart
+    // from `[::1]:631`; an unbracketed IPv6 address is not supported.
+    let has_port = authority
+        .rsplit_once(':')
+        .is_some_and(|(_, port)| port.parse::<u16>().is_ok());
+    let authority = if has_port {
+        authority.to_string()
+    } else {
+        // 631 is the IPP port, not the HTTP one — a bare host means the
+        // printer's standard IPP endpoint.
+        format!("{authority}:{}", if tls { 443 } else { 631 })
+    };
+
+    IppEndpoint {
+        url: format!("{}://{authority}{path}", if tls { "https" } else { "http" }),
+        printer_uri: format!("{}://{authority}{path}", if tls { "ipps" } else { "ipp" }),
+    }
 }
 
 impl IppPrinter {
     pub fn new(name: String, address: String) -> Self {
+        let endpoint = parse_endpoint(&address);
         Self {
             name,
             address,
-            port: 631,
+            endpoint,
         }
     }
 
@@ -30,20 +82,35 @@ impl IppPrinter {
             .build()
             .map_err(|e| e.to_string())?;
 
-        let url = format!("http://{}:{}/ipp/print", self.address, self.port);
-
         let response = client
-            .post(&url)
+            .post(&self.endpoint.url)
             .header("Content-Type", "application/ipp")
             .body(ipp_body)
             .send()
             .await
             .map_err(|e| format!("IPP request failed: {}", e))?;
 
-        if response.status().is_success() {
+        let http = response.status();
+        if !http.is_success() {
+            return Err(format!("IPP server returned HTTP {http}"));
+        }
+
+        // HTTP 200 is not a printed label. RFC 8010 puts the outcome in the
+        // response body — version (2), status code (2), request-id (4) — and
+        // this used to be skipped, so a printer that rejected the job counted
+        // as printed (P7).
+        let body = response
+            .bytes()
+            .await
+            .map_err(|e| format!("IPP response unreadable: {e}"))?;
+        let status = parse_status_code(&body)?;
+        if status >> 8 == 0 {
             Ok(())
         } else {
-            Err(format!("IPP server returned {}", response.status()))
+            Err(format!(
+                "printer rejected the job: {}",
+                describe_status(status)
+            ))
         }
     }
 
@@ -66,8 +133,12 @@ impl IppPrinter {
         // RFC 8011 requires these three first in order
         Self::push_attr(&mut body, 0x47, "attributes-charset", b"utf-8");
         Self::push_attr(&mut body, 0x48, "attributes-natural-language", b"en");
-        let uri = format!("ipp://{}:{}/ipp/print", self.address, self.port);
-        Self::push_attr(&mut body, 0x45, "printer-uri", uri.as_bytes());
+        Self::push_attr(
+            &mut body,
+            0x45,
+            "printer-uri",
+            self.endpoint.printer_uri.as_bytes(),
+        );
 
         // Optional but expected by most servers
         Self::push_attr(&mut body, 0x42, "requesting-user-name", b"PrintNinja");
@@ -120,6 +191,52 @@ impl PrinterTransport for IppPrinter {
     async fn send(&self, job: RenderedJob) -> Result<(), String> {
         self.send_pdf(&job.data, job.copies).await
     }
+}
+
+/// The status code from an IPP response body: version (2 bytes), status code
+/// (2), request-id (4), then the attribute groups.
+fn parse_status_code(body: &[u8]) -> Result<u16, String> {
+    if body.len() < 4 {
+        return Err(format!(
+            "malformed IPP response: {} bytes, need at least 4",
+            body.len()
+        ));
+    }
+    // Versions in the wild are 1.0, 1.1, 2.0, 2.1, 2.2. Anything else means
+    // this is not an IPP body at all — e.g. a proxy's HTML error page behind
+    // a 200.
+    if body[0] != 0x01 && body[0] != 0x02 {
+        return Err(format!(
+            "not an IPP response (starts 0x{:02x}{:02x})",
+            body[0], body[1]
+        ));
+    }
+    Ok(u16::from_be_bytes([body[2], body[3]]))
+}
+
+/// Human-readable form of an IPP status code, for the error the job records.
+/// The common codes are named; the rest fall back to their class (RFC 8011
+/// §14.1: 0x04xx client errors, 0x05xx server errors) and the hex value.
+fn describe_status(status: u16) -> String {
+    let name = match status {
+        0x0000 => "successful-ok",
+        0x0001 => "successful-ok-ignored-or-substituted-attributes",
+        0x0002 => "successful-ok-conflicting-attributes",
+        0x0400 => "client-error-bad-request",
+        0x0500 => "server-error-internal-error",
+        0x0501 => "server-error-operation-not-supported",
+        0x0502 => "server-error-service-unavailable",
+        0x0503 => "server-error-version-not-supported",
+        0x0504 => "server-error-device-error",
+        0x0505 => "server-error-temporary-error",
+        0x0506 => "server-error-not-accepting-jobs",
+        0x0507 => "server-error-busy",
+        0x0508 => "server-error-job-canceled",
+        _ if status >> 8 == 0x04 => "client-error",
+        _ if status >> 8 == 0x05 => "server-error",
+        _ => "unexpected status",
+    };
+    format!("IPP status 0x{status:04x} ({name})")
 }
 
 #[cfg(test)]
@@ -178,5 +295,60 @@ mod tests {
         let b = body(1);
         // After request-id (8 bytes), group tag 0x01
         assert_eq!(b[8], 0x01);
+    }
+
+    // ── P7: configurable endpoint ────────────────────────────────
+
+    #[test]
+    fn a_bare_host_keeps_the_ipp_defaults() {
+        let p = IppPrinter::new("t".into(), "192.168.1.10".into());
+        assert_eq!(p.endpoint.url, "http://192.168.1.10:631/ipp/print");
+        assert_eq!(p.endpoint.printer_uri, "ipp://192.168.1.10:631/ipp/print");
+    }
+
+    #[test]
+    fn port_and_path_come_from_the_address() {
+        let p = IppPrinter::new("t".into(), "printer.local:8080/ipp/files".into());
+        assert_eq!(p.endpoint.url, "http://printer.local:8080/ipp/files");
+        assert_eq!(p.endpoint.printer_uri, "ipp://printer.local:8080/ipp/files");
+    }
+
+    #[test]
+    fn an_ipp_scheme_address_is_posted_over_http() {
+        let p = IppPrinter::new("t".into(), "ipp://host/ipp/print".into());
+        assert_eq!(p.endpoint.url, "http://host:631/ipp/print");
+        assert_eq!(p.endpoint.printer_uri, "ipp://host:631/ipp/print");
+    }
+
+    #[test]
+    fn an_https_address_keeps_tls_and_uses_the_https_port() {
+        let p = IppPrinter::new("t".into(), "https://host/printers/1".into());
+        assert_eq!(p.endpoint.url, "https://host:443/printers/1");
+        assert_eq!(p.endpoint.printer_uri, "ipps://host:443/printers/1");
+    }
+
+    // ── P7: the response status, not the HTTP status, decides ──────
+
+    #[test]
+    fn status_code_is_read_from_the_body() {
+        // version 1.1, status 0x0502, request-id 1
+        let body = [0x01, 0x01, 0x05, 0x02, 0x00, 0x00, 0x00, 0x01];
+        assert_eq!(parse_status_code(&body).unwrap(), 0x0502);
+    }
+
+    #[test]
+    fn a_body_that_is_not_ipp_is_refused() {
+        assert!(parse_status_code(b"<html>maintenance page</html>").is_err());
+        assert!(parse_status_code(&[0x01, 0x01]).is_err());
+    }
+
+    #[test]
+    fn statuses_are_described_with_class_and_hex() {
+        assert!(describe_status(0x0502).contains("0x0502"));
+        assert!(describe_status(0x0502).contains("service-unavailable"));
+        // Unknown codes still name their class and value.
+        assert!(describe_status(0x040f).contains("0x040f"));
+        assert!(describe_status(0x040f).contains("client-error"));
+        assert!(describe_status(0x05ff).contains("server-error"));
     }
 }

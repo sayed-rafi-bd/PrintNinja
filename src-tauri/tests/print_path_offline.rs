@@ -25,6 +25,9 @@ const PRINT_PATH: &[(&str, &str)] = &[
         "commands/history.rs",
         include_str!("../src/commands/history.rs"),
     ),
+    // The worker is the one consumer of `queued` rows: reprint, retry and
+    // batch all land here, so it is part of every print's path.
+    ("worker.rs", include_str!("../src/worker.rs")),
     (
         "render/handlebars.rs",
         include_str!("../src/render/handlebars.rs"),
@@ -109,7 +112,10 @@ fn the_renderer_refuses_remote_references() {
 #[test]
 fn reprint_replays_the_rendered_html_of_the_original_job() {
     let history = include_str!("../src/commands/history.rs");
-    let start = history.find("fn reprint_job").expect("reprint_job exists");
+    // The implementation, not the `#[tauri::command]` wrapper around it.
+    let start = history
+        .find("fn reprint_job_conn")
+        .expect("reprint_job_conn exists");
     let body = &history[start..];
     let end = body[1..].find("\n}").map(|i| i + 1).unwrap_or(body.len());
     let body = &body[..end];

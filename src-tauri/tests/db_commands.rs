@@ -3,29 +3,20 @@
 //! These run against a real temp-file SQLite database so the SQL is actually
 //! exercised (not just type-checked). Tauri `State` is unwrapped via a helper.
 
-use printninja_lib::db::Database;
+use printninja_lib::db::{strip_sqlite_prefix, Database};
 use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
 
 /// Build an in-memory DB seeded with the app schema, returning the DbState
 /// and a guard so the connection stays alive.
 fn test_db() -> (Arc<Mutex<Database>>, Connection) {
-    let mut conn = Connection::open_in_memory().expect("open in-memory db");
-    conn.execute_batch(include_str!("../src/db/schema.sql"))
-        .expect("apply schema");
-    printninja_lib::db::ensure_v2_schema(&mut conn).expect("apply v2 schema");
+    let conn = Connection::open_in_memory().expect("open in-memory db");
+    printninja_lib::db::init(&conn).expect("apply schema");
 
     let dir = std::env::temp_dir();
     let path = dir.join(format!("printninja_test_{}.db", uuid::Uuid::new_v4()));
-    let mut file_conn = Connection::open(&path).expect("open file db");
-    file_conn
-        .execute_batch(include_str!("../src/db/schema.sql"))
-        .expect("apply schema");
-    printninja_lib::db::ensure_v2_schema(&mut file_conn).expect("apply v2 schema");
-    drop(file_conn);
-
-    let url = format!("sqlite:{}", path.display());
-    (Arc::new(Mutex::new(Database { url })), conn)
+    let db = Database::open(&format!("sqlite:{}", path.display())).expect("open file db");
+    (Arc::new(Mutex::new(db)), conn)
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -34,15 +25,14 @@ fn test_db() -> (Arc<Mutex<Database>>, Connection) {
 
 #[test]
 fn db_path_strips_sqlite_prefix() {
-    let db = Database {
-        url: "sqlite:/tmp/printninja.db".to_string(),
-    };
-    assert_eq!(db.path(), "/tmp/printninja.db");
-
-    let plain = Database {
-        url: "/tmp/printninja.db".to_string(),
-    };
-    assert_eq!(plain.path(), "/tmp/printninja.db");
+    assert_eq!(
+        strip_sqlite_prefix("sqlite:/tmp/printninja.db"),
+        "/tmp/printninja.db"
+    );
+    assert_eq!(
+        strip_sqlite_prefix("/tmp/printninja.db"),
+        "/tmp/printninja.db"
+    );
 }
 
 #[test]
@@ -244,7 +234,7 @@ fn version_columns(conn: &Connection) -> Vec<String> {
 fn compiled_css_columns_are_added_to_an_existing_database() {
     // A database created before per-template compilation: schema.sql alone has
     // no compiled_* columns, and already holds a saved version.
-    let mut conn = Connection::open_in_memory().unwrap();
+    let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(include_str!("../src/db/schema.sql"))
         .unwrap();
     assert!(!version_columns(&conn).contains(&"compiled_css".to_string()));
@@ -263,7 +253,7 @@ fn compiled_css_columns_are_added_to_an_existing_database() {
     )
     .unwrap();
 
-    printninja_lib::db::ensure_v2_schema(&mut conn).unwrap();
+    printninja_lib::db::ensure_v2_schema(&conn).unwrap();
 
     let cols = version_columns(&conn);
     assert!(cols.contains(&"compiled_css".to_string()), "{cols:?}");
@@ -287,10 +277,10 @@ fn compiled_css_columns_are_added_to_an_existing_database() {
 
 #[test]
 fn compiled_css_migration_is_idempotent() {
-    let (_state, mut conn) = test_db();
+    let (_state, conn) = test_db();
     let before = version_columns(&conn);
-    printninja_lib::db::ensure_v2_schema(&mut conn).unwrap();
-    printninja_lib::db::ensure_v2_schema(&mut conn).unwrap();
+    printninja_lib::db::ensure_v2_schema(&conn).unwrap();
+    printninja_lib::db::ensure_v2_schema(&conn).unwrap();
     assert_eq!(version_columns(&conn), before);
 }
 

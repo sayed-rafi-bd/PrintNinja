@@ -29,7 +29,7 @@ pub fn list_templates(db: State<DbState>) -> AppResult<Vec<Template>> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     let mut stmt = conn.prepare(
         "SELECT id, name, current_version_id, page_w_mm, page_h_mm,
@@ -124,8 +124,8 @@ pub fn create_template(db: State<DbState>, req: CreateTemplateRequest) -> AppRes
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let mut conn = guard.connection()?;
-    let tx = conn.transaction()?;
+    let conn = guard.connection();
+    let tx = conn.unchecked_transaction()?;
 
     let exists: i64 = tx.query_row(
         "SELECT COUNT(*) FROM templates WHERE name = ?1 COLLATE NOCASE",
@@ -168,7 +168,7 @@ pub fn create_template(db: State<DbState>, req: CreateTemplateRequest) -> AppRes
 
     tx.commit()?;
 
-    let template = tx_guard_to_template(&conn, template_id)?;
+    let template = tx_guard_to_template(conn, template_id)?;
     Ok(template)
 }
 
@@ -206,8 +206,8 @@ pub fn get_template(db: State<DbState>, id: i64) -> AppResult<Template> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
-    tx_guard_to_template(&conn, id).map_err(|e| match e {
+    let conn = guard.connection();
+    tx_guard_to_template(conn, id).map_err(|e| match e {
         rusqlite::Error::QueryReturnedNoRows => {
             AppError::NotFound(format!("Template {} not found", id))
         }
@@ -235,8 +235,8 @@ pub fn update_template_meta(
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
-    write_template_meta(&conn, &req)
+    let conn = guard.connection();
+    write_template_meta(conn, &req)
 }
 
 /// The work behind [`update_template_meta`], split out so the SQL runs in tests
@@ -291,7 +291,7 @@ pub fn update_readme(db: State<DbState>, req: UpdateReadmeRequest) -> AppResult<
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
     let affected = conn.execute(
         "UPDATE templates SET readme = ?1, updated_at = datetime('now') WHERE id = ?2",
         rusqlite::params![req.readme, req.id],
@@ -299,7 +299,7 @@ pub fn update_readme(db: State<DbState>, req: UpdateReadmeRequest) -> AppResult<
     if affected == 0 {
         return Err(AppError::NotFound(format!("Template {} not found", req.id)));
     }
-    tx_guard_to_template(&conn, req.id).map_err(Into::into)
+    tx_guard_to_template(conn, req.id).map_err(Into::into)
 }
 
 #[tauri::command]
@@ -307,7 +307,7 @@ pub fn delete_template(db: State<DbState>, id: i64) -> AppResult<()> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     let affected = conn.execute("DELETE FROM templates WHERE id = ?1", [id])?;
     if affected == 0 {
@@ -329,8 +329,8 @@ pub fn set_publish_info(db: State<DbState>, req: SetPublishInfoRequest) -> AppRe
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
-    write_publish_info(&conn, &req)
+    let conn = guard.connection();
+    write_publish_info(conn, &req)
 }
 
 /// The work behind [`set_publish_info`], split out for tests.
@@ -369,7 +369,7 @@ pub fn clear_publish_info(db: State<DbState>, req: ClearPublishInfoRequest) -> A
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
     let affected = conn.execute(
         "UPDATE templates SET remote_id = NULL, published_at = NULL WHERE id = ?1",
         [req.id],
@@ -377,7 +377,7 @@ pub fn clear_publish_info(db: State<DbState>, req: ClearPublishInfoRequest) -> A
     if affected == 0 {
         return Err(AppError::NotFound(format!("Template {} not found", req.id)));
     }
-    tx_guard_to_template(&conn, req.id).map_err(Into::into)
+    tx_guard_to_template(conn, req.id).map_err(Into::into)
 }
 
 #[derive(Debug, Deserialize)]
@@ -397,7 +397,7 @@ pub fn update_template_origin(db: State<DbState>, req: UpdateOriginRequest) -> A
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
     let affected = conn.execute(
         "UPDATE templates SET origin = ?1, origin_owner = ?2 WHERE id = ?3",
         rusqlite::params![req.origin, req.origin_owner, req.id],
@@ -405,5 +405,5 @@ pub fn update_template_origin(db: State<DbState>, req: UpdateOriginRequest) -> A
     if affected == 0 {
         return Err(AppError::NotFound(format!("Template {} not found", req.id)));
     }
-    tx_guard_to_template(&conn, req.id).map_err(Into::into)
+    tx_guard_to_template(conn, req.id).map_err(Into::into)
 }

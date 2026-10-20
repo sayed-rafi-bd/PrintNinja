@@ -25,7 +25,7 @@ fn port_from_settings(db: &DbState, key: &str, default: u16) -> u16 {
     db.lock()
         .ok()
         .and_then(|g| {
-            let conn = g.connection().ok()?;
+            let conn = g.connection();
             conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
                 r.get::<_, String>(0)
             })
@@ -40,7 +40,7 @@ fn bool_from_settings(db: &DbState, key: &str, default: bool) -> bool {
     db.lock()
         .ok()
         .and_then(|g| {
-            let conn = g.connection().ok()?;
+            let conn = g.connection();
             conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
                 r.get::<_, String>(0)
             })
@@ -60,7 +60,6 @@ pub fn get_api_status(_app: AppHandle, db: State<DbState>) -> AppResult<ApiStatu
         .ok()
         .and_then(|g| {
             g.connection()
-                .ok()?
                 .query_row(
                     "SELECT value FROM settings WHERE key = 'api_bind'",
                     [],
@@ -110,7 +109,7 @@ pub fn start_api_server(
         let guard = db
             .lock()
             .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-        let conn = guard.connection()?;
+        let conn = guard.connection();
         conn.execute(
             "INSERT INTO settings (key, value) VALUES ('api_port', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -145,7 +144,7 @@ pub fn start_api_server(
         let guard = db
             .lock()
             .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-        let conn = guard.connection()?;
+        let conn = guard.connection();
         conn.execute(
             "INSERT INTO settings (key, value) VALUES ('api_bind', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -220,7 +219,7 @@ pub fn regenerate_api_key(db: State<DbState>) -> AppResult<String> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     conn.execute(
         "INSERT INTO api_clients (name, key_hash, scopes) VALUES ('default', ?1, 'print,read')

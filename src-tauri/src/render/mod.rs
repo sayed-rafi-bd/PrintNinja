@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::path::PathBuf;
 
 pub mod handlebars;
@@ -13,6 +13,31 @@ impl PdfRenderer {
         Self { cache_dir }
     }
 
+    /// Write one job's HTML to a **uniquely named** file and return the path.
+    ///
+    /// Every job shares this cache directory and jobs for different printers
+    /// render in parallel, so the fixed `render.html` this used to write let
+    /// one job hand its document to another printer (P6).
+    pub async fn write_job_html(&self, html: &str) -> Result<PathBuf> {
+        let path = self
+            .cache_dir
+            .join(format!("render-{}.html", uuid::Uuid::new_v4()));
+        tokio::fs::write(&path, html).await?;
+        // Keep the newest input next to `last-render.pdf` for debugging;
+        // it is an artifact, never read back by a render.
+        let _ = tokio::fs::copy(&path, self.cache_dir.join("last-render.html")).await;
+        Ok(path)
+    }
+
+    /// Render `html` to a PDF.
+    ///
+    /// Page size and orientation arrive in the document's `@page` rule
+    /// (`apply_layout`), so the parameters here are for the log line.
+    ///
+    /// Failure is an error, never a placeholder (P5). When Edge was missing
+    /// or failed — and on every non-Windows platform — this used to return a
+    /// stub PDF containing the word "PrintNinja" and the job reported success,
+    /// so the operator saw a printed page instead of their label.
     pub async fn html_to_pdf(
         &self,
         html: &str,
@@ -20,29 +45,26 @@ impl PdfRenderer {
         page_height_mm: f64,
         orientation: &str,
     ) -> Result<Vec<u8>> {
-        let html_path = self.cache_dir.join("render.html");
-        tokio::fs::write(&html_path, html).await?;
+        tracing::debug!(page_width_mm, page_height_mm, orientation, "rendering PDF");
+        let html_path = self.write_job_html(html).await?;
 
         #[cfg(windows)]
-        {
-            self.webview2_print_to_pdf(&html_path, page_width_mm, page_height_mm, orientation)
-                .await
-        }
+        let result = self.webview2_print_to_pdf(&html_path).await;
 
         #[cfg(not(windows))]
-        {
-            self.fallback_pdf(page_width_mm, page_height_mm, orientation)
-        }
+        let result = Err(anyhow!(
+            "no PDF renderer on this platform (printing needs Windows with Edge/WebView2); \
+             refusing to send a placeholder instead of the document"
+        ));
+
+        // Per-job file: removed whether the render worked or not, so the
+        // cache dir does not grow a file per print.
+        let _ = tokio::fs::remove_file(&html_path).await;
+        result
     }
 
     #[cfg(windows)]
-    async fn webview2_print_to_pdf(
-        &self,
-        html_path: &PathBuf,
-        page_width_mm: f64,
-        page_height_mm: f64,
-        orientation: &str,
-    ) -> Result<Vec<u8>> {
+    async fn webview2_print_to_pdf(&self, html_path: &PathBuf) -> Result<Vec<u8>> {
         use std::os::windows::process::CommandExt;
         use std::process::Command;
         use windows::Win32::System::Threading::CREATE_NO_WINDOW;
@@ -55,87 +77,66 @@ impl PdfRenderer {
         // A throwaway profile makes headless Edge start its own process
         // instead of delegating to the user's already-open Edge window.
         let profile_dir = self.cache_dir.join(format!("edge-profile-{job}"));
-        let width_in = page_width_mm / 25.4;
-        let height_in = page_height_mm / 25.4;
-        let (w, h) = if orientation == "landscape" {
-            (height_in, width_in)
-        } else {
-            (width_in, height_in)
-        };
 
         let edge_paths = [
             r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
             r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
         ];
 
-        let edge_path = edge_paths.iter().find(|p| std::path::Path::new(p).exists());
+        let edge_path = edge_paths
+            .iter()
+            .find(|p| std::path::Path::new(p).exists())
+            .ok_or_else(|| {
+                anyhow!(
+                    "Microsoft Edge not found (looked in {}) — PDF rendering needs \
+                     Edge/WebView2; the job cannot print without it",
+                    edge_paths.join(", ")
+                )
+            })?;
 
-        if let Some(edge) = edge_path {
-            let html_url = format!("file:///{}", html_path.to_string_lossy().replace('\\', "/"));
-            let output = Command::new(edge)
-                .args(&[
-                    "--headless",
-                    "--disable-gpu",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "--print-to-pdf-no-header",
-                    "--no-pdf-header-footer",
-                    &format!("--user-data-dir={}", profile_dir.to_string_lossy()),
-                    &format!("--print-to-pdf={}", pdf_path.to_string_lossy()),
-                    &html_url,
-                ])
-                .creation_flags(CREATE_NO_WINDOW.0)
-                .output()?;
+        let html_url = format!("file:///{}", html_path.to_string_lossy().replace('\\', "/"));
+        let output = Command::new(edge_path)
+            .args(&[
+                "--headless",
+                "--disable-gpu",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--print-to-pdf-no-header",
+                "--no-pdf-header-footer",
+                &format!("--user-data-dir={}", profile_dir.to_string_lossy()),
+                &format!("--print-to-pdf={}", pdf_path.to_string_lossy()),
+                &html_url,
+            ])
+            .creation_flags(CREATE_NO_WINDOW.0)
+            .output()?;
 
-            let _ = std::fs::remove_dir_all(&profile_dir);
+        let _ = std::fs::remove_dir_all(&profile_dir);
 
-            if output.status.success() && pdf_path.exists() {
-                let bytes = tokio::fs::read(&pdf_path).await;
-                // Keep the newest render next to render.html so it can be
-                // opened directly to tell "Edge output is unstyled" apart
-                // from "styling is lost later in the print path".
-                let last = self.cache_dir.join("last-render.pdf");
-                let _ = std::fs::copy(&pdf_path, &last);
-                let _ = std::fs::remove_file(&pdf_path);
-                tracing::info!(
-                    html = %html_url,
-                    pdf = %last.display(),
-                    bytes = bytes.as_ref().map_or(0, |b| b.len()),
-                    "rendered PDF with Edge"
-                );
-                return bytes.map_err(Into::into);
-            }
-
-            tracing::warn!(
-                status = ?output.status,
-                pdf_written = pdf_path.exists(),
-                stderr = %String::from_utf8_lossy(&output.stderr),
-                "Edge print-to-pdf did not produce a PDF"
+        if output.status.success() && pdf_path.exists() {
+            let bytes = tokio::fs::read(&pdf_path).await;
+            // Keep the newest render next to last-render.html so it can be
+            // opened directly to tell "Edge output is unstyled" apart from
+            // "styling is lost later in the print path".
+            let last = self.cache_dir.join("last-render.pdf");
+            let _ = std::fs::copy(&pdf_path, &last);
+            let _ = std::fs::remove_file(&pdf_path);
+            tracing::info!(
+                html = %html_url,
+                pdf = %last.display(),
+                bytes = bytes.as_ref().map_or(0, |b| b.len()),
+                "rendered PDF with Edge"
             );
+            return bytes.map_err(Into::into);
         }
 
-        tracing::warn!("Edge print-to-pdf failed or msedge.exe not found; using placeholder PDF");
-        self.fallback_pdf(w * 25.4, h * 25.4, orientation)
-    }
-
-    fn fallback_pdf(
-        &self,
-        page_width_mm: f64,
-        page_height_mm: f64,
-        orientation: &str,
-    ) -> Result<Vec<u8>> {
-        let width_pt = page_width_mm * 2.83465;
-        let height_pt = page_height_mm * 2.83465;
-        let (final_width, final_height) = if orientation == "landscape" {
-            (height_pt, width_pt)
-        } else {
-            (width_pt, height_pt)
-        };
-
-        let pdf = format!(
-            "%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {:.2} {:.2}] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n4 0 obj\n<< /Length 44 >>\nstream\nBT /F1 12 Tf 100 700 Td (PrintNinja) Tj ET\nendstream\nendobj\n5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\nxref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000266 00000 n \n0000000360 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n437\n%%EOF",
-            final_width, final_height
-        );
-        Ok(pdf.into_bytes())
+        // Edge failed or wrote nothing. Report it; do not fall back to a
+        // placeholder (P5).
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let _ = std::fs::remove_file(&pdf_path);
+        Err(anyhow!(
+            "Edge print-to-pdf did not produce a PDF (status {}, stderr: {})",
+            output.status,
+            stderr.trim()
+        ))
     }
 }

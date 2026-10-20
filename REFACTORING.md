@@ -1,6 +1,6 @@
 # PrintNinja Backend Redesign: Design and Implementation Plan
 
-Oct 20, 2026 · @Rafi · Revision 2: the server is the source of truth and the app is a cache; the service lives in `server/`; Playwright end-to-end tests added
+Oct 20, 2026 · @Rafi · Revision 2: the server is the source of truth and the app is a cache; the service lives in `server/`; Playwright end-to-end tests added. All sign-offs approved and all 24 questions answered on 2026-10-20 (sections 1 and 13).
 
 ## 1. Summary
 
@@ -20,15 +20,17 @@ Keep printing on the user's machine. Make a new TypeScript service (Fastify, Pri
 4. **Same repository.** The service is in `server/`, the Rust share server moves to `server-legacy/`, and one pnpm workspace holds the app, the service and the end-to-end suite (section 5).
 5. **Frontend end-to-end tests** with Playwright, selecting elements by `data-testid`. Printing is not covered by end-to-end tests because it cannot be driven from a browser (section 11).
 
-**Sign-off needed before Phase 1**
+**Sign-offs: all seven approved on 2026-10-20**
 
-1. Hardware boundary: printers, transports, the queue, batches, job history, the local API and deep links stay in the local Rust agent. Everything the user owns moves to the server and is cached locally (section 6).
-2. PostgreSQL for dev, CI and production instead of staying on SQLite (section 4).
-3. A new `/v2` contract with new error and pagination shapes instead of keeping `/v1` (section 9).
-4. Phase 0: fix the Rust print-path bugs first (section 12).
-5. Whether print history should sync to the cloud, which is optional Phase 5 (section 13).
-6. The server is the source of truth, with a delta sync endpoint and mandatory revisions (sections 6 and 8).
-7. The Playwright suite and a fake desktop agent for it (section 11).
+1. Hardware boundary: printers, transports, the queue, batches, job history, the local API and deep links stay in the local Rust agent. Everything the user owns moves to the server and is cached locally (section 6). — **approved**
+2. PostgreSQL for dev, CI and production instead of staying on SQLite (section 4). — **approved**
+3. A new `/v2` contract with new error and pagination shapes instead of keeping `/v1` (section 9). — **approved**
+4. Phase 0: fix the Rust print-path bugs first (section 12). — **approved**
+5. Print history sync to the cloud: **deferred** — out of scope for now; it remains an optional, undesigned Phase 5 (section 13, question 10).
+6. The server is the source of truth, with a delta sync endpoint and mandatory revisions (sections 6 and 8). — **approved**
+7. The Playwright suite and a fake desktop agent for it (section 11). — **approved**
+
+All 24 questions are answered in section 13, so nothing is left open before the Phase 1 spike.
 
 ## 2. Existing architecture
 
@@ -104,7 +106,7 @@ Eighteen defects, ranked by user impact. Ten are critical or high and sit in the
 | P11 | High | `db/mod.rs` | `connection()` opens a new SQLite connection on every call; the `Mutex` guards only the URL string. No WAL, no busy timeout. Three schema paths exist: `schema.sql`, `ensure_v2_schema` and a plugin migration. | Phase 0 |
 | P12 | High | `api/routes.rs`, `commands/api.rs` | API-key `scopes`, `allowed_ips` and `last_used_at` are stored but never checked. The idempotency check runs before the job row exists, so two concurrent requests both print. `callback_url` is accepted and ignored. The hand-written `openapi.rs` says `data` is required; the code treats it as optional. | Phase 0 |
 | P13 | High | `data/fetcher.rs`, `deeplink.rs` | `data_url` fetches any URL and follows 5 redirects with no scheme or address limits, so a caller can reach `localhost` or LAN hosts. | Phase 0 |
-| P14 | Medium | `commands/print.rs:318-321` | Handlebars is skipped when no data is given, and errors are swallowed with `unwrap_or(html)`. The preview uses handlebars.js with bwip-js barcodes; the Rust renderer has no barcode helper, so print and preview can differ. | Phase 0, pick one engine |
+| P14 | Medium | `commands/print.rs:318-321` | Handlebars is skipped when no data is given, and errors are swallowed with `unwrap_or(html)`, so the raw template source can be printed instead of the rendered label. | Phase 0, pick one engine |
 | P15 | Medium | `commands/print.rs:522` | The job row is written after printing ends: `started_at` equals `finished_at`, `job_id` is empty on a render failure, and a running job is invisible. | Phase 0 |
 | P16 | Medium | `server/src/main.rs`, `share/client.ts` | Timestamps mix `YYYY-MM-DD HH:MM:SS` with no zone and RFC 3339; the client compares them with `new Date()`, which reads the first as local time. Private templates use `''` instead of null. A duplicate handle returns 400, not 409. LIKE wildcards in search are not escaped. The list returns a bare array with no total. A first `PUT` without a `publish` flag publishes the template (`main.rs:480`), and a later `PUT` without `readme` or `summary` resets them to empty while `css` is kept (`main.rs:440, 475`). | Backend, Phases 1 and 2 |
 | P17 | Low | README, `package.json` | The README says secrets live in `keyring`; there is no such dependency and the session token is plain text in `settings`. `retention_days` has no Rust code behind it. `server/Cargo.toml` says Turso-backed but uses SQLite, and `server/Caddyfile` refers to a compose profile `https` that `docker-compose.yml` does not define. `server/dockerignore` has no leading dot, so Docker never reads it as `.dockerignore`. The app's manifests all agree on 0.5.0. | Docs |
@@ -302,7 +304,7 @@ Printing never calls the hosted API, so it keeps working with the network off.
 | Sample datasets | Server | Cache | No UI or Rust command persists them today; the Designer panel for them is a Phase 4 deliverable |
 | Printer profiles | Server, keyed by template and printer name | Cache | A profile for a printer name this PC does not have stays dormant |
 | Fonts | Server (bytes and metadata) | Metadata, plus the file on disk once downloaded | Edge needs the file on disk to render |
-| Account preferences: `ui_density`, `brand_name`, `brand_logo` | Server | Cache | The full key list is audited in Phase 4 (open question 23) |
+| Account preferences: `ui_density`, `brand_name`, `brand_logo` | Server | Cache | The full key list is audited in Phase 4 (question 23, answered: everything not on the allow-list stays local) |
 | Printers and their addresses | **Local only** | n/a | A printer is a device attached to this PC or its network |
 | Transports, print queue, print worker | **Local only** | n/a | |
 | Jobs, batches, job history | **Local only** | n/a | Optional cloud sync is Phase 5 |
@@ -340,7 +342,7 @@ With a cache and a stored session, the app opens in **offline mode** when the se
 
 ### Where the sync engine runs
 
-In the frontend (`src/lib/sync/`), written against the generated client. The Rust side gets a few transactional cache commands (below) and stays free of HTTP code for this purpose. The cost: if the local REST API is used with no window open, it prints the cache as of the last sync. Moving the engine into Rust, which already has `reqwest`, is the answer if headless use matters (open question 22).
+In the frontend (`src/lib/sync/`), written against the generated client. The Rust side gets a few transactional cache commands (below) and stays free of HTTP code for this purpose. The cost: if the local REST API is used with no window open, it prints the cache as of the last sync. Moving the engine into Rust, which already has `reqwest`, is the answer if headless use matters (question 22, answered: frontend first).
 
 ### What happens to the 48 IPC commands
 
@@ -724,7 +726,7 @@ Rules the table cannot show. Where v1 differs, the bullet says so:
 - **`GET /v2/templates/{id}`.** No `Authorization` header: published templates only. A valid token: also your own private ones. A token that is present but invalid: `401`, as v1 does. `If-None-Match: "<revision>"` returns `304` when the revision is unchanged.
 - **Saved list.** A template its author has unpublished is left out of `GET /v2/saved`, as in v1. The saved manifest (below) reports it as `withdrawn`, which is how a cache learns about it without guessing from an absence.
 - **`AuthResponse`.** v1 returned `{ token, user }`. v2 adds `expires_at`.
-- **`POST .../use`** counts `count` (default 1) per call from a signed-in user. The app sends counts it queued while printing offline. See open question 8 in section 13.
+- **`POST .../use`** counts `count` (default 1) per call from a signed-in user. The app sends counts it queued while printing offline. See question 8 in section 13 (answered: rate limit only for now).
 
 ### Delta sync: `GET /v2/sync/changes`
 
@@ -781,7 +783,7 @@ interface PutFontRequest { family: string; style?: string; weight?: string; form
 
 - **Settings allow-list.** The server accepts only keys it lists (`ui_density`, `brand_name`, `brand_logo` to start). Anything else is `400`, so a device setting can never be stored by accident.
 - **Fonts.** Metadata and bytes are two calls, so a failed upload leaves a font with `sha256: null`, which the app shows as not ready and retries. The server checks the first bytes against the declared format, rejects files over 5 MiB (`FONT_MAX_BYTES`), and computes the SHA-256. Fonts are private to their owner and are never part of a published template.
-- **Profiles.** `printer_key` is the lowercase printer name, matching how the local API finds printers (open question 20).
+- **Profiles.** `printer_key` is the lowercase printer name, matching how the local API finds printers (question 20, answered).
 
 ### Version types
 
@@ -964,7 +966,7 @@ The goal is one place where the contract is written. Here it is the Zod schemas 
 
 ### The local agent side
 
-The Rust IPC commands cannot come from OpenAPI. Phase 3 adds a thin typed `agent` module in the frontend that wraps each `invoke` call with explicit argument and result types, replacing `invoke<any>`. The Playwright fake agent implements the same module's types, so a command that changes shape breaks the e2e build. A Vitest check compares the command names the app calls with the `generate_handler!` list in `src-tauri/src/lib.rs`, so a command that exists in only one place fails fast (section 11). Generating those types from Rust with `tauri-specta` is attractive, but I have not verified it against Tauri 2 and this project, so it stays an open question, not a commitment. The local REST API (port 17717) keeps its hand-written `openapi.rs`, which is corrected in Phase 0 (the `data` field is optional in code and required in the document).
+The Rust IPC commands cannot come from OpenAPI. Phase 3 adds a thin typed `agent` module in the frontend that wraps each `invoke` call with explicit argument and result types, replacing `invoke<any>`. The Playwright fake agent implements the same module's types, so a command that changes shape breaks the e2e build. A Vitest check compares the command names the app calls with the `generate_handler!` list in `src-tauri/src/lib.rs`, so a command that exists in only one place fails fast (section 11). Generating those types from Rust with `tauri-specta` is attractive, but it is not verified against Tauri 2 and this project, so the answer to question 11 in section 13 is: hand-written module first, evaluate `tauri-specta` as a Phase 3 spike, not a commitment. The local REST API (port 17717) keeps its hand-written `openapi.rs`, which is corrected in Phase 0 (the `data` field is optional in code and required in the document).
 
 ### Unverified compatibility
 
@@ -1151,7 +1153,7 @@ Toasts come from `sonner`. I have not checked whether its options can carry a te
 | F11 | Account preferences | Brand name and density set on A appear on B after a pull. `settings-api-port` set on A does not appear on B |
 | F12 | Offline start and recovery | With a cache and a session, the API is made unreachable (`route.abort`) and the app reloads: it opens with `offline-banner`, templates are listed, `sync-status` is `offline`. Local edits show `pending`. The API comes back, the next pull succeeds and the edits are pushed. Without a cache the unreachable screen shows and Retry works |
 | F13 | No network at print time | On the Print page, with request logging on, selecting a template and a printer and filling the form causes **zero** requests to the API. The test never presses `print-submit` |
-| F14 | First sync of a migrated install | The fake agent starts with local-only templates and one template whose server copy changed. The "back up N templates" dialog appears (open question 18). After confirming, the local-only ones are pushed private, and the changed one shows `conflict` instead of being overwritten |
+| F14 | First sync of a migrated install | The fake agent starts with local-only templates and one template whose server copy changed. The "back up N templates" dialog appears (question 18, answered: ask once, allow decline). After confirming, the local-only ones are pushed private, and the changed one shows `conflict` instead of being overwritten |
 
 Roughly 14 specs and 20 to 25 test cases; the target is under 6 minutes on 4 workers.
 
@@ -1225,7 +1227,7 @@ Phases are ordered by user impact and risk. Sizes are relative (S, M, L), not ca
 | 2 | Templates, versions, community, saved, delta sync, and data migration | L | Phase 1 |
 | 3 | App switch: local cache, sync engine, typed client, offline start, e2e suite, cutover | L | Phase 2, item 0.2 |
 | 4 | Profiles, sample datasets, account preferences and fonts (server and app) | M | Phase 3 |
-| 5 | Optional: print history sync | Not designed | Sign-off (section 13, question 10) |
+| 5 | Optional: print history sync | Not designed | Deferred on 2026-10-20 (section 13, question 10) |
 
 ### Phase 0: Fix the Rust app
 
@@ -1299,7 +1301,7 @@ Work in `src/` and `src-tauri/`, then production.
 | Local schema migration (Rust) | The columns and the `sync_state` table in section 6, added through the single migration path from 0.2. Existing `remote_id` becomes `server_id`. Local-only templates get a new `server_id` and the state `dirty` with no server copy |
 | Cache commands (Rust) | Section 6, with tests: `cache_apply_changes` is atomic with the cursor; a dirty row survives a pull; a tombstone is removed only when the server confirms; clearing the account wipes the cache. Cases live in `cache_cases.json` and run in Rust and against the fake agent |
 | Sync engine (`src/lib/sync/`) | Pull, push, triggers, backoff, the `reset` pass, queued use counts |
-| Adoption pass for existing installs | On first sync, a local row whose content matches the server is `synced`; one that differs is a `conflict`, not an overwrite; a local-only template is pushed as private after a one-time confirmation dialog (open question 18) |
+| Adoption pass for existing installs | On first sync, a local row whose content matches the server is `synced`; one that differs is a `conflict`, not an overwrite; a local-only template is pushed as private after a one-time confirmation dialog (question 18, answered) |
 | UI | Sync status chip and staleness, conflict dialog, "Save version" through the server, version panel reading from the server, the sync bar reduced to Publish, Unpublish and Sync now |
 | Offline start | The gate opens from the cache when the server is unreachable (section 6) |
 | Entity types de-duplicated, typed `agent` module | Closes P18; `invoke<any>` removed in the Designer |
@@ -1317,7 +1319,7 @@ A vertical slice: server and app together, because each piece is small.
 | --- | --- |
 | Models and endpoints 23 to 32 | `SampleDataset`, `PrinterProfile`, `UserSetting`, `Font`, `FontFile`; sync records for each |
 | Settings audit | Every key in the local `settings` table is classified as device (stays) or account (moves). The allow-list is enforced on the server |
-| Profiles | Existing local profiles are uploaded keyed by printer name (open question 20); `list_profiles`, `save_profile`, `delete_profile` become cache writes |
+| Profiles | Existing local profiles are uploaded keyed by printer name (question 20, answered); `list_profiles`, `save_profile`, `delete_profile` become cache writes |
 | Fonts | Upload, magic-byte and size checks, background download with a SHA-256 check into the cache folder, `font-state-<id>` in Settings |
 | Sample datasets | The Designer panel that saves and selects datasets, which has no persistence today |
 | Account preferences | Density, brand name and logo through the cache |
@@ -1396,7 +1398,7 @@ Documentation only; none has been run. Script names are proposals. Server script
 | App end-to-end tests (root) | `pnpm e2e`; `pnpm e2e --ui` while writing specs |
 | Browser for the e2e tests | `pnpm exec playwright install chromium` |
 
-## 13. Decisions, trade-offs and open questions
+## 13. Decisions, trade-offs and answered questions
 
 ### Key decisions
 
@@ -1435,34 +1437,36 @@ Documentation only; none has been run. Script names are proposals. Server script
 - **A real cache costs more than two buttons.** It needs a sync engine, a local migration, conflict handling and a status display. In return, the manual Save and Refresh steps go away, and so does the "refresh before printing" habit that `MIGRATION_PLAN.md` listed as a risk.
 - **Strict layering for about 15 endpoints.** Three layers and a fake per port is more than a tiny service needs. I kept it because the brief asks for business logic independent of the database, and because it is what makes the unit tests fast. Everything beyond that (events, a unit of work, a service bus) is deliberately left out.
 
-### Open questions
+### Questions: all answered on 2026-10-20
 
-Each has a recommendation, so you can answer with "yes" where you agree.
+Every question this plan left open now has an answer and nothing blocks Phase 1. Rows marked **Decided** were answered directly by Rafi; the others were accepted as the recommendation given here. Two answers changed a recommendation: there are no released `/v1` clients, so no `/v1` adapter is needed (question 2), and TLS is terminated by an existing reverse proxy rather than a new Caddy (question 7).
 
-1. **The sign-offs from the summary.** Hardware boundary, PostgreSQL, a `/v2` contract, Phase 0 first, whether print history syncs (question 10), the server as source of truth with delta sync, and the Playwright suite. Recommended: approve all except print history sync.
-2. **Do released apps depend on `/v1`?** `CHANGELOG.md` lists the sign-in and Save to server work as Unreleased, so I assumed no released build uses the hosted API yet. If one does, add a thin `/v1` adapter for the cutover window. Recommended: confirm; no adapter if confirmed.
-3. **Who may register?** Registration is open today, and `MIGRATION_PLAN.md` leaves it open and says to restrict at the network level. Recommended: keep open for now; add an invite code only if the service is public.
-4. **Account recovery and deletion.** Accounts have no email, so a lost password cannot be reset, and neither v1 nor this plan has a delete-account endpoint. Recommended: accept for an internal tool; add both before a public launch.
-5. **Edit conflicts.** `MIGRATION_PLAN.md` chose "last push wins". With a cache that pushes in the background, that would lose edits silently, so this plan enforces `revision` and `if_revision` from Phase 2 and adds the conflict dialog in Phase 3. Recommended: yes.
-6. **Copy a community template to edit.** Still open in `MIGRATION_PLAN.md`. Recommended: not in the first release.
-7. **Hosting and HTTPS.** `server/Caddyfile` says it is the `https` profile of `docker-compose.yml`, but the compose file has no such profile or Caddy service. Decide who terminates TLS and how many proxy hops `TRUST_PROXY` should trust. Recommended: Caddy in front of the container, `TRUST_PROXY=1`.
-8. **Use-count inflation.** Any signed-in user can call `POST .../use` repeatedly, as in v1. Recommended: rely on the rate limit for now; add one count per user per template only if the number matters.
-9. **How a saved copy shows as withdrawn.** A cache cannot infer "withdrawn" from an absence, so the saved manifest reports an explicit state (`published`, `withdrawn`, `deleted`), while `GET /v2/saved` keeps the v1 behaviour. Recommended: yes.
-10. **Print history sync (Phase 5).** Rendered HTML can contain customer data, so it needs a retention and consent decision. Recommended: defer; the plan works without it.
-11. **Typing the IPC commands.** Hand-written `agent` module, or `tauri-specta`, which I did not check against this Tauri version. Recommended: hand-written first, evaluate `tauri-specta` as a Phase 3 spike.
-12. **Hardware for testing.** P4, P7, the USB transport (built with vendor and product id 0) and the Android bridge (a stub returning no printers) cannot be tested without devices. Who has an ESC/POS printer, a ZPL or TSPL printer and a network printer? Android printing is outside this plan but currently non-functional.
-13. **One template engine.** Preview uses handlebars.js with bwip-js barcodes; the Rust renderer has no barcode helper and swallows errors (P14). Which is the truth for print? Recommended: print what the preview shows, by rendering with the same engine, or by documenting a fixed helper set that both support.
-14. **Which versions the server keeps.** All of them, or fewer? Recommended: keep every `manual` and `restore` version, and the newest 50 `autosave` versions per template.
-15. **Toolchain timing.** TypeScript 7 and Prisma 8 are on npm (7.0.2 `latest`, 8.0.0-rc.23). Recommended: TypeScript 5.x and Prisma 7.10 now, upgrade after the first release.
-16. **Session token on the client.** It is stored as plain text in the `settings` table although the README says `keyring` (P17). Not a backend change, but the new service raises its value. Recommended: schedule it separately.
-17. **Opening offline.** With a cache and a stored session, should the app open when the server is down at launch, in offline mode? Today it shows "cannot reach server". Without this the cache is of no use at start. Recommended: yes (section 6).
-18. **Uploading existing local-only templates.** On the first sync after the update, templates that exist only on this PC would be pushed to the server, private. Recommended: ask once, with a dialog that says how many, and let the person decline.
-19. **Automatic push or explicit Save.** Recommended: push dirty edits automatically about 3 seconds after the last change, keep "Save version" as the explicit action that records a labelled version, and keep Publish explicit.
-20. **How a profile names its printer.** Printer ids are local to a PC, so a profile is keyed by the lowercase printer name, the way the local API already matches printers. Renaming a printer leaves its profile dormant. Recommended: yes.
-21. **Fonts on the server.** Private to the owner, never shared through a published template, at most 5 MiB and 50 per user, stored in PostgreSQL. Font licences may restrict storing a copy on a third-party server. Recommended: accept for an internal tool; confirm licences before a public launch.
-22. **Where the sync engine runs.** In the frontend now, in Rust later if the local REST API must serve fresh data with no window open. Recommended: frontend first.
-23. **Which settings are account preferences.** The first allow-list is `ui_density`, `brand_name` and `brand_logo`. A Phase 4 audit classifies every other key in `settings`. Recommended: everything not on the list stays local.
-24. **Where the Playwright suite lives.** In `e2e/` at the repository root, because it drives both the app and the service, with Chromium only. Recommended: yes; moving it under `server/` would only change paths.
+| # | Question | Answer |
+| --- | --- | --- |
+| 1 | The sign-offs from the summary | **Decided:** all seven approved as recommended — hardware boundary, PostgreSQL, `/v2` contract, Phase 0 first, server as source of truth with delta sync, and the Playwright suite with its fake agent; print history sync deferred (section 1). |
+| 2 | Do released apps depend on `/v1`? | **Decided: no.** Verified in this repository: tags `v1.0.1`–`v1.0.6` exist (`v1.0.6` is `origin/main`) and their `src/lib/share/client.ts` calls `/v1/auth/*`, `/v1/templates*` and `/v1/saved*`, but these are internal/dev tags never distributed to users. **No `/v1` adapter** for cutover; `/v2` is a clean break. Revisit before any public release. |
+| 3 | Who may register? | **Decided:** keep registration open — the service is an internal tool. Add an invite code only if it ever goes public. |
+| 4 | Account recovery and deletion | **Decided:** accept as-is for an internal tool (accounts have no email, so recovery is impossible today). Add password recovery and account deletion before any public launch. |
+| 5 | Edit conflicts | Yes: `revision` and `if_revision` are mandatory from Phase 2, conflict dialog in Phase 3. `MIGRATION_PLAN.md`'s "last push wins" is rejected because background pushes would silently lose edits. |
+| 6 | Copy a community template to edit | Not in the first release. |
+| 7 | Hosting and HTTPS | **Decided:** TLS is terminated by the existing reverse proxy / load balancer; no Caddy is added. Deployment sets `TRUST_PROXY` to that proxy's actual hop count (1 for a single proxy; the default stays `0` until then). `server/Caddyfile` is deleted as dead config (P17). |
+| 8 | Use-count inflation | Rely on the general rate limit (`POST .../use` per token); add one count per user per template only if the number starts to matter. |
+| 9 | How a saved copy shows as withdrawn | Yes: the saved manifest reports an explicit `published` / `withdrawn` / `deleted` state, while `GET /v2/saved` keeps the v1 behaviour. |
+| 10 | Print history sync (Phase 5) | **Decided: deferred.** Rendered HTML can contain customer data; the plan works without it. Stays optional and undesigned. |
+| 11 | Typing the IPC commands | Hand-written typed `agent` module first; evaluate `tauri-specta` as a Phase 3 spike (it is unverified against this Tauri version). |
+| 12 | Hardware for testing | **Decided:** all three devices are available — an ESC/POS printer, a ZPL or TSPL printer and a network printer. The full manual hardware checklist therefore runs for Phase 0 item 0.6 (P4, P7) and the USB transport. The Android bridge (a stub returning no printers) stays outside this plan. |
+| 13 | One template engine | Print what the preview shows: one fixed helper set that both the preview's handlebars.js and the Rust renderer implement. No JavaScript runtime is added to the print path; P14 is fixed in the Rust renderer. |
+| 14 | Which versions the server keeps | Every `manual` and `restore` version, plus the newest 50 `autosave` versions per template (`AUTOSAVE_KEEP=50`). |
+| 15 | Toolchain timing | TypeScript 5.x and Prisma 7.10.x now; upgrade to TypeScript 7 and Prisma 8 after the first release. |
+| 16 | Session token on the client | Scheduled separately: move the plain-text token in `settings` to a secure store. Tracked as a P17 follow-up, not part of this backend work. |
+| 17 | Opening offline | Yes: with a cache and a stored session the app opens in offline mode when the server is unreachable at launch (section 6). |
+| 18 | Uploading existing local-only templates | Ask once with a dialog that says how many templates will be pushed, and let the person decline. |
+| 19 | Automatic push or explicit Save | Push dirty edits automatically about 3 seconds after the last change; "Save version" stays the explicit action that records a labelled version; Publish stays explicit. |
+| 20 | How a profile names its printer | Keyed by the lowercase printer name, as the local API already matches printers. Renaming a printer leaves its profile dormant. |
+| 21 | Fonts on the server | **Decided:** accepted for an internal tool — private to the owner, never in published templates, 5 MiB and 50 per user, bytes in PostgreSQL. Font licences are re-checked before any public launch. |
+| 22 | Where the sync engine runs | The frontend (`src/lib/sync/`) first; move it into Rust only if the local REST API must serve fresh data with no window open. |
+| 23 | Which settings are account preferences | Allow-list starts with `ui_density`, `brand_name`, `brand_logo`; everything else stays local. A Phase 4 audit classifies the remaining keys in the local `settings` table. |
+| 24 | Where the Playwright suite lives | `e2e/` at the repository root, Chromium only — it drives both the app and the service; moving it under `server/` would only change paths. |
 
 ### Out of scope
 
@@ -1470,7 +1474,7 @@ Microservices, message queues, a server-side cache or Redis, GraphQL, organisati
 
 ### What I did not verify
 
-- How real printers handle a RAW spooler job carrying PDF bytes, the USB transport, and the Android path. All need hardware.
+- How real printers handle a RAW spooler job carrying PDF bytes, the USB transport, and the Android path. Not yet exercised, but the hardware (ESC/POS, ZPL/TSPL, network printer) is confirmed available per question 12, so Phase 0 item 0.6 and the manual checklist can run. Android still needs a device.
 - Running anything. For this revision I read the code only. The package versions come from the earlier draft's npm lookup of 2026-10-20 and were not re-checked; I installed nothing, built nothing and ran no tests (the SQLite reproduction of P1 in section 3 comes from the earlier draft). P2 is read from the schema and the code, not from a failing run.
 - That the chosen packages emit a valid OpenAPI 3.1 document together. Their declared peer ranges are compatible (section 4); the Phase 1 spike proves the rest.
 - The parameters of the stored scrypt hashes, and the real volume of data to migrate.

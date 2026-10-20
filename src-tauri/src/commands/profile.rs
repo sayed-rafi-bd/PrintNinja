@@ -22,7 +22,7 @@ pub fn list_profiles(
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     let mut sql = String::from(
         "SELECT id, printer_id, template_id, settings_json, created_at, updated_at
@@ -76,7 +76,7 @@ pub fn save_profile(db: State<DbState>, req: SaveProfileRequest) -> AppResult<Pr
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     // Ensure the referenced rows exist so profiles never dangle.
     for (id, table) in [(req.printer_id, "printers"), (req.template_id, "templates")] {
@@ -128,7 +128,7 @@ pub fn delete_profile(db: State<DbState>, id: i64) -> AppResult<()> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     let affected = conn.execute("DELETE FROM printer_profiles WHERE id = ?1", [id])?;
     if affected == 0 {

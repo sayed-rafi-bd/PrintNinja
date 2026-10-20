@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS template_versions (
     label TEXT,
     note TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    created_by TEXT NOT NULL DEFAULT 'manual' CHECK(created_by IN ('manual', 'autosave', 'restore'))
+    created_by TEXT NOT NULL DEFAULT 'manual' CHECK(created_by IN ('manual', 'autosave', 'restore', 'sync'))
 );
 
 CREATE TABLE IF NOT EXISTS sample_datasets (
@@ -101,6 +101,11 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     copies INTEGER NOT NULL DEFAULT 1,
     settings_json TEXT,
     rendered_html TEXT,
+    -- The job's input payload, kept so a queued row can run again (retry,
+    -- reprint, batch records). Run-input, not a history view: it is never
+    -- selected into `PrintJob` (IPC/REST); the displayed artifact,
+    -- `rendered_html`, stays secret-redacted by the pipeline.
+    data_json TEXT,
     idempotency_key TEXT,
     is_test INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),

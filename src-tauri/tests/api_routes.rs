@@ -6,7 +6,6 @@
 use axum::http::{Request, StatusCode};
 use printninja_lib::api::auth::ApiKey;
 use printninja_lib::db::Database;
-use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
 
@@ -17,21 +16,17 @@ fn setup() -> (Db, String) {
     // tests could get the same file name and share (and lock) one SQLite DB.
     let path = std::env::temp_dir().join(format!("printninja_api_{}.db", uuid::Uuid::new_v4()));
 
-    let mut conn = Connection::open(&path).expect("open db");
-    conn.execute_batch(include_str!("../src/db/schema.sql"))
-        .expect("apply schema");
-    printninja_lib::db::ensure_v2_schema(&mut conn).expect("apply v2 schema");
-    drop(conn);
-
-    let db: Db = Arc::new(Mutex::new(Database {
-        url: format!("sqlite:{}", path.display()),
-    }));
+    // `Database::open` is the one schema path: DDL, migrations, WAL, busy
+    // timeout — so the test exercises exactly what the app runs.
+    let db: Db = Arc::new(Mutex::new(
+        Database::open(&format!("sqlite:{}", path.display())).expect("open db"),
+    ));
 
     // Seed an API client.
     let (plain, hash) = ApiKey::generate();
     {
         let guard = db.lock().unwrap();
-        let c = guard.connection().unwrap();
+        let c = guard.connection();
         c.execute(
             "INSERT INTO api_clients (name, key_hash, scopes) VALUES ('t', ?1, 'print,read')",
             [&hash],
@@ -44,7 +39,7 @@ fn setup() -> (Db, String) {
 
 fn seed_printers_and_templates(db: &Db) -> (String, String) {
     let guard = db.lock().unwrap();
-    let c = guard.connection().unwrap();
+    let c = guard.connection();
 
     c.execute(
         "INSERT INTO printers (name, type, address, language) VALUES ('Desk','ipp','1.2.3.4','pdf')",
@@ -165,7 +160,7 @@ async fn jobs_id_supports_both_get_and_delete() {
 
     {
         let guard = db.lock().unwrap();
-        let c = guard.connection().unwrap();
+        let c = guard.connection();
         c.execute(
             "INSERT INTO print_jobs (source, status, copies, is_test)
              VALUES ('api','queued',1,0)",
@@ -212,7 +207,7 @@ async fn jobs_id_supports_both_get_and_delete() {
     );
 
     let guard = db.lock().unwrap();
-    let c = guard.connection().unwrap();
+    let c = guard.connection();
     let status: String = c
         .query_row("SELECT status FROM print_jobs WHERE id = 1", [], |r| {
             r.get(0)
@@ -277,7 +272,7 @@ async fn duplicate_idempotency_key_does_not_create_a_second_job() {
     assert_eq!(res.status(), StatusCode::OK, "replay returns 200 duplicate");
 
     let guard = db.lock().unwrap();
-    let c = guard.connection().unwrap();
+    let c = guard.connection();
     let n: i64 = c
         .query_row(
             "SELECT COUNT(*) FROM print_jobs WHERE idempotency_key = 'order-1042'",
@@ -297,7 +292,7 @@ fn router(db: &Db) -> axum::Router {
     printninja_lib::api::routes::router_with_state(
         printninja_lib::api::routes::ApiState {
             db: db.clone(),
-            queue: std::sync::Arc::new(printninja_lib::queue::PrintQueue::new().0),
+            queue: std::sync::Arc::new(printninja_lib::queue::PrintQueue::new()),
             cache_dir: cache,
         },
         false,
@@ -347,7 +342,7 @@ async fn print_runs_the_real_pipeline_instead_of_lying_queued() {
 
     // A history row is written either way, tagged as coming from the API.
     let guard = db.lock().unwrap();
-    let c = guard.connection().unwrap();
+    let c = guard.connection();
     let source: String = c
         .query_row("SELECT source FROM print_jobs LIMIT 1", [], |r| r.get(0))
         .unwrap();
@@ -390,7 +385,6 @@ async fn print_rejects_a_template_with_no_current_version() {
         let guard = db.lock().unwrap();
         guard
             .connection()
-            .unwrap()
             .execute("UPDATE templates SET current_version_id = NULL", [])
             .unwrap();
     }
@@ -478,7 +472,7 @@ async fn batch_print_creates_one_job_per_record() {
     assert_eq!(res.status(), StatusCode::ACCEPTED);
 
     let guard = db.lock().unwrap();
-    let c = guard.connection().unwrap();
+    let c = guard.connection();
     let n: i64 = c
         .query_row(
             "SELECT COUNT(*) FROM print_jobs WHERE source='api'",
@@ -487,6 +481,129 @@ async fn batch_print_creates_one_job_per_record() {
         )
         .unwrap();
     assert_eq!(n, 3);
+
+    // Each record's own payload is stored on its row — that is what the
+    // worker renders (P3). It used to be dropped, so queued rows had
+    // nothing to print.
+    let stored = {
+        let mut stmt = c
+            .prepare("SELECT data_json FROM print_jobs WHERE source='api' ORDER BY record_index")
+            .unwrap();
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0)).unwrap();
+        rows.collect::<Result<Vec<_>, _>>().unwrap()
+    };
+    assert_eq!(stored, vec!["{\"n\":1}", "{\"n\":2}", "{\"n\":3}"]);
+}
+
+/// An empty batch queues nothing to print, and the same 5,000-record cap
+/// the IPC batch command enforces applies to the API (both return 400,
+/// not a cheerful 202 with rows nobody will ever run).
+#[tokio::test]
+async fn batch_print_validates_record_count() {
+    let (db, key) = setup();
+    seed_printers_and_templates(&db);
+
+    for (label, data) in [
+        ("empty", serde_json::json!([])),
+        (
+            "oversized",
+            serde_json::json!((0..=5000)
+                .map(|i| serde_json::json!({ "n": i }))
+                .collect::<Vec<_>>()),
+        ),
+    ] {
+        let app = router(&db);
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/print/batch")
+                    .header("authorization", format!("Bearer {}", key))
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        serde_json::json!({
+                            "template": "Receipt",
+                            "printer": "Desk",
+                            "mode": "per_record",
+                            "data": data
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::BAD_REQUEST,
+            "{label} batch rejected"
+        );
+    }
+
+    let guard = db.lock().unwrap();
+    let n: i64 = guard
+        .connection()
+        .query_row("SELECT COUNT(*) FROM batches", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0, "a rejected batch must insert nothing at all");
+}
+
+/// Retry re-queues only terminal rows: a `queued` or running job must not
+/// be re-queued (it would print twice), and an unknown id stays a 404 (P3).
+#[tokio::test]
+async fn retry_rejects_non_terminal_jobs_and_still_404s_unknown_ones() {
+    let (db, key) = setup();
+    seed_printers_and_templates(&db);
+
+    let queued_id: i64 = {
+        let guard = db.lock().unwrap();
+        let conn = guard.connection();
+        conn.execute(
+            "INSERT INTO print_jobs (source, status, copies, is_test)
+             VALUES ('api', 'queued', 1, 0)",
+            [],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    };
+
+    let retry = |id: i64, key: String, db: Db| async move {
+        let app = router(&db);
+        app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/jobs/{id}/retry"))
+                .header("authorization", format!("Bearer {}", key))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    };
+
+    let res = retry(queued_id, key.clone(), db.clone()).await;
+    assert_eq!(
+        res.status(),
+        StatusCode::BAD_REQUEST,
+        "a queued job is not retryable"
+    );
+
+    let res = retry(424242, key.clone(), db.clone()).await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND, "unknown id stays 404");
+
+    // Once it is failed, retry re-queues it — and the worker owns it then.
+    {
+        let guard = db.lock().unwrap();
+        guard
+            .connection()
+            .execute(
+                "UPDATE print_jobs SET status='failed', error='offline' WHERE id=?1",
+                [queued_id],
+            )
+            .unwrap();
+    }
+    let res = retry(queued_id, key, db.clone()).await;
+    assert_eq!(res.status(), StatusCode::OK, "failed job re-queues");
 }
 
 #[tokio::test]
@@ -515,10 +632,10 @@ async fn openapi_documents_bearer_auth() {
 async fn verify_stored_key_matches_hashed_value() {
     let (db, plain) = setup();
     let guard = db.lock().unwrap();
-    let conn = guard.connection().unwrap();
+    let conn = guard.connection();
 
-    assert!(printninja_lib::verify_api_key(&conn, &plain));
-    assert!(!printninja_lib::verify_api_key(&conn, "pn_live_nope"));
+    assert!(printninja_lib::verify_api_key(conn, &plain));
+    assert!(!printninja_lib::verify_api_key(conn, "pn_live_nope"));
 }
 /// Regression for #18: nothing ever wrote `print_jobs.idempotency_key`, so the
 /// replay guard in `check_auth` — which looks for an existing row with that
@@ -551,7 +668,7 @@ async fn the_idempotency_key_is_persisted_with_the_job() {
         .unwrap();
 
     let guard = db.lock().unwrap();
-    let c = guard.connection().unwrap();
+    let c = guard.connection();
     let stored: Option<String> = c
         .query_row(
             "SELECT idempotency_key FROM print_jobs ORDER BY id DESC LIMIT 1",
@@ -597,7 +714,7 @@ async fn requests_without_a_key_do_not_collide() {
     }
 
     let guard = db.lock().unwrap();
-    let c = guard.connection().unwrap();
+    let c = guard.connection();
     let n: i64 = c
         .query_row(
             "SELECT COUNT(*) FROM print_jobs WHERE idempotency_key IS NULL",
