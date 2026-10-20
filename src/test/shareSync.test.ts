@@ -222,7 +222,20 @@ describe("downloadToLocal", () => {
     const result = await downloadToLocal(REMOTE.id, "saved", "ana");
     expect(result).toEqual({ id: 12, created: true });
     expect(calls("create_template")[0][1]).toMatchObject({
-      req: { name: "Invoice", html: REMOTE.body, css: REMOTE.css, readme: REMOTE.readme, summary: REMOTE.summary, orientation: "portrait" },
+      req: {
+        name: "Invoice",
+        html: REMOTE.body,
+        css: REMOTE.css,
+        readme: REMOTE.readme,
+        summary: REMOTE.summary,
+        orientation: "portrait",
+        server_id: REMOTE.id,
+        sync_state: "synced",
+        server_revision: REMOTE.revision,
+        base_revision: REMOTE.revision,
+        kind: "saved",
+        owner_handle: "ana",
+      },
     });
     expect(calls("update_template_origin")[0][1]).toEqual({
       req: { id: 12, origin: "saved", origin_owner: "ana" },

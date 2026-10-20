@@ -28,7 +28,6 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import * as share from "@/lib/share/client";
-import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
 import { downloadToLocal, refreshFromServer, saveToServer } from "@/lib/share/sync";
 import { cn } from "@/lib/utils";
 
@@ -231,12 +230,17 @@ export function TemplatesPage() {
     if (!localTpl.remote_id) return;
     try {
       await share.unsaveRemoteTemplate(localTpl.remote_id);
-    } catch {
-      // The local copy is removed either way; the server list catches up next time.
+    } catch (e) {
+      // Saving is a network operation: without the server round-trip the
+      // copy stays, and the next pull (which still lists it as saved)
+      // would bring it right back.
+      toast.error(e instanceof Error ? e.message : String(e));
+      return;
     }
+    // The server confirmed the unsave, so the local copy is forgotten
+    // outright — no tombstone, nothing for the engine to push.
     try {
-      await invoke("delete_template", { id: localTpl.id });
-      notifyLocalEdit();
+      await invoke("cache_forget_template", { server_id: localTpl.server_id ?? localTpl.remote_id });
       toast.success("Removed from Saved");
       await loadMine();
     } catch (e) {

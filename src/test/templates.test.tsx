@@ -181,9 +181,22 @@ describe("Templates page", () => {
     fireEvent.click(within(row).getByRole("button", { name: "Remove" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Remove “Saved A” from Saved?")).toBeInTheDocument();
-    expect(invoke.mock.calls.some((c) => c[0] === "delete_template")).toBe(false);
+    expect(invoke.mock.calls.some((c) => c[0] === "cache_forget_template")).toBe(false);
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove template" }));
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith("delete_template", { id: 4 }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("cache_forget_template", { server_id: "x1" }));
+  });
+
+  it("keeps the saved copy when unsaving cannot reach the server", async () => {
+    share.unsaveRemoteTemplate.mockRejectedValueOnce(new Error("offline"));
+    renderPage();
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: /Saved/ }));
+    const row = (await screen.findByText("Saved A")).closest("tr")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Remove" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Remove template" }));
+    // The row stays listed and nothing is forgotten: the next pull (which
+    // still lists it as saved) would resurrect a local-only delete.
+    await waitFor(() => expect(screen.getByText("Saved A")).toBeInTheDocument());
+    expect(invoke.mock.calls.some((c) => c[0] === "cache_forget_template")).toBe(false);
   });
 
   it("Get from server lists the account's templates and adds the chosen one", async () => {

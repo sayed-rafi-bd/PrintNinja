@@ -231,11 +231,14 @@ export async function downloadToLocal(
   const remote = await fetchRemoteTemplate(remoteId);
 
   const existing = await invoke<SyncTemplate[]>("list_templates");
-  const already = (existing ?? []).find((t) => t.remote_id === remoteId);
+  const already = (existing ?? []).find((t) => t.remote_id === remoteId || t.server_id === remoteId);
   if (already) return { id: already.id, created: false };
 
   let created;
   try {
+    // A downloaded copy arrives synced at the server's revision: the
+    // engine must not push it back as a new own template, and a later
+    // pull refreshes it instead of duplicating it.
     created = await invoke<SyncTemplate>("create_template", {
       req: {
         name: remote.name,
@@ -247,6 +250,12 @@ export async function downloadToLocal(
         ...(await compiledFields(remote.body ?? "")),
         readme: remote.readme ?? "",
         summary: remote.summary ?? "",
+        server_id: remote.id,
+        sync_state: "synced",
+        server_revision: remote.revision,
+        base_revision: remote.revision,
+        kind: origin,
+        owner_handle: origin === "saved" ? (originOwner ?? remote.owner_handle) : null,
       },
     });
   } catch (e) {
