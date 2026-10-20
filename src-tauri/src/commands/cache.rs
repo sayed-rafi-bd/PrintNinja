@@ -460,11 +460,17 @@ pub enum ConflictResolution {
 /// copy the caller already fetched and marks it synced; `Mine` puts the
 /// row back to dirty so the next push retries it. Only conflicted rows
 /// can be resolved — anything else is a caller bug.
+///
+/// `rebase_to` (Mine only): the server revision the local content was
+/// just confirmed against. Without it the next push re-sends the stale
+/// base and 409s again; with it the push overwrites cleanly while the
+/// other PC's edit stays in version history.
 pub fn resolve_conflict(
     conn: &Connection,
     server_id: &str,
     resolution: ConflictResolution,
     server_copy: Option<&TemplateDataIn>,
+    rebase_to: Option<i64>,
 ) -> AppResult<()> {
     let state: Option<String> = conn
         .query_row(
@@ -480,10 +486,16 @@ pub fn resolve_conflict(
     }
     match resolution {
         ConflictResolution::Mine => {
-            conn.execute(
-                "UPDATE templates SET sync_state = 'dirty' WHERE server_id = ?1",
-                [server_id],
-            )?;
+            match rebase_to {
+                Some(revision) => conn.execute(
+                    "UPDATE templates SET sync_state = 'dirty', server_revision = ?1, base_revision = ?1 WHERE server_id = ?2",
+                    rusqlite::params![revision, server_id],
+                )?,
+                None => conn.execute(
+                    "UPDATE templates SET sync_state = 'dirty' WHERE server_id = ?1",
+                    [server_id],
+                )?,
+            };
             Ok(())
         }
         ConflictResolution::Theirs => {
@@ -624,6 +636,7 @@ pub fn cache_resolve_conflict(
     server_id: String,
     resolution: ConflictResolution,
     server_copy: Option<TemplateDataIn>,
+    rebase_to: Option<i64>,
 ) -> AppResult<()> {
     let guard = db
         .lock()
@@ -633,6 +646,7 @@ pub fn cache_resolve_conflict(
         &server_id,
         resolution,
         server_copy.as_ref(),
+        rebase_to,
     )
 }
 

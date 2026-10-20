@@ -264,12 +264,19 @@ fn conflict_marks_and_resolves_both_ways() {
         updated_at: "2026-10-20T00:00:00Z".to_string(),
     };
     // "mine" puts it back to dirty for the next push.
-    resolve_conflict(&conn, "srv-c", ConflictResolution::Mine, None).unwrap();
+    resolve_conflict(&conn, "srv-c", ConflictResolution::Mine, None, None).unwrap();
     assert_eq!(sync_state_of(&conn, "srv-c"), "dirty");
 
     // Back to conflict, then take theirs.
     mark_conflicted(&conn, "srv-c").unwrap();
-    resolve_conflict(&conn, "srv-c", ConflictResolution::Theirs, Some(&data)).unwrap();
+    resolve_conflict(
+        &conn,
+        "srv-c",
+        ConflictResolution::Theirs,
+        Some(&data),
+        None,
+    )
+    .unwrap();
     let (state, rev, html): (String, i64, String) = conn
         .query_row(
             "SELECT t.sync_state, t.server_revision, v.html FROM templates t
@@ -284,7 +291,7 @@ fn conflict_marks_and_resolves_both_ways() {
     assert_eq!(html, "<p>server</p>");
 
     // Non-conflicted rows refuse to resolve.
-    let err = resolve_conflict(&conn, "srv-c", ConflictResolution::Mine, None).unwrap_err();
+    let err = resolve_conflict(&conn, "srv-c", ConflictResolution::Mine, None, None).unwrap_err();
     assert!(format!("{err}").contains("not conflicted"));
 }
 
@@ -379,4 +386,26 @@ fn conflicted_lists_only_conflicted_rows_in_id_order() {
     assert_eq!(listed[0].server_id.as_deref(), Some("srv-a"));
     assert_eq!(listed[1].server_id.as_deref(), Some("srv-c"));
     assert!(listed.iter().all(|r| r.id > 0 && !r.name.is_empty()));
+}
+
+#[test]
+fn mine_with_rebase_retries_cleanly() {
+    use printninja_lib::commands::cache::{mark_conflicted, resolve_conflict, ConflictResolution};
+    let conn = Connection::open_in_memory().unwrap();
+    printninja_lib::db::init(&conn).unwrap();
+    seed_synced(&conn, "srv-r", 5);
+    mark_conflicted(&conn, "srv-r").unwrap();
+
+    // Rebasing to the server's current revision keeps the row dirty but
+    // moves both revisions forward, so the next push matches.
+    resolve_conflict(&conn, "srv-r", ConflictResolution::Mine, None, Some(7)).unwrap();
+    let (state, server_rev, base_rev): (String, i64, i64) = conn
+        .query_row(
+            "SELECT sync_state, server_revision, base_revision FROM templates WHERE server_id = 'srv-r'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(state, "dirty");
+    assert_eq!((server_rev, base_rev), (7, 7));
 }

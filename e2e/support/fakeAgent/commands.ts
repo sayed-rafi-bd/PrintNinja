@@ -61,6 +61,7 @@ const implemented: Record<string, Handler> = {
 			String(args["server_id"] ?? ""),
 			resolution,
 			(args["server_copy"] as Record<string, unknown> | undefined),
+			args["rebase_to"] === undefined ? undefined : Number(args["rebase_to"]),
 		);
 		return null;
 	},

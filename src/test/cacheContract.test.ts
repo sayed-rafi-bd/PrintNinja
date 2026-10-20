@@ -203,6 +203,11 @@ describe("cache ops parity", () => {
 		expect(() => cache.resolveConflict("srv-c", "mine", undefined)).not.toThrow();
 		expect(cache._store.templates.get(1)?.sync_state).toBe("dirty");
 
+		// Rebasing moves both revisions so the next push matches.
+		cache.markConflicted("srv-c");
+		cache.resolveConflict("srv-c", "mine", undefined, 9);
+		expect(cache._store.templates.get(1)).toMatchObject({ sync_state: "dirty", server_revision: 9, base_revision: 9 });
+
 		// Theirs overwrites content and marks synced at the given revision.
 		cache.markConflicted("srv-c");
 		cache.resolveConflict("srv-c", "theirs", {

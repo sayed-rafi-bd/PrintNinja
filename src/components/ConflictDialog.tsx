@@ -58,7 +58,10 @@ export function ConflictDialog({
   const keepMine = () =>
     run("mine", async () => {
       if (!serverId) throw new Error("This template was never on the server");
-      await invoke("cache_resolve_conflict", { server_id: serverId, resolution: "mine" });
+      // Rebase onto the server's current revision so the next push
+      // overwrites cleanly; the other PC's edit stays in version history.
+      const remote = await share.fetchRemoteTemplate(serverId);
+      await invoke("cache_resolve_conflict", { server_id: serverId, resolution: "mine", rebase_to: remote.revision });
       notifyLocalEdit();
     });
 

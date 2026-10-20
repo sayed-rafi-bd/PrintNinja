@@ -341,13 +341,17 @@ export function createFakeCache() {
 			persist();
 		},
 
-		resolveConflict(serverId: string, resolution: "theirs" | "mine", serverCopy?: Record<string, unknown>): void {
+		resolveConflict(serverId: string, resolution: "theirs" | "mine", serverCopy?: Record<string, unknown>, rebaseTo?: number): void {
 			const row = findByServerId(serverId);
 			if (!row || row.sync_state !== "conflict") {
 				throw new Error(`template ${serverId} is not conflicted`);
 			}
 			if (resolution === "mine") {
 				row.sync_state = "dirty";
+				if (rebaseTo !== undefined) {
+					row.server_revision = rebaseTo;
+					row.base_revision = rebaseTo;
+				}
 				persist();
 				return;
 			}

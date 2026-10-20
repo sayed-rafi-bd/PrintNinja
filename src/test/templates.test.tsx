@@ -261,7 +261,8 @@ describe("conflict banner and dialog", () => {
     expect(screen.getByTestId("conflict-keep-both")).toBeInTheDocument();
   });
 
-  it("Keep mine resolves mine and reloads", async () => {
+  it("Keep mine rebases onto the server revision and reloads", async () => {
+    share.fetchRemoteTemplate.mockResolvedValue(REMOTE as never);
     invoke.mockImplementation(async (cmd: string) => {
       if (cmd === "list_templates") return LIST;
       if (cmd === "cache_list_conflicted")
@@ -271,10 +272,12 @@ describe("conflict banner and dialog", () => {
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Review" }));
     fireEvent.click(await screen.findByTestId("conflict-keep-mine"));
+    await waitFor(() => expect(share.fetchRemoteTemplate).toHaveBeenCalledWith("r2"));
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith("cache_resolve_conflict", {
         server_id: "r2",
         resolution: "mine",
+        rebase_to: 5,
       }),
     );
     await waitFor(() => expect(screen.queryByTestId("conflict-banner")).not.toBeInTheDocument());

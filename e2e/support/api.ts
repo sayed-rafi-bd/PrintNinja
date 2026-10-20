@@ -95,3 +95,7 @@ export interface ApiVersion {
 export function apiVersions(token: string, id: string): Promise<{ items: ApiVersion[] }> {
 	return request<{ items: ApiVersion[] }>("GET", `/v2/templates/${id}/versions?page=1&page_size=5`, { token });
 }
+
+export function apiVersion(token: string, id: string, n: number): Promise<{ body: string }> {
+	return request<{ body: string }>("GET", `/v2/templates/${id}/versions/${n}`, { token });
+}
