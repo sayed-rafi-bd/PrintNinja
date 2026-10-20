@@ -15,10 +15,7 @@ type Db = Arc<Mutex<Database>>;
 fn setup() -> (Db, String) {
     // A UUID, not a timestamp: Windows' clock is coarse enough that parallel
     // tests could get the same file name and share (and lock) one SQLite DB.
-    let path = std::env::temp_dir().join(format!(
-        "printninja_api_{}.db",
-        uuid::Uuid::new_v4()
-    ));
+    let path = std::env::temp_dir().join(format!("printninja_api_{}.db", uuid::Uuid::new_v4()));
 
     let mut conn = Connection::open(&path).expect("open db");
     conn.execute_batch(include_str!("../src/db/schema.sql"))
@@ -296,10 +293,7 @@ async fn duplicate_idempotency_key_does_not_create_a_second_job() {
 /// The state carries a print queue and a cache dir so `POST /v1/print` runs
 /// the real pipeline instead of only inserting a "queued" row.
 fn router(db: &Db) -> axum::Router {
-    let cache = std::env::temp_dir().join(format!(
-        "printninja_api_cache_{}",
-        uuid::Uuid::new_v4()
-    ));
+    let cache = std::env::temp_dir().join(format!("printninja_api_cache_{}", uuid::Uuid::new_v4()));
     printninja_lib::api::routes::router_with_state(
         printninja_lib::api::routes::ApiState {
             db: db.clone(),
