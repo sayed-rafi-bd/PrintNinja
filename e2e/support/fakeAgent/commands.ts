@@ -11,6 +11,81 @@ import { createFakeCache, type SyncChangeIn } from "./cache.js";
 // The sync cache is the exception: one module holds the whole behavior
 // so the shared cache_cases.json runs identically here and in Rust.
 
+// In-memory batch store. Mirrors the Rust validation in
+// commands/batch.rs (mode, JSON array, non-empty, 5k records) and the
+// cancel/retry state rules. There is no worker here: rows stay queued
+// until cancelled, and retry re-queues — the worker drain itself is
+// covered by src-tauri worker tests, and the virtual-printer suite
+// covers the device half.
+interface FakeBatchRow {
+  id: number;
+  total: number;
+  done: number;
+  failed: number;
+  mode: string;
+  status: "queued" | "printing" | "success" | "failed" | "cancelled";
+}
+
+const batches = new Map<number, FakeBatchRow>();
+let nextBatchId = 1;
+
+function getBatchOrThrow(id: number): FakeBatchRow {
+  const row = batches.get(id);
+  if (!row) {
+    throw new Error(`Batch ${id} not found`);
+  }
+  return row;
+}
+
+const batchHandlers: Record<string, Handler> = {
+  create_batch: (args) => {
+    const req = (args["req"] ?? args) as Record<string, unknown>;
+    const mode = String(req["mode"] ?? "");
+    if (mode !== "single_job" && mode !== "per_record") {
+      throw new Error(
+        `Invalid mode '${mode}'. Expected one of ["single_job", "per_record"]`,
+      );
+    }
+    const data = req["data"];
+    if (!Array.isArray(data)) {
+      throw new Error("Batch data must be a JSON array");
+    }
+    if (data.length === 0) {
+      throw new Error("Batch contains no records");
+    }
+    if (data.length > 5000) {
+      throw new Error(`Batch too large: ${data.length} records (max 5000)`);
+    }
+    const id = nextBatchId++;
+    const row: FakeBatchRow = {
+      id,
+      total: data.length,
+      done: 0,
+      failed: 0,
+      mode,
+      status: "queued",
+    };
+    batches.set(id, row);
+    return { ...row };
+  },
+  list_batches: () => [...batches.values()].map((row) => ({ ...row })),
+  get_batch: (args) => ({ ...getBatchOrThrow(Number(args["id"] ?? 0)) }),
+  cancel_batch: (args) => {
+    const row = getBatchOrThrow(Number(args["id"] ?? 0));
+    if (row.status === "queued" || row.status === "printing") {
+      row.status = "cancelled";
+    }
+    return null;
+  },
+  retry_batch: (args) => {
+    const row = getBatchOrThrow(Number(args["id"] ?? 0));
+    row.status = "queued";
+    row.failed = 0;
+    row.done = 0;
+    return null;
+  },
+};
+
 type Handler = (args: Record<string, unknown>) => unknown;
 
 // One cache per browser context (module scope = the injected page).
@@ -131,7 +206,17 @@ const implemented: Record<string, Handler> = {
   list_printers: () => cache.library.listPrinters(),
   add_printer: (args) => {
     const req = (args["req"] ?? args) as Record<string, unknown>;
-    return cache.library.addPrinter(String(req["name"] ?? "Printer"));
+    return cache.library.addPrinter({
+      name: String(req["name"] ?? "Printer"),
+      printer_type:
+        req["printer_type"] === undefined
+          ? undefined
+          : String(req["printer_type"]),
+      address:
+        req["address"] === undefined ? undefined : String(req["address"]),
+      language:
+        req["language"] === undefined ? undefined : String(req["language"]),
+    });
   },
   delete_printer: (args) => {
     cache.library.deletePrinter(Number(args["id"] ?? 0));
@@ -288,11 +373,6 @@ const acknowledgedStubs: string[] = [
   "delete_version",
   "restore_version",
   "diff_versions",
-  "create_batch",
-  "list_batches",
-  "get_batch",
-  "cancel_batch",
-  "retry_batch",
   "start_api_server",
   "stop_api_server",
   "get_api_status",
@@ -301,7 +381,10 @@ const acknowledgedStubs: string[] = [
   "refresh_background",
 ];
 
-const commands: Record<string, Handler> = { ...implemented };
+const commands: Record<string, Handler> = {
+  ...implemented,
+  ...batchHandlers,
+};
 for (const name of acknowledgedStubs) {
   commands[name] = () => {
     console.warn(`[fake-agent] ${name} has no behavior yet (Phase 1 stub)`);
