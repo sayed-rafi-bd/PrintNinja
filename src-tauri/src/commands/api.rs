@@ -21,52 +21,63 @@ pub struct ApiStatus {
     pub lan_access: bool,
 }
 
+fn port_from_conn(conn: &rusqlite::Connection, key: &str, default: u16) -> u16 {
+    conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+        r.get::<_, String>(0)
+    })
+    .ok()
+    .and_then(|v| v.parse().ok())
+    .unwrap_or(default)
+}
+
 fn port_from_settings(db: &DbState, key: &str, default: u16) -> u16 {
     db.lock()
         .ok()
-        .and_then(|g| {
-            let conn = g.connection();
-            conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
-                r.get::<_, String>(0)
-            })
-            .ok()?
-            .parse()
-            .ok()
-        })
+        .map(|g| port_from_conn(g.connection(), key, default))
         .unwrap_or(default)
+}
+
+fn bool_from_conn(conn: &rusqlite::Connection, key: &str, default: bool) -> bool {
+    conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+        r.get::<_, String>(0)
+    })
+    .ok()
+    .map(|v| v == "true" || v == "1")
+    .unwrap_or(default)
 }
 
 fn bool_from_settings(db: &DbState, key: &str, default: bool) -> bool {
     db.lock()
         .ok()
-        .and_then(|g| {
-            let conn = g.connection();
-            conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
-                r.get::<_, String>(0)
-            })
-            .ok()
-        })
-        .map(|v| v == "true" || v == "1")
+        .map(|g| bool_from_conn(g.connection(), key, default))
         .unwrap_or(default)
 }
 
 #[tauri::command]
 pub fn get_api_status(_app: AppHandle, db: State<DbState>) -> AppResult<ApiStatus> {
-    let port = port_from_settings(&db, "api_port", 17717);
-    let lan = bool_from_settings(&db, "api_lan_access", false);
-
-    let address: String = db
+    let guard = db
         .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    Ok(api_status_from_db(
+        guard.connection(),
+        RUNNING.load(Ordering::Relaxed),
+    ))
+}
+
+/// The status the UI shows, from one connection. Split out so tests can
+/// drive it against a real database without a Tauri runtime: port and
+/// LAN come from settings, the bind address from the last start (or the
+/// LAN default when never started).
+pub fn api_status_from_db(conn: &rusqlite::Connection, running: bool) -> ApiStatus {
+    let port = port_from_conn(conn, "api_port", 17717);
+    let lan = bool_from_conn(conn, "api_lan_access", false);
+    let address = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'api_bind'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
         .ok()
-        .and_then(|g| {
-            g.connection()
-                .query_row(
-                    "SELECT value FROM settings WHERE key = 'api_bind'",
-                    [],
-                    |r| r.get::<_, String>(0),
-                )
-                .ok()
-        })
         .unwrap_or_else(|| {
             if lan {
                 "0.0.0.0".into()
@@ -75,12 +86,12 @@ pub fn get_api_status(_app: AppHandle, db: State<DbState>) -> AppResult<ApiStatu
             }
         });
 
-    Ok(ApiStatus {
-        running: RUNNING.load(Ordering::Relaxed),
+    ApiStatus {
+        running,
         address,
         port,
         lan_access: lan,
-    })
+    }
 }
 
 /// Handle stored in Tauri state so the UI can query the live bound address.
@@ -125,15 +136,9 @@ pub fn start_api_server(
     let host = if lan { "0.0.0.0" } else { "127.0.0.1" };
     let addr = format!("{}:{}", host, port);
 
-    // Bind synchronously first so a busy port returns a clear error to the UI
-    // instead of failing silently inside the spawned task.
-    let listener = std::net::TcpListener::bind(&addr)
-        .map_err(|e| AppError::Internal(format!("Cannot bind {}: {}", addr, e)))?;
-    listener
-        .set_nonblocking(true)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-    let listener = tokio::net::TcpListener::from_std(listener)
-        .map_err(|e| AppError::Internal(format!("Listener setup failed: {}", e)))?;
+    // Bound synchronously first so a busy port returns a clear error to
+    // the UI instead of failing silently inside the spawned task.
+    let listener = bind_addr(&addr)?;
 
     let display_addr = host.to_string();
     app.manage(ApiServerHandle {
@@ -216,16 +221,34 @@ pub fn stop_api_server() -> AppResult<()> {
     Ok(())
 }
 
+/// Bind a TCP listener synchronously so a busy port returns a clear
+/// error to the caller instead of failing silently inside a spawned
+/// task. Split out so tests can pin the busy-port message without a
+/// Tauri runtime.
+pub fn bind_addr(addr: &str) -> AppResult<tokio::net::TcpListener> {
+    let listener = std::net::TcpListener::bind(addr)
+        .map_err(|e| AppError::Internal(format!("Cannot bind {addr}: {e}")))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    tokio::net::TcpListener::from_std(listener)
+        .map_err(|e| AppError::Internal(format!("Listener setup failed: {e}")))
+}
+
 /// Issue a fresh API key, storing only the SHA-256 hash (PLANNING.md §11).
 /// The plaintext is returned exactly once so the user can copy it.
 #[tauri::command]
 pub fn regenerate_api_key(db: State<DbState>) -> AppResult<String> {
-    let (plaintext, hash) = ApiKey::generate();
-
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection();
+    rotate_api_key(guard.connection())
+}
+
+/// Rotate the default API key, returning the plaintext exactly once.
+/// The old key stops verifying the moment the row is replaced.
+pub fn rotate_api_key(conn: &rusqlite::Connection) -> AppResult<String> {
+    let (plaintext, hash) = ApiKey::generate();
 
     conn.execute(
         "INSERT INTO api_clients (name, key_hash, scopes) VALUES ('default', ?1, 'print,read')
