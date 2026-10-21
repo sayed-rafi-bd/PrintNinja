@@ -1,7 +1,23 @@
 use crate::transport::{PrinterInfo, PrinterTransport, RenderedJob};
 use async_trait::async_trait;
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
+
+/// How long to wait for a raw (JetDirect) printer to accept a connection.
+///
+/// Kept short so an unreachable printer fails in seconds rather than after
+/// the whole send budget: the OS default for an unanswered SYN is minutes.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long the bytes of one job may take to be accepted.
+///
+/// This covers only the write and flush, not the time this process spends
+/// waiting for the printer's turn (that is the per-printer permit's
+/// business). A raw printer sends nothing back, so this deadline is the
+/// *only* thing that can end a job against a printer which accepts the
+/// connection and then goes quiet.
+const SEND_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct RawTcpPrinter {
     pub name: String,
@@ -29,21 +45,46 @@ impl RawTcpPrinter {
         } else {
             format!("{}:{}", self.address, self.port)
         };
-        let mut stream = TcpStream::connect(&addr)
-            .await
-            .map_err(|e| format!("TCP connect failed: {}", e))?;
+        let at = format!("the printer at {addr}");
 
-        stream
-            .write_all(data)
+        // A raw printer gives no application-level reply: the job is done
+        // when the bytes are written. That means a printer which accepts the
+        // connection and then stops reading — a full buffer, a wedged
+        // spooler, or a server answering `hang` — blocks `write_all`
+        // forever. The job then sits `printing`, the UI spins and nothing
+        // ever reaches history, so both phases carry a deadline.
+        let mut stream = match tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect(&addr))
             .await
-            .map_err(|e| format!("TCP write failed: {}", e))?;
+        {
+            Err(_) => {
+                return Err(format!(
+                    "{at} never accepted a connection (waited {}s) — check the address and that the printer is powered on",
+                    CONNECT_TIMEOUT.as_secs()
+                ));
+            }
+            Ok(Err(e)) => {
+                return Err(format!("Could not reach {at}: {e}"));
+            }
+            Ok(Ok(stream)) => stream,
+        };
 
-        stream
-            .flush()
-            .await
-            .map_err(|e| format!("TCP flush failed: {}", e))?;
+        let send = async {
+            stream.write_all(data).await.map_err(|e| {
+                format!("{at} closed the connection while the job was sending: {e}")
+            })?;
+            stream
+                .flush()
+                .await
+                .map_err(|e| format!("{at} stopped responding while the job was finishing: {e}"))?;
+            Ok::<(), String>(())
+        };
 
-        Ok(())
+        tokio::time::timeout(SEND_TIMEOUT, send).await.map_err(|_| {
+            format!(
+                "{at} stopped responding after {}s — check for a paper jam or out-of-paper, or that it is still connected",
+                SEND_TIMEOUT.as_secs()
+            )
+        })?
     }
 }
 

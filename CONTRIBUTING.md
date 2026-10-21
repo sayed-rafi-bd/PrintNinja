@@ -55,6 +55,14 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 Add a regression test for each fix (Vitest `src/test/*`, Rust `#[cfg(test)]` or `src-tauri/tests/*`).
 
+Print failures are covered end to end by `src-tauri/tests/virtual_printer.rs`. It builds and
+spawns the vendored Virtual Printer (`e2e/support/virtual-printer`, the `rust` branch of
+[sayed-rafi-bd/virtual-printer](https://github.com/sayed-rafi-bd/virtual-printer), std-only)
+on a free port per test and switches its fault state — `ok`, `paperout`, `jam`, `offline`,
+`hang`, `drop`. The fixture compiles itself on first run in under a second, so the suite needs
+nothing but `cargo` and never skips. `e2e/support/virtual-printer/target/` is gitignored; delete
+it to rebuild from scratch.
+
 ## Release
 
 Local-only signing. See `docs/RELEASE.md` and `scripts/release.sh` (rename app, bump version, `git tag`). CI builds Windows MSI only and Android `aarch64` only.
