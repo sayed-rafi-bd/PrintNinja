@@ -91,3 +91,44 @@ test("F14 first sync of a migrated install", async ({ browser }) => {
     "<p>local edit</p>",
   );
 });
+
+test("F14 declining the backup leaves local templates alone", async ({
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  const auth = await apiRegister(
+    `f14d-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    PASSWORD,
+  );
+
+  const seeded = await pc(browser, {
+    settings: { share_session_token: auth.token, install_migrated: "1" },
+    templates: [
+      { name: "Local only", html: "<p>mine</p>" },
+    ],
+  });
+  const page = await seeded.context.newPage();
+  await page.goto("/");
+  await expect(
+    page.getByText("Back up 1 template to the server?"),
+  ).toBeVisible({ timeout: 30_000 });
+
+  // Declining dismisses the dialog and pushes nothing; the row stays
+  // local-only and the prompt does not return on reload.
+  await page.getByRole("button", { name: "Not now" }).click();
+  await expect(
+    page.getByText("Back up 1 template to the server?"),
+  ).toBeHidden({ timeout: 30_000 });
+  await expect(async () => {
+    const mine = await apiMine(auth.token);
+    expect(mine.items.map((t) => t.name)).not.toContain("Local only");
+  }).toPass({ timeout: 30_000 });
+
+  await page.reload();
+  await expect(page.getByTestId(testids.shellApp)).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(
+    page.getByText("Back up 1 template to the server?"),
+  ).toBeHidden({ timeout: 15_000 });
+});
