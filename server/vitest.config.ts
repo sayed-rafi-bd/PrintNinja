@@ -8,5 +8,15 @@ export default defineConfig({
     // a running container, never in the default pass.
     include: ["test/**/*.test.ts"],
     exclude: ["test/e2e/**"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      include: ["src/domain/**/*.ts"],
+      thresholds: {
+        lines: 80,
+        functions: 80,
+        statements: 80,
+      },
+    },
   },
 });

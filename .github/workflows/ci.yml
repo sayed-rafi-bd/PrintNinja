@@ -115,6 +115,7 @@ jobs:
       - run: pnpm --filter server typecheck
       - run: pnpm --filter server arch
       - run: pnpm --filter server test
+      - run: pnpm --filter server test:coverage
       - name: OpenAPI drift check
         run: |
           DATABASE_URL=postgresql://user:pass@localhost:5432/printninja \
