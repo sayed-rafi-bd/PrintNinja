@@ -40,10 +40,15 @@
 //!    Get-Printer-Attributes. A failed job now asks — once, on its own
 //!    short deadline — so the operator reads "out of paper" instead of
 //!    "the printer stopped".
-//!
-//! Raw/ESC-POS printers still report success whenever the bytes are
-//! accepted: they answer paper-out only to a `DLE EOT` status query, which
-//! the app does not send yet. That is a documented limit, not an oversight.
+//! 4. **Raw printers were never asked.** A raw printer answers a status
+//!    query but never a job, so paper-out, jam and offline all arrived
+//!    looking like successful prints — accepting the bytes was the only
+//!    evidence there was. The transport now asks (`transport::status`) in
+//!    the printer's own language before sending: `DLE EOT` for ESC/POS,
+//!    `~HS` for ZPL, `ESC !?` for TSPL. Silence is not a fault until the
+//!    printer has answered once, so a mis-set language cannot stop every
+//!    print — and for Zebra that reading is required anyway: the spec says
+//!    it sends no `~HS` reply at all when media is out.
 //!
 //! Every test here needs `cargo` and nothing else, so none of them skip.
 
@@ -52,7 +57,9 @@ use printninja_lib::db::Database;
 use printninja_lib::queue::PrintQueue;
 use printninja_lib::transport::ipp::IppPrinter;
 use printninja_lib::transport::raw_tcp::RawTcpPrinter;
-use printninja_lib::transport::{PrinterType, TransportRegistry};
+use printninja_lib::transport::{
+    PrinterLanguage, PrinterTransport, PrinterType, RenderedJob, TransportRegistry,
+};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -116,11 +123,10 @@ fn fixture_binary() -> PathBuf {
 /// On Linux `tcp_wmem` max defaults to 4 MiB, so a job smaller than that is
 /// copied into the send buffer, `write_all` returns, and the send is
 /// *reported* as done even though nobody ever read it. A deadline can only
-/// catch a transfer that is still outstanding — which is the honest limit of
-/// a protocol with no reply: a small job to a silent JetDirect printer is
-/// still acknowledged by the kernel and still counted as printed. Detecting
-/// that case needs a status query, which raw printers only answer when
-/// asked (see the note in the header).
+/// catch a transfer that is still outstanding — the honest limit of a
+/// protocol with no reply. The status query sent before every job
+/// (`transport::status`) covers the faults a printer *reports*; what it
+/// never reports — it took the bytes and went quiet — is caught only here.
 ///
 /// So this is 8 MiB: over the 4 MiB default with room to spare, whatever the
 /// peer's advertised window.
@@ -147,7 +153,11 @@ impl VirtualPrinter {
         let exe = fixture_binary();
 
         for _ in 0..8 {
-            let offset = 11000 + (uuid::Uuid::new_v4().as_u128() as u16) % 2000;
+            // Wide range on purpose: every test here binds four ports from
+            // this offset, and two tests silently sharing one fixture (same
+            // ports) would look like a pass while their printers are not the
+            // ones being tested.
+            let offset = 10000 + (uuid::Uuid::new_v4().as_u128() as u16) % 45000;
             let jobs = std::env::temp_dir().join(format!("pn-vprinter-{}", uuid::Uuid::new_v4()));
             let child = Command::new(&exe)
                 .arg("--host")
@@ -320,14 +330,18 @@ fn cache_dir() -> PathBuf {
     dir
 }
 
-/// A printer row of the given type, pointing at the virtual printer.
-fn seed_printer(db: &Db, name: &str, printer_type: &str, address: &str) {
+/// A printer row of the given type and command language, pointing at the
+/// virtual printer.
+///
+/// The language is what a raw transport reads to choose its status query, so
+/// most of the tests in this file are really tests of this column.
+fn seed_printer(db: &Db, name: &str, printer_type: &str, address: &str, language: &str) {
     let guard = db.lock().unwrap();
     guard
         .connection()
         .execute(
-            "INSERT INTO printers (name, type, address, language) VALUES (?1, ?2, ?3, 'pdf')",
-            rusqlite::params![name, printer_type, address],
+            "INSERT INTO printers (name, type, address, language) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![name, printer_type, address, language],
         )
         .expect("seed printer");
 }
@@ -382,6 +396,18 @@ impl JobRenderer for FakeRenderer {
         _orientation: &str,
     ) -> anyhow::Result<Vec<u8>> {
         Ok(self.0.clone())
+    }
+
+    /// Stand in for the browser's screenshot path, so a printer that speaks a
+    /// command language (`escpos`, `zpl`, `tspl`) reaches the real encoder —
+    /// and with it the status query that picks the right dialect.
+    async fn rasterize(
+        &self,
+        _final_html: &str,
+        w_px: usize,
+        h_px: usize,
+    ) -> anyhow::Result<printninja_lib::render::raster::RasterImage> {
+        Ok(printninja_lib::render::raster::RasterImage::new(w_px, h_px))
     }
 }
 
@@ -609,7 +635,7 @@ async fn a_jam_fails_the_job_with_a_message_stored_in_history() {
         return;
     };
     let db = test_db();
-    seed_printer(&db, "Jam", "ipp", &printer.ipp_url());
+    seed_printer(&db, "Jam", "ipp", &printer.ipp_url(), "pdf");
     let queue = PrintQueue::new();
 
     let response = run_print_with(
@@ -657,6 +683,7 @@ async fn a_hung_print_ends_as_a_failed_job_not_a_stuck_one() {
         "Hung",
         "raw_tcp",
         &format!("127.0.0.1:{}", printer.raw_port()),
+        "pdf",
     );
     let queue = PrintQueue::new();
 
@@ -700,4 +727,267 @@ async fn the_registry_dispatches_a_raw_printer_to_the_virtual_one() {
     )
     .await
     .expect("test connection to a working raw printer");
+}
+
+// ───────────────────────────────────────────────────────────────
+// raw: the only reply a raw printer ever gives is to a question
+// ───────────────────────────────────────────────────────────────
+
+/// Send one job over the fixture's raw port in `language` — the same
+/// struct and the same trait method the app sends on.
+async fn send_raw_job(
+    printer: &VirtualPrinter,
+    language: PrinterLanguage,
+    data: &[u8],
+) -> Result<(), String> {
+    RawTcpPrinter::new(
+        "Virtual".into(),
+        format!("127.0.0.1:{}", printer.raw_port()),
+    )
+    .send(RenderedJob {
+        job_id: "job-1".into(),
+        printer_id: "p1".into(),
+        data: data.to_vec(),
+        mime_type: "application/octet-stream".into(),
+        copies: 1,
+        language,
+    })
+    .await
+}
+
+/// How many jobs the fixture has stored. A status query is a question, not a
+/// print, and the fixture only stores what looks like job data — so this is
+/// how the tests below prove that *nothing* was sent to a printer which said
+/// it could not print.
+fn stored_jobs(printer: &VirtualPrinter) -> usize {
+    std::fs::read_dir(&printer.jobs)
+        .map(|dir| dir.flatten().count())
+        .unwrap_or(0)
+}
+
+#[tokio::test]
+async fn escpos_reports_a_printer_that_is_out_of_paper_instead_of_sending() {
+    let Some(printer) = VirtualPrinter::start("paperout") else {
+        return;
+    };
+
+    let err = send_raw_job(&printer, PrinterLanguage::Escpos, b"PNJ-NO-PAPER")
+        .await
+        .expect_err("a printer with no paper cannot have printed");
+
+    assert!(err.contains("it is out of paper"), "{err}");
+    // The bytes behind the claim travel with the sentence, for support.
+    assert!(err.contains("DLE EOT 4 = 0x72"), "{err}");
+    assert!(err.contains("did not print the job"), "{err}");
+    assert_eq!(
+        stored_jobs(&printer),
+        0,
+        "the job must not have been sent to a printer with no paper"
+    );
+}
+
+#[tokio::test]
+async fn escpos_reports_an_offline_printer_instead_of_sending() {
+    let Some(printer) = VirtualPrinter::start("offline") else {
+        return;
+    };
+
+    let err = send_raw_job(&printer, PrinterLanguage::Escpos, b"PNJ-OFFLINE")
+        .await
+        .expect_err("an offline printer cannot have printed");
+
+    assert!(err.contains("it is offline"), "{err}");
+    assert!(err.contains("DLE EOT 1 = 0x1e"), "{err}");
+    assert_eq!(stored_jobs(&printer), 0, "nothing was sent");
+}
+
+/// ESC/POS has no "paper jam" bit — the spec offers only "an error exists" —
+/// so the operator is given that plus where to look, and above all not a
+/// success.
+#[tokio::test]
+async fn escpos_reports_a_jammed_printer_instead_of_sending() {
+    let Some(printer) = VirtualPrinter::start("jam") else {
+        return;
+    };
+
+    let err = send_raw_job(&printer, PrinterLanguage::Escpos, b"PNJ-JAM")
+        .await
+        .expect_err("a jammed printer cannot have printed");
+
+    assert!(err.contains("it reports an error"), "{err}");
+    assert!(
+        err.contains("check for a paper jam"),
+        "the message must say where to look: {err}"
+    );
+    assert!(err.contains("DLE EOT 2 = 0x52"), "{err}");
+    assert_eq!(stored_jobs(&printer), 0, "nothing was sent");
+}
+
+/// The query must be invisible when nothing is wrong: the job still lands,
+/// and the question itself is not stored as a print.
+#[tokio::test]
+async fn a_status_query_does_not_get_in_the_way_of_a_healthy_print() {
+    let Some(printer) = VirtualPrinter::start("ok") else {
+        return;
+    };
+
+    send_raw_job(&printer, PrinterLanguage::Escpos, b"PNJ-HEALTHY")
+        .await
+        .expect("a healthy printer must still print");
+
+    assert!(
+        printer.received_containing(b"PNJ-HEALTHY"),
+        "no job arrived"
+    );
+    assert_eq!(stored_jobs(&printer), 1, "the query was stored as a job");
+}
+
+#[tokio::test]
+async fn zpl_reports_a_printer_that_is_out_of_paper_instead_of_sending() {
+    let Some(printer) = VirtualPrinter::start("paperout") else {
+        return;
+    };
+
+    let err = send_raw_job(&printer, PrinterLanguage::Zpl, b"PNJ-ZPL-NO-PAPER")
+        .await
+        .expect_err("a printer with no paper cannot have printed");
+
+    assert!(err.contains("it is out of paper"), "{err}");
+    assert!(err.contains("~HS paper-out flag = 1"), "{err}");
+    assert_eq!(stored_jobs(&printer), 0, "nothing was sent");
+}
+
+/// `~HS` has no "offline" flag — a Zebra reports pause — so pause is what
+/// the operator reads. The point is that the job did not go out.
+#[tokio::test]
+async fn zpl_reports_a_paused_printer_instead_of_sending() {
+    let Some(printer) = VirtualPrinter::start("offline") else {
+        return;
+    };
+
+    let err = send_raw_job(&printer, PrinterLanguage::Zpl, b"PNJ-ZPL-PAUSED")
+        .await
+        .expect_err("a paused printer cannot have printed");
+
+    assert!(err.contains("it is paused"), "{err}");
+    assert!(err.contains("~HS pause flag = 1"), "{err}");
+    assert_eq!(stored_jobs(&printer), 0, "nothing was sent");
+}
+
+/// The fixture answers no TSPL query, which is exactly the shape of a printer
+/// that does not implement one. The first silence must not stop the job —
+/// otherwise a language column nobody can verify would stop printing outright.
+#[tokio::test]
+async fn a_tspl_printer_that_does_not_answer_still_prints() {
+    let Some(printer) = VirtualPrinter::start("ok") else {
+        return;
+    };
+
+    send_raw_job(&printer, PrinterLanguage::Tspl, b"PNJ-TSPL-QUIET")
+        .await
+        .expect("a printer that never answers status must still print");
+
+    assert!(
+        printer.received_containing(b"PNJ-TSPL-QUIET"),
+        "the job must still go out"
+    );
+}
+
+/// Same rule against a printer that has stopped reading rather than one that
+/// never had the dialect: silence means nothing the first time.
+#[tokio::test]
+async fn a_hanging_printer_that_never_answered_still_prints() {
+    let Some(printer) = VirtualPrinter::start("hang") else {
+        return;
+    };
+
+    send_raw_job(&printer, PrinterLanguage::Escpos, b"PNJ-FIRST-SILENCE")
+        .await
+        .expect("the first silence must not stop a job");
+}
+
+/// The case Zebra's spec describes: a printer answers, then stops — media
+/// out, ribbon out or an open head are exactly when it goes quiet. The job
+/// must fail on that, and fail at the *status* deadline rather than waiting
+/// out the send one.
+#[tokio::test]
+async fn once_a_printer_has_answered_its_silence_fails_the_job() {
+    let Some(printer) = VirtualPrinter::start("ok") else {
+        return;
+    };
+
+    send_raw_job(&printer, PrinterLanguage::Escpos, b"PNJ-BEFORE")
+        .await
+        .expect("the healthy print is what proves this printer answers");
+    assert!(
+        printer.received_containing(b"PNJ-BEFORE"),
+        "the first print must land before it wedges"
+    );
+    printer.set_state("hang");
+
+    let started = Instant::now();
+    let err = send_raw_job(&printer, PrinterLanguage::Escpos, b"PNJ-AFTER")
+        .await
+        .expect_err("a printer that stops answering must not report success");
+
+    let elapsed = started.elapsed();
+    assert!(err.contains("stopped answering status queries"), "{err}");
+    assert!(err.contains("media out"), "name the likely cause: {err}");
+    assert!(
+        elapsed < Duration::from_secs(15),
+        "took {elapsed:?}: that is the send deadline, not the status one"
+    );
+    assert_eq!(stored_jobs(&printer), 1, "only the healthy print went out");
+}
+
+/// The whole path, and the promise the UI makes: no paper, and the row the
+/// operator reads says so — with the evidence, in history and in the
+/// response.
+#[tokio::test]
+async fn an_out_of_paper_raw_print_fails_with_the_reason_in_history() {
+    let Some(printer) = VirtualPrinter::start("paperout") else {
+        return;
+    };
+    let db = test_db();
+    seed_printer(
+        &db,
+        "Labels",
+        "raw_tcp",
+        &format!("127.0.0.1:{}", printer.raw_port()),
+        "escpos",
+    );
+    let queue = PrintQueue::new();
+
+    let response = run_print_with(
+        &cache_dir(),
+        &db,
+        &queue,
+        print_request("Labels"),
+        &FakeRenderer::tiny(),
+    )
+    .await
+    .expect("the pipeline answers");
+
+    assert!(
+        !response.success,
+        "a printer with no paper cannot report success"
+    );
+    let returned = response
+        .error
+        .clone()
+        .expect("the response must carry the reason");
+    assert!(returned.contains("out of paper"), "{returned}");
+
+    let (status, row_error) = only_job(&db);
+    assert_eq!(status, "failed", "history must record the failure");
+    let row_error = row_error.expect("the history row must carry the error");
+    assert!(row_error.contains("out of paper"), "{row_error}");
+    assert!(
+        row_error.contains("DLE EOT"),
+        "evidence for a support exchange: {row_error}"
+    );
+    assert!(
+        printer.received().is_empty(),
+        "nothing must have reached the printer"
+    );
 }

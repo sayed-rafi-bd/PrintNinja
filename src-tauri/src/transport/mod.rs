@@ -97,6 +97,11 @@ pub struct RenderedJob {
     pub data: Vec<u8>,
     pub mime_type: String,
     pub copies: u32,
+    /// The printer's own command language, which a raw transport needs to
+    /// know *before* the job: it decides which status query, if any, the
+    /// printer is asked whether it can actually print. `Pdf` — the language
+    /// of a printer row that carries none — asks nothing.
+    pub language: PrinterLanguage,
 }
 
 #[async_trait]
@@ -121,6 +126,7 @@ pub mod escpos;
 pub mod ipp;
 pub mod label_langs;
 pub mod raw_tcp;
+pub mod status;
 pub mod windows_bluetooth;
 pub mod windows_spooler;
 pub mod windows_usb;
@@ -393,6 +399,7 @@ mod tests {
             data: vec![0x25, 0x50, 0x44, 0x46],
             mime_type: "application/pdf".into(),
             copies: 1,
+            language: PrinterLanguage::Pdf,
         };
         // No IPP server on the loopback test port: must be Err, not Ok.
         assert!(t.send(job).await.is_err());

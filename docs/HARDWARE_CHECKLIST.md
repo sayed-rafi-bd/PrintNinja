@@ -35,6 +35,13 @@ print **3 copies**.
       encoding, not PDF bytes
 - [ ] 3 copies → 3 identical labels, one after another (the per-printer
       queue serialises them)
+- [ ] With the media removed, the next print **fails with the reason**: the
+      response and the History row read "it is out of paper" (plus the raw
+      evidence, e.g. `DLE EOT 4 = 0x72`) and nothing is printed. Reload the
+      media and the next print goes through. This only applies to printers
+      with a command language — ESC/POS, ZPL, TSPL are asked before every
+      job; PDF, raster and CPCL printers are not (`transport::status`), and
+      a printer that has never answered a status query prints as before
 
 ## 2. PDF path, spooler and worker (items 0.3, 0.4, P7, P15)
 

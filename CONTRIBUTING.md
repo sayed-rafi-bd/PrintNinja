@@ -59,7 +59,10 @@ Print failures are covered end to end by `src-tauri/tests/virtual_printer.rs`. I
 spawns the vendored Virtual Printer (`e2e/support/virtual-printer`, the `rust` branch of
 [sayed-rafi-bd/virtual-printer](https://github.com/sayed-rafi-bd/virtual-printer), std-only)
 on a free port per test and switches its fault state — `ok`, `paperout`, `jam`, `offline`,
-`hang`, `drop`. The fixture compiles itself on first run in under a second, so the suite needs
+`hang`, `drop`. It also answers raw status queries — `DLE EOT` for ESC/POS and `~HS` for ZPL —
+which is what `src-tauri/src/transport/status.rs` is tested against; its silence on TSPL's
+`ESC !?` is what exercises the "a printer that never answers still prints" path. The fixture
+compiles itself on first run in under a second, so the suite needs
 nothing but `cargo` and never skips. `e2e/support/virtual-printer/target/` is gitignored; delete
 it to rebuild from scratch.
 
