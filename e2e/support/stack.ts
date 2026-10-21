@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -18,11 +19,15 @@ const serverDir = join(repoDir, "server");
 
 const API_PORT = Number(process.env.E2E_API_PORT ?? 3101);
 
-async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
+async function waitForHealth(
+  url: string,
+  timeoutMs: number,
+  path = "/v2/health",
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     try {
-      const response = await fetch(`${url}/v2/health`);
+      const response = await fetch(`${url}${path}`);
       if (response.ok) return;
     } catch {
       // Not listening yet.
@@ -107,5 +112,59 @@ export default async function globalSetup(): Promise<void> {
     agentBundle: bundlePath,
     pgContainerId: container.getId(),
     servicePid: service.pid,
+    virtualPrinter: await startVirtualPrinter(),
   });
+}
+
+/**
+ * The vendored virtual printer (support/virtual-printer, std-only
+ * Rust): build once, then serve raw/IPP on its default high ports with
+ * a scratch jobs dir. Returns the dashboard URL, the raw port and the
+ * printer pid for the stack file; throws when the binary cannot start,
+ * so a broken fixture fails setup instead of every spec.
+ */
+async function startVirtualPrinter(): Promise<{
+  dashboardUrl: string;
+  rawPort: number;
+  ippUrl: string;
+  pid?: number;
+}> {
+  const printerDir = join(e2eDir, "support", "virtual-printer");
+  execFileSync(
+    "cargo",
+    ["build", "--manifest-path", join(printerDir, "Cargo.toml")],
+    {
+      stdio: "pipe",
+      timeout: 300_000,
+    },
+  );
+  const binary = join(
+    printerDir,
+    "target",
+    "debug",
+    process.platform === "win32" ? "virtualprinter.exe" : "virtualprinter",
+  );
+  if (!existsSync(binary)) {
+    throw new Error(`virtual printer binary missing at ${binary}`);
+  }
+  const jobsDir = mkdtempSync(join(tmpdir(), "printninja-vp-"));
+  const rawPort = 20100;
+  const dashboardUrl = "http://127.0.0.1:11080";
+  const printer = spawn(binary, ["--jobs", jobsDir, "--host", "127.0.0.1"], {
+    stdio: "pipe",
+  });
+  printer.unref();
+  const state = {
+    dashboardUrl,
+    rawPort,
+    ippUrl: "http://127.0.0.1:11631/ipp/print",
+    pid: printer.pid,
+  };
+  try {
+    await waitForHealth(dashboardUrl, 15_000, "/api/status");
+  } catch (error) {
+    printer.kill();
+    throw error;
+  }
+  return state;
 }

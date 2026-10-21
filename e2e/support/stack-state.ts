@@ -11,6 +11,12 @@ export interface StackState {
   agentBundle: string;
   pgContainerId?: string;
   servicePid?: number;
+  virtualPrinter?: {
+    dashboardUrl: string;
+    rawPort: number;
+    ippUrl: string;
+    pid?: number;
+  };
 }
 
 const here = dirname(fileURLToPath(import.meta.url));

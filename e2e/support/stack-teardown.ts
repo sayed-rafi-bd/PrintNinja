@@ -25,6 +25,13 @@ export default async function globalTeardown(): Promise<void> {
       // Already gone.
     }
   }
+  if (state.virtualPrinter?.pid !== undefined) {
+    try {
+      process.kill(state.virtualPrinter.pid, "SIGTERM");
+    } catch {
+      // Already gone.
+    }
+  }
   if (state.pgContainerId !== undefined) {
     try {
       execFileSync("docker", ["stop", state.pgContainerId], { stdio: "pipe" });
