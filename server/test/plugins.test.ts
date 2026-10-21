@@ -232,10 +232,15 @@ describe("docs gating", () => {
       config: testConfig({ docsEnabled: false }),
       deps: fakeDeps(),
     });
-    const response = await app.inject({ url: "/docs" });
+    const docs = await app.inject({ url: "/docs" });
 
-    expect(response.statusCode).toBe(404);
-    const body = response.json() as { error: { code: string } };
-    expect(body.error.code).toBe("not_found");
+    expect(docs.statusCode).toBe(404);
+    const docsBody = docs.json() as { error: { code: string } };
+    expect(docsBody.error.code).toBe("not_found");
+
+    const openapi = await app.inject({ url: "/openapi.json" });
+    expect(openapi.statusCode).toBe(404);
+    const openapiBody = openapi.json() as { error: { code: string } };
+    expect(openapiBody.error.code).toBe("not_found");
   });
 });

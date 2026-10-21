@@ -822,6 +822,23 @@ describe("v2 endpoint contracts", () => {
     expect(statuses.sort()).toEqual([201, 428]);
   });
 
+  it("gives one 200 and one 409 for concurrent same-revision updates", async () => {
+    const { token } = await register("raceretry");
+    const id = randomUUID();
+    const created = await put(id, token, tpl());
+    expect(created.status).toBe(201);
+
+    // Both writers read revision 1; only one update can win it.
+    const attempts = await Promise.allSettled([
+      put(id, token, { ...tpl(), if_revision: 1 }),
+      put(id, token, { ...tpl(), if_revision: 1 }),
+    ]);
+    const statuses = attempts.map((result) =>
+      result.status === "fulfilled" ? result.value.status : "rejected",
+    );
+    expect(statuses.sort()).toEqual([200, 409]);
+  });
+
   it("paginates, sorts and searches literally", async () => {
     const { token } = await register("pages");
     const names = ["delta", "alpha", "charlie"];

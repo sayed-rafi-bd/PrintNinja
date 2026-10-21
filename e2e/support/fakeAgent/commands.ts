@@ -159,9 +159,18 @@ type Handler = (args: Record<string, unknown>) => unknown;
 // One cache per browser context (module scope = the injected page).
 const cache = createFakeCache();
 
-// Printers are read once at bundle evaluation, before index.ts consumes
-// the one-shot seed (invoke-time reads would find it already gone).
+// Printers are snapshotted at bundle evaluation, when the one-shot
+// seed is still present (index.ts consumes it after every module has
+// evaluated). Unit tests that seed after importing get nothing from
+// the snapshot, so enumerate also merges a live read — empty in the
+// browser, since the key is already consumed there.
 const seededPrinters = seedPrinters();
+function allSeededPrinters(): Array<Record<string, unknown>> {
+  const live = seedPrinters().filter(
+    (p) => !seededPrinters.some((s) => s["name"] === p["name"]),
+  );
+  return [...seededPrinters, ...live];
+}
 
 const implemented: Record<string, Handler> = {
   get_setting: (args) => getSetting(String(args.key ?? "")),
@@ -174,10 +183,19 @@ const implemented: Record<string, Handler> = {
     cache.library.markSettingDirty(key, typeof value === "string" ? value : "");
     return null;
   },
-  reset_database: () => cache.resetDatabase(),
+  reset_database: () => {
+    const report = cache.resetDatabase() as Record<string, number>;
+    // The fake runs no worker, so there are no print-job rows — but
+    // batches are real here, unlike print_jobs. Report their count so
+    // the wipe path is pinned instead of masked as zero.
+    report["batches"] = batches.size;
+    batches.clear();
+    nextBatchId = 1;
+    return report;
+  },
   ping: () => null,
   enumerate_system_printers: () =>
-    seededPrinters.map((p, i) => ({
+    allSeededPrinters().map((p, i) => ({
       id: `printer-${i + 1}`,
       name: String(p["name"] ?? `E2E Printer ${i + 1}`),
       address: String(p["address"] ?? "usb:e2e"),

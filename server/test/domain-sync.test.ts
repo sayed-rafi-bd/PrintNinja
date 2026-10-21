@@ -146,6 +146,48 @@ describe("readChanges", () => {
     expect(parseTypes("template, font")).toEqual(["template", "font"]);
     expect(() => parseTypes("template,nope")).toThrow(ValidationError);
   });
+
+  it("answers an empty page with no rows, no more and the same cursor", async () => {
+    const { repos } = setup();
+    const result = await readChanges(
+      repos,
+      "owner-1",
+      { cursor: null, limit: 100, types: ["template"] },
+      8 * 1024 * 1024,
+    );
+    expect(result.reset).toBe(false);
+    expect(result.changes).toEqual([]);
+    expect(result.hasMore).toBe(false);
+    expect(result.nextCursor).toBe(0n);
+  });
+
+  it("trims pages to the byte budget but never returns an empty page with rows pending", async () => {
+    const { repos } = setup();
+    await repos.templates.create(write("a1", "a".repeat(1000)), version);
+    await repos.templates.create(write("b1", "b".repeat(1000)), version);
+
+    // A budget that fits one row: the page stops early with more set.
+    const first = await readChanges(
+      repos,
+      "owner-1",
+      { cursor: null, limit: 100, types: ["template"] },
+      1200,
+    );
+    expect(first.changes).toHaveLength(1);
+    expect(first.hasMore).toBe(true);
+
+    // The rest follows from the returned cursor with nothing left.
+    const second = await readChanges(
+      repos,
+      "owner-1",
+      { cursor: first.nextCursor, limit: 100, types: ["template"] },
+      8 * 1024 * 1024,
+    );
+    expect(second.changes).toHaveLength(1);
+    expect(second.hasMore).toBe(false);
+    expect(second.nextCursor).toBe(second.changes[0].seq);
+    expect(second.changes[0].seq).not.toBe(first.changes[0].seq);
+  });
 });
 
 describe("purgeOldTombstones", () => {
