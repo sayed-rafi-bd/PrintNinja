@@ -4,6 +4,17 @@ import { defineConfig, devices } from "@playwright/test";
 // runs the committed migrations, starts the built service and bundles the
 // fake agent; every spec gets a fresh browser context through fixtures.
 // Vite serves the app at 1420; the API port is the setup's business.
+const browsers = (process.env.E2E_BROWSERS ?? "chromium")
+  .split(",")
+  .map((name) => name.trim())
+  .filter((name) => name.length > 0);
+const projects = browsers.map((name) => {
+  if (name === "firefox") {
+    return { name: "firefox", use: { ...devices["Desktop Firefox"] } };
+  }
+  return { name: "chromium", use: { ...devices["Desktop Chrome"] } };
+});
+
 export default defineConfig({
   testDir: "./tests",
   testMatch: "**/*.e2e.ts",
@@ -20,7 +31,7 @@ export default defineConfig({
     baseURL: "http://localhost:1420",
     trace: "on-first-retry",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects,
   webServer: {
     command: "pnpm -C .. dev",
     url: "http://localhost:1420",

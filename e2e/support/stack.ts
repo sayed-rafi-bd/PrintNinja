@@ -23,9 +23,7 @@ const repoDir = resolve(e2eDir, "..");
 const serverDir = join(repoDir, "server");
 
 const BASE_API_PORT = Number(process.env.E2E_API_PORT ?? 3101);
-const WORKERS = Number(
-  process.env.E2E_WORKERS ?? (process.env.CI ? 4 : 2),
-);
+const WORKERS = Number(process.env.E2E_WORKERS ?? (process.env.CI ? 4 : 2));
 
 async function waitForHealth(
   url: string,
@@ -113,7 +111,10 @@ export default async function globalSetup(): Promise<void> {
  * behaves exactly like the old shared stack.
  */
 async function startWorkerApi(
-  container: { getConnectionUri(): string; exec(command: string[]): Promise<unknown> },
+  container: {
+    getConnectionUri(): string;
+    exec(command: string[]): Promise<unknown>;
+  },
   databaseUrl: string,
   worker: number,
 ): Promise<{ pid?: number }> {
@@ -154,16 +155,19 @@ async function startWorkerApi(
       SESSION_CLEANUP_MINUTES: "60",
       // Each worker has its own server, so the relaxed brute-force
       // limit applies per worker; the real limiter is pinned by E8
-      // and the server rate-limit tests.
-      RATE_LIMIT_MAX: "1000",
-      RATE_LIMIT_AUTH_MAX: "1000",
-      RATE_LIMIT_AUTH_WINDOW_SECONDS: "300",
+      // and the server rate-limit tests. Every knob honors the
+      // environment so the nightly prod-like run can tighten them to
+      // production values (see .github/workflows/e2e-nightly.yml).
+      RATE_LIMIT_MAX: process.env.E2E_RATE_LIMIT_MAX ?? "1000",
+      RATE_LIMIT_AUTH_MAX: process.env.E2E_RATE_LIMIT_AUTH_MAX ?? "1000",
+      RATE_LIMIT_AUTH_WINDOW_SECONDS:
+        process.env.E2E_RATE_LIMIT_AUTH_WINDOW_SECONDS ?? "300",
       // Low-cost argon2: e2e registers hundreds of users and never
       // measures hashing.
-      ARGON2_MEMORY_KIB: "8",
-      ARGON2_TIME_COST: "1",
-      ARGON2_PARALLELISM: "1",
-      DOCS_ENABLED: "false",
+      ARGON2_MEMORY_KIB: process.env.E2E_ARGON2_MEMORY_KIB ?? "8",
+      ARGON2_TIME_COST: process.env.E2E_ARGON2_TIME_COST ?? "1",
+      ARGON2_PARALLELISM: process.env.E2E_ARGON2_PARALLELISM ?? "1",
+      DOCS_ENABLED: process.env.E2E_DOCS_ENABLED ?? "false",
     },
     stdio: "pipe",
   });
