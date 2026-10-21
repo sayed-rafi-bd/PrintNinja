@@ -679,7 +679,7 @@ pub fn clear_account(conn: &Connection) -> AppResult<usize> {
 
 // ── Tauri wrappers: lock, delegate, no logic ─────────────────────────
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn cache_apply_changes(
     db: State<'_, DbState>,
     changes: Vec<SyncChangeIn>,
@@ -707,7 +707,7 @@ pub fn cache_list_dirty(db: State<'_, DbState>) -> AppResult<Vec<DirtyTemplate>>
     list_dirty(guard.connection())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn cache_mark_pushed(
     db: State<'_, DbState>,
     server_id: String,
@@ -719,7 +719,7 @@ pub fn cache_mark_pushed(
     mark_pushed(guard.connection(), &server_id, revision)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn cache_mark_conflicted(db: State<'_, DbState>, server_id: String) -> AppResult<()> {
     let guard = db
         .lock()
@@ -727,7 +727,7 @@ pub fn cache_mark_conflicted(db: State<'_, DbState>, server_id: String) -> AppRe
     mark_conflicted(guard.connection(), &server_id)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn cache_resolve_conflict(
     db: State<'_, DbState>,
     server_id: String,
@@ -747,7 +747,7 @@ pub fn cache_resolve_conflict(
     )
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn cache_queue_use(db: State<'_, DbState>, server_id: String, delta: i64) -> AppResult<i64> {
     let guard = db
         .lock()
@@ -787,7 +787,7 @@ pub fn cache_list_synced(db: State<'_, DbState>) -> AppResult<Vec<String>> {
     list_synced(guard.connection())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn cache_forget_template(db: State<'_, DbState>, server_id: String) -> AppResult<bool> {
     let guard = db
         .lock()

@@ -89,7 +89,7 @@ pub struct ApiServerHandle {
     pub port: u16,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn start_api_server(
     app: AppHandle,
     db: State<'_, DbState>,

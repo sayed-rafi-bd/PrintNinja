@@ -177,7 +177,7 @@ pub struct UploadFontRequest {
     pub family: Option<String>,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn upload_font(
     app: AppHandle,
     db: State<'_, DbState>,
@@ -667,7 +667,7 @@ pub fn cache_list_dirty_fonts(db: State<DbState>) -> AppResult<Vec<DirtyFont>> {
     list_dirty_fonts(guard.connection())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn cache_mark_font_pushed(
     db: State<DbState>,
     server_id: String,
@@ -695,7 +695,7 @@ pub fn cache_list_synced_fonts(db: State<DbState>) -> AppResult<Vec<String>> {
     list_synced_fonts(guard.connection())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn cache_forget_font(db: State<DbState>, server_id: String) -> AppResult<bool> {
     let guard = db
         .lock()
@@ -703,7 +703,7 @@ pub fn cache_forget_font(db: State<DbState>, server_id: String) -> AppResult<boo
     forget_font(guard.connection(), &server_id)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn cache_read_font_file(db: State<DbState>, server_id: String) -> AppResult<Vec<u8>> {
     let guard = db
         .lock()

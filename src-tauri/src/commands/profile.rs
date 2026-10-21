@@ -358,7 +358,7 @@ pub fn forget_profile(conn: &Connection, server_id: &str) -> AppResult<bool> {
 
 // ── Tauri wrappers: lock, delegate, no logic ────────────────────
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn list_profiles(
     db: State<DbState>,
     printer_id: Option<i64>,
@@ -394,7 +394,7 @@ pub fn cache_list_dirty_profiles(db: State<DbState>) -> AppResult<Vec<DirtyProfi
     list_dirty_profiles(guard.connection())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn cache_mark_profile_pushed(
     db: State<DbState>,
     server_id: String,
@@ -422,7 +422,7 @@ pub fn cache_list_synced_profiles(db: State<DbState>) -> AppResult<Vec<String>> 
     list_synced_profiles(guard.connection())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn cache_forget_profile(db: State<DbState>, server_id: String) -> AppResult<bool> {
     let guard = db
         .lock()

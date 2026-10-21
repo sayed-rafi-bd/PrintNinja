@@ -47,7 +47,7 @@ fn map_version(row: &rusqlite::Row) -> rusqlite::Result<TemplateVersion> {
 /// shows which copy came from where.
 const VALID_CREATED_BY: &[&str] = &["manual", "autosave", "restore", "sync"];
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn list_versions(db: State<DbState>, template_id: i64) -> AppResult<Vec<TemplateVersion>> {
     let guard = db
         .lock()
@@ -256,7 +256,7 @@ pub struct VersionDiff {
 }
 
 /// Line-level diff of any two versions of the same template (PLANNING.md 7.3).
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn diff_versions(db: State<DbState>, from_id: i64, to_id: i64) -> AppResult<VersionDiff> {
     let guard = db
         .lock()

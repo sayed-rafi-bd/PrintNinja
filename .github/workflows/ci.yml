@@ -39,6 +39,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      - run: pnpm check:tauri-args
       - run: pnpm build
       # Reused by the Rust jobs (tauri::generate_context! embeds ../dist),
       # so the frontend is only built once per run.

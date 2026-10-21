@@ -326,7 +326,7 @@ pub fn cache_list_dirty_datasets(db: State<DbState>) -> AppResult<Vec<DirtyDatas
     list_dirty_datasets(guard.connection())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn cache_mark_dataset_pushed(
     db: State<DbState>,
     server_id: String,
@@ -354,7 +354,7 @@ pub fn cache_list_synced_datasets(db: State<DbState>) -> AppResult<Vec<String>> 
     list_synced_datasets(guard.connection())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn cache_forget_dataset(db: State<DbState>, server_id: String) -> AppResult<bool> {
     let guard = db
         .lock()
