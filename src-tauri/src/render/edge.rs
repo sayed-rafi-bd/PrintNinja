@@ -153,7 +153,9 @@ impl EdgeLauncher {
         // one exception is the startup warm-up, which is nearly done and
         // leaves a profile that makes this job fast; wait for that, briefly.
         let guard = if self.warming.load(Ordering::SeqCst) {
-            tokio::time::timeout(WARM_UP_WAIT, self.warm.lock()).await.ok()
+            tokio::time::timeout(WARM_UP_WAIT, self.warm.lock())
+                .await
+                .ok()
         } else {
             self.warm.try_lock().ok()
         };
@@ -366,12 +368,19 @@ echo ok > "$out"
                 &rig.cache.join("warm.pdf"),
             )
             .await;
-        assert!(!rig.cache.join("warm.pdf").exists(), "warm-up output removed");
+        assert!(
+            !rig.cache.join("warm.pdf").exists(),
+            "warm-up output removed"
+        );
 
         let a = rig.run(&launcher, "a.pdf", &[]).await.unwrap();
         assert!(a.warm);
         let runs = std::fs::read_to_string(rig.cache.join(WARM_PROFILE_DIR).join("runs")).unwrap();
-        assert_eq!(runs.lines().count(), 2, "warm-up run + first job, one profile");
+        assert_eq!(
+            runs.lines().count(),
+            2,
+            "warm-up run + first job, one profile"
+        );
         assert!(rig.throwaway_dirs().is_empty());
     }
 
@@ -390,7 +399,10 @@ echo ok > "$out"
             rig.run(&launcher, "a.pdf", &[]),
         );
 
-        assert!(job.unwrap().warm, "the job waited and used the warm profile");
+        assert!(
+            job.unwrap().warm,
+            "the job waited and used the warm profile"
+        );
         assert!(rig.throwaway_dirs().is_empty());
         let runs = std::fs::read_to_string(rig.cache.join(WARM_PROFILE_DIR).join("runs")).unwrap();
         assert_eq!(runs.lines().count(), 2);

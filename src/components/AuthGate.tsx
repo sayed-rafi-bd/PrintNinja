@@ -116,7 +116,10 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         />
       )}
 
-      {opened && <div hidden={!ready}>{children}</div>}
+      {/* `ready ||`: mount the app in the same render that signs in. Waiting for
+          the `opened` effect left one blank frame between the form going away
+          and the app appearing. */}
+      {(opened || ready) && <div hidden={!ready}>{children}</div>}
     </>
   );
 }

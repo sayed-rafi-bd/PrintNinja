@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, useEffect } from "react";
 import { agent } from "@/lib/agent/commands";
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthGate } from "./components/AuthGate";
 import { Layout } from "./components/Layout";
 import { Onboarding } from "./components/Onboarding";
@@ -11,6 +11,7 @@ import { HistoryPage } from "./pages/History";
 import { SettingsPage } from "./pages/Settings";
 import { TemplatesPage } from "./pages/Templates";
 import { diagnostics } from "./lib/diagnostics";
+import { startOnPrint } from "./lib/shell/startRoute";
 
 // Reference page for shared components. Not bundled into production builds.
 const UiKitPage = import.meta.env.DEV ? lazy(() => import("./pages/UiKit")) : null;
@@ -25,18 +26,14 @@ export default function App() {
 }
 
 /**
- * Open the Print page when the app starts. Only the initial "/" is redirected,
- * so the Designer (also at "/") stays reachable from the sidebar afterwards.
+ * The router, started on the Print page. The address is rewritten before
+ * `BrowserRouter` reads it (a `useState` initializer runs once, during this
+ * component's first render and so before its child's), which is why the
+ * Designer at "/" never flashes on the way to Print.
  */
-function StartOnPrint() {
-  const navigate = useNavigate();
-  const { pathname } = useLocation();
-  useEffect(() => {
-    if (pathname === "/") navigate("/print", { replace: true });
-    // Run once on launch, not on every later visit to "/".
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  return null;
+export function AppRouter({ children }: { children: React.ReactNode }) {
+  useState(startOnPrint);
+  return <BrowserRouter>{children}</BrowserRouter>;
 }
 
 function AppContent() {
@@ -108,8 +105,7 @@ function AppContent() {
   }
 
   return (
-    <BrowserRouter>
-      <StartOnPrint />
+    <AppRouter>
       <Layout>
         <Routes>
           <Route path="/" element={<DesignerPage />} />
@@ -132,6 +128,6 @@ function AppContent() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>
-    </BrowserRouter>
+    </AppRouter>
   );
 }

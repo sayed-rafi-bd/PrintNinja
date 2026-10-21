@@ -171,6 +171,15 @@ pub fn run() {
             commands::api::regenerate_api_key,
             commands::deeplink_cmd::parse_deeplink,
         ]))
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // The persistent headless Edge must not outlive the app.
+            #[cfg(windows)]
+            if let tauri::RunEvent::Exit = event {
+                render::shutdown_edge();
+            }
+            #[cfg(not(windows))]
+            let _ = event;
+        });
 }

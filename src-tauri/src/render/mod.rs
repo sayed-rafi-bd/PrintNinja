@@ -5,6 +5,8 @@ pub mod barcode;
 // Launches headless Edge. Windows runs it for real; the unit tests build it
 // everywhere so the profile logic is tested without Edge.
 #[cfg(any(windows, test))]
+mod cdp;
+#[cfg(any(windows, test))]
 mod edge;
 pub mod handlebars;
 pub mod raster;
@@ -78,6 +80,37 @@ impl PdfRenderer {
 
         let edge_path = find_edge("PDF rendering")?;
         let html_url = format!("file:///{}", html_path.to_string_lossy().replace('\\', "/"));
+
+        // The persistent Edge first: no process start, no new profile — a tab
+        // opens, prints and closes. Any failure there falls through to the
+        // one-shot launcher below, so printing never depends on it.
+        if cdp::enabled() {
+            let started = std::time::Instant::now();
+            let cfg = cdp::Config::new(std::path::Path::new(edge_path), &self.cache_dir);
+            match cdp::shared().print_pdf(&cfg, &html_url).await {
+                Ok(bytes) => {
+                    tracing::info!(
+                        html = %html_url,
+                        bytes = bytes.len(),
+                        edge_ms = started.elapsed().as_millis() as u64,
+                        persistent = true,
+                        "rendered PDF with Edge"
+                    );
+                    // Debug copy, off the print's critical path.
+                    let last = self.cache_dir.join("last-render.pdf");
+                    let copy = bytes.clone();
+                    tokio::spawn(async move {
+                        let _ = tokio::fs::write(last, copy).await;
+                    });
+                    return Ok(bytes);
+                }
+                Err(e) => tracing::warn!(
+                    error = %e,
+                    "persistent Edge could not render; using one-shot Edge"
+                ),
+            }
+        }
+
         let mut args: Vec<String> = [
             "--headless",
             "--disable-gpu",
@@ -185,6 +218,32 @@ impl PdfRenderer {
 
         let edge_path = find_edge("raster printing")?;
         let html_url = format!("file:///{}", html_path.to_string_lossy().replace('\\', "/"));
+
+        // Persistent Edge first, as in `webview2_print_to_pdf`.
+        if cdp::enabled() {
+            let started = std::time::Instant::now();
+            let cfg = cdp::Config::new(std::path::Path::new(edge_path), &self.cache_dir);
+            match cdp::shared()
+                .screenshot(&cfg, &html_url, w_px as u32, h_px as u32)
+                .await
+            {
+                Ok(bytes) => {
+                    let edge_ms = started.elapsed().as_millis() as u64;
+                    tokio::fs::write(&png_path, &bytes).await?;
+                    tracing::info!(edge_ms, persistent = true, "rendered screenshot with Edge");
+                    let decoded = png_to_raster(&png_path);
+                    let _ =
+                        tokio::fs::copy(&png_path, self.cache_dir.join("last-render.png")).await;
+                    let _ = tokio::fs::remove_file(&png_path).await;
+                    return decoded.map_err(|e| anyhow!("screenshot decode: {e}"));
+                }
+                Err(e) => tracing::warn!(
+                    error = %e,
+                    "persistent Edge could not render; using one-shot Edge"
+                ),
+            }
+        }
+
         let mut args: Vec<String> = [
             "--headless",
             "--disable-gpu",
@@ -265,8 +324,11 @@ fn find_edge(purpose: &str) -> Result<&'static str> {
         })
 }
 
-/// Start headless Edge once, in the background, on the reusable profile, so
-/// the first real print does not pay for Edge's first-run initialisation.
+/// Start headless Edge once, in the background, so the first real print does
+/// not pay for Edge's start-up.
+///
+/// The persistent Edge (`cdp.rs`) is started and primed with one page; only if
+/// that fails is the one-shot launcher's reusable profile warmed instead.
 ///
 /// Call from app setup after `sweep_leftover_edge_profiles` and **before the
 /// worker spawns**: the profile is claimed synchronously here, and a job that
@@ -301,6 +363,32 @@ pub fn warm_up_edge(cache_dir: PathBuf) {
             return;
         }
         let url = format!("file:///{}", html.to_string_lossy().replace('\\', "/"));
+
+        // Preferred: start the persistent Edge and print one page through
+        // it, which also warms its renderer, fonts and print pipeline. Then
+        // the one-shot profile is not needed unless a render falls back.
+        if cdp::enabled() {
+            let cfg = cdp::Config::new(std::path::Path::new(edge_path), &cache_dir);
+            let started = std::time::Instant::now();
+            let primed = match cdp::shared().start(&cfg).await {
+                Ok(()) => cdp::shared().print_pdf(&cfg, &url).await.map(|_| ()),
+                Err(e) => Err(e),
+            };
+            match primed {
+                Ok(()) => {
+                    tracing::info!(
+                        warm_up_ms = started.elapsed().as_millis() as u64,
+                        "persistent Edge is running and warm"
+                    );
+                    let _ = tokio::fs::remove_file(&html).await;
+                    return; // `claim` drops: the one-shot profile stays free.
+                }
+                Err(e) => tracing::warn!(
+                    error = %e,
+                    "persistent Edge did not start; warming one-shot Edge instead"
+                ),
+            }
+        }
         // Same switches as `webview2_print_to_pdf`, so the same code paths load.
         let mut args: Vec<String> = [
             "--headless",
@@ -320,6 +408,14 @@ pub fn warm_up_edge(cache_dir: PathBuf) {
             .await;
         let _ = tokio::fs::remove_file(&html).await;
     });
+}
+
+/// Close the persistent Edge. Called once when the app exits: the handle is a
+/// `static`, so nothing drops it, and an Edge left running would keep its
+/// profile locked for the next start.
+#[cfg(windows)]
+pub fn shutdown_edge() {
+    tauri::async_runtime::block_on(cdp::shared().shutdown());
 }
 
 /// Startup sweep: remove throwaway Edge profiles left behind by earlier
