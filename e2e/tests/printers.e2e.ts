@@ -51,6 +51,21 @@ test("printers add, reject duplicates, test and remove", async ({
     timeout: 15_000,
   });
 
+  // Edit changes the address in place: no duplicate row, no re-add.
+  await page.getByRole("button", { name: "Edit E2E JetDirect" }).click();
+  await expect(page.getByRole("heading", { name: "Edit printer" })).toBeVisible();
+  await page.getByLabel(/address|host|port/i).fill("127.0.0.1:9102");
+  await page.getByRole("button", { name: "Save printer" }).click();
+  await expect(page.getByText('Saved "E2E JetDirect"')).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(
+    page.getByRole("button", { name: "Test print on E2E JetDirect" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Test print on E2E JetDirect" }),
+  ).toHaveCount(1);
+
   // Remove asks first, then the row is gone.
   await page.getByRole("button", { name: "Remove E2E JetDirect" }).click();
   await page.getByRole("button", { name: "Remove printer" }).click();

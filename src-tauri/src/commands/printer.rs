@@ -20,6 +20,28 @@ pub struct Printer {
 const VALID_PRINTER_TYPES: &[&str] = &["ipp", "raw_tcp", "usb", "bluetooth", "system"];
 const VALID_LANGUAGES: &[&str] = &["pdf", "escpos", "tspl", "zpl", "cpcl", "raster"];
 
+/// Shared by add and update so the UI, the API and the tests see one
+/// rulebook with identical messages.
+fn validate_printer_input(name: &str, printer_type: &str, language: &str) -> AppResult<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(AppError::Validation("Printer name required".into()));
+    }
+    if !VALID_PRINTER_TYPES.contains(&printer_type) {
+        return Err(AppError::Validation(format!(
+            "Invalid printer type '{}'. Expected one of {:?}",
+            printer_type, VALID_PRINTER_TYPES
+        )));
+    }
+    if !VALID_LANGUAGES.contains(&language) {
+        return Err(AppError::Validation(format!(
+            "Invalid language '{}'. Expected one of {:?}",
+            language, VALID_LANGUAGES
+        )));
+    }
+    Ok(name.to_string())
+}
+
 #[tauri::command]
 pub fn list_printers(db: State<DbState>) -> AppResult<Vec<Printer>> {
     let guard = db
@@ -65,22 +87,7 @@ pub struct AddPrinterRequest {
 
 #[tauri::command]
 pub fn add_printer(db: State<DbState>, req: AddPrinterRequest) -> AppResult<Printer> {
-    let name = req.name.trim();
-    if name.is_empty() {
-        return Err(AppError::Validation("Printer name required".into()));
-    }
-    if !VALID_PRINTER_TYPES.contains(&req.printer_type.as_str()) {
-        return Err(AppError::Validation(format!(
-            "Invalid printer type '{}'. Expected one of {:?}",
-            req.printer_type, VALID_PRINTER_TYPES
-        )));
-    }
-    if !VALID_LANGUAGES.contains(&req.language.as_str()) {
-        return Err(AppError::Validation(format!(
-            "Invalid language '{}'. Expected one of {:?}",
-            req.language, VALID_LANGUAGES
-        )));
-    }
+    let name = validate_printer_input(&req.name, &req.printer_type, &req.language)?;
 
     let guard = db
         .lock()
@@ -89,7 +96,7 @@ pub fn add_printer(db: State<DbState>, req: AddPrinterRequest) -> AppResult<Prin
 
     let exists: i64 = conn.query_row(
         "SELECT COUNT(*) FROM printers WHERE name = ?1 COLLATE NOCASE",
-        [name],
+        [&name],
         |r| r.get(0),
     )?;
     if exists > 0 {
@@ -137,27 +144,56 @@ pub fn add_printer(db: State<DbState>, req: AddPrinterRequest) -> AppResult<Prin
     Ok(printer)
 }
 
+/// Edit a printer in place (the UI used to require delete + re-add,
+/// losing profiles keyed by name). Same validation as add; the
+/// duplicate-name check excludes the row being edited.
 #[tauri::command]
-pub fn delete_printer(db: State<DbState>, id: i64) -> AppResult<()> {
+pub fn update_printer(db: State<DbState>, id: i64, req: AddPrinterRequest) -> AppResult<Printer> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection();
+    update_printer_conn(guard.connection(), id, &req)
+}
 
-    let affected = conn.execute("DELETE FROM printers WHERE id = ?1", [id])?;
+/// Test seam for the edit path: the Tauri command only adds the lock.
+/// Public so integration tests can drive validation and the duplicate
+/// check against a real database without a Tauri runtime.
+pub fn update_printer_conn(
+    conn: &rusqlite::Connection,
+    id: i64,
+    req: &AddPrinterRequest,
+) -> AppResult<Printer> {
+    let name = validate_printer_input(&req.name, &req.printer_type, &req.language)?;
+
+    let clash: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM printers WHERE name = ?1 COLLATE NOCASE AND id <> ?2",
+        rusqlite::params![name, id],
+        |r| r.get(0),
+    )?;
+    if clash > 0 {
+        return Err(AppError::Validation(format!(
+            "A printer named '{}' already exists",
+            name
+        )));
+    }
+
+    let affected = conn.execute(
+        "UPDATE printers SET name = ?1, type = ?2, address = ?3, language = ?4,
+                paper_width_mm = ?5, dpi = ?6, updated_at = datetime('now')
+         WHERE id = ?7",
+        rusqlite::params![
+            name,
+            req.printer_type,
+            req.address,
+            req.language,
+            req.paper_width_mm,
+            req.dpi,
+            id,
+        ],
+    )?;
     if affected == 0 {
         return Err(AppError::NotFound(format!("Printer {} not found", id)));
     }
-    Ok(())
-}
-
-#[tauri::command]
-pub fn get_printer(db: State<DbState>, id: i64) -> AppResult<Printer> {
-    let guard = db
-        .lock()
-        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection();
-
     conn.query_row(
         "SELECT id, name, type, address, language, paper_width_mm, dpi,
                 default_settings_json, created_at, updated_at
@@ -179,6 +215,54 @@ pub fn get_printer(db: State<DbState>, id: i64) -> AppResult<Printer> {
         },
     )
     .map_err(|_| AppError::NotFound(format!("Printer {} not found", id)))
+}
+
+fn get_printer_inner(db: &DbState, id: i64) -> AppResult<Printer> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    guard
+        .connection()
+        .query_row(
+            "SELECT id, name, type, address, language, paper_width_mm, dpi,
+                    default_settings_json, created_at, updated_at
+             FROM printers WHERE id = ?1",
+            [id],
+            |row| {
+                Ok(Printer {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    printer_type: row.get(2)?,
+                    address: row.get(3)?,
+                    language: row.get(4)?,
+                    paper_width_mm: row.get(5)?,
+                    dpi: row.get(6)?,
+                    default_settings_json: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
+                })
+            },
+        )
+        .map_err(|_| AppError::NotFound(format!("Printer {} not found", id)))
+}
+
+#[tauri::command]
+pub fn delete_printer(db: State<DbState>, id: i64) -> AppResult<()> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    let conn = guard.connection();
+
+    let affected = conn.execute("DELETE FROM printers WHERE id = ?1", [id])?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("Printer {} not found", id)));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_printer(db: State<DbState>, id: i64) -> AppResult<Printer> {
+    get_printer_inner(&db, id)
 }
 
 /// Send a small test page to a configured printer.

@@ -139,6 +139,7 @@ export interface AgentCommands {
   // Printers
   list_printers: [{}, PrinterRow[]];
   add_printer: [{ req: AddPrinterReq }, PrinterRow];
+  update_printer: [{ id: number; req: AddPrinterReq }, PrinterRow];
   delete_printer: [{ id: number }, null];
   get_printer: [{ id: number }, PrinterRow];
   test_printer: [{ id: number }, null];

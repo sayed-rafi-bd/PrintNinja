@@ -304,6 +304,15 @@ const implemented: Record<string, Handler> = {
         req["language"] === undefined ? undefined : String(req["language"]),
     });
   },
+  update_printer: (args) => {
+    const req = (args["req"] ?? args) as Record<string, unknown>;
+    return cache.library.updatePrinter(Number(args["id"] ?? NaN), {
+      name: String(req["name"] ?? ""),
+      printer_type: String(req["printer_type"] ?? ""),
+      address: String(req["address"] ?? ""),
+      language: String(req["language"] ?? ""),
+    });
+  },
   delete_printer: (args) => {
     cache.library.deletePrinter(Number(args["id"] ?? 0));
     return null;

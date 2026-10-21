@@ -190,6 +190,7 @@ pub fn run() {
             commands::background::refresh_background,
             commands::printer::list_printers,
             commands::printer::add_printer,
+            commands::printer::update_printer,
             commands::printer::delete_printer,
             commands::printer::get_printer,
             commands::printer::test_printer,

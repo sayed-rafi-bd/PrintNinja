@@ -233,6 +233,69 @@ export function createFakeLibrary(deps: {
     return row.server_id;
   };
 
+  function upsertPrinter(
+    id: number | undefined,
+    input: {
+      name: string;
+      printer_type?: string;
+      address?: string;
+      language?: string;
+    },
+  ): FakePrinterRow {
+    // Mirrors the Rust validation in commands/printer.rs so the
+    // printers spec pins the same error paths: empty name, unknown
+    // type/language, and case-insensitive duplicate names. Updates
+    // exclude the edited row from the duplicate check.
+    const name = (input.name ?? "").trim();
+    if (!name) {
+      throw new Error("Printer name required");
+    }
+    const printer_type = input.printer_type ?? "ipp";
+    if (
+      !["ipp", "raw_tcp", "usb", "bluetooth", "system"].includes(printer_type)
+    ) {
+      throw new Error(
+        `Invalid printer type '${printer_type}'. Expected one of ["ipp", "raw_tcp", "usb", "bluetooth", "system"]`,
+      );
+    }
+    const language = input.language ?? "pdf";
+    if (
+      !["pdf", "escpos", "tspl", "zpl", "cpcl", "raster"].includes(language)
+    ) {
+      throw new Error(
+        `Invalid language '${language}'. Expected one of ["pdf", "escpos", "tspl", "zpl", "cpcl", "raster"]`,
+      );
+    }
+    const lower = name.toLowerCase();
+    for (const row of printers.values()) {
+      if (row.id !== id && row.name.toLowerCase() === lower) {
+        throw new Error(`A printer named '${name}' already exists`);
+      }
+    }
+    if (id === undefined) {
+      const created: FakePrinterRow = {
+        id: nextPrinterId++,
+        name,
+        printer_type,
+        address: input.address ?? "",
+        language,
+      };
+      printers.set(created.id, created);
+      persistAll();
+      return created;
+    }
+    const row = printers.get(id);
+    if (!row) {
+      throw new Error(`Printer ${id} not found`);
+    }
+    row.name = name;
+    row.printer_type = printer_type;
+    if (input.address !== undefined) row.address = input.address;
+    row.language = language;
+    persistAll();
+    return row;
+  }
+
   return {
     /** Test seam: the raw stores plus id allocators. */
     _store: {
@@ -257,46 +320,18 @@ export function createFakeLibrary(deps: {
       address?: string;
       language?: string;
     }): FakePrinterRow {
-      // Mirrors the Rust validation in commands/printer.rs so the
-      // printers spec pins the same error paths: empty name, unknown
-      // type/language, and case-insensitive duplicate names.
-      const name = (input.name ?? "").trim();
-      if (!name) {
-        throw new Error("Printer name required");
-      }
-      const printer_type = input.printer_type ?? "ipp";
-      if (
-        !["ipp", "raw_tcp", "usb", "bluetooth", "system"].includes(printer_type)
-      ) {
-        throw new Error(
-          `Invalid printer type '${printer_type}'. Expected one of ["ipp", "raw_tcp", "usb", "bluetooth", "system"]`,
-        );
-      }
-      const language = input.language ?? "pdf";
-      if (
-        !["pdf", "escpos", "tspl", "zpl", "cpcl", "raster"].includes(language)
-      ) {
-        throw new Error(
-          `Invalid language '${language}'. Expected one of ["pdf", "escpos", "tspl", "zpl", "cpcl", "raster"]`,
-        );
-      }
-      const lower = name.toLowerCase();
-      for (const row of printers.values()) {
-        if (row.name.toLowerCase() === lower) {
-          throw new Error(`A printer named '${name}' already exists`);
-        }
-      }
-      const id = nextPrinterId++;
-      const row: FakePrinterRow = {
-        id,
-        name,
-        printer_type,
-        address: input.address ?? "",
-        language,
-      };
-      printers.set(id, row);
-      persistAll();
-      return row;
+      return upsertPrinter(undefined, input);
+    },
+    updatePrinter(
+      id: number,
+      input: {
+        name: string;
+        printer_type?: string;
+        address?: string;
+        language?: string;
+      },
+    ): FakePrinterRow {
+      return upsertPrinter(id, input);
     },
     deletePrinter(id: number): void {
       // No foreign keys: profiles keyed at this printer stay dormant.

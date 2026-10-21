@@ -149,6 +149,40 @@ describe("Printers page", () => {
     );
   });
 
+  it("edits a printer in place without delete and re-add", async () => {
+    renderPage();
+    await screen.findByText("Dock Zebra");
+    fireEvent.click(screen.getByRole("button", { name: "Edit Dock Zebra" }));
+    const panel = await screen.findByRole("dialog");
+    expect(
+      within(panel).getByRole("heading", { name: "Edit printer" }),
+    ).toBeInTheDocument();
+    expect(within(panel).getByLabelText("Printer name")).toHaveValue(
+      "Dock Zebra",
+    );
+    fireEvent.change(within(panel).getByLabelText("Address"), {
+      target: { value: "10.0.0.6:9100" },
+    });
+    fireEvent.click(
+      within(panel).getByRole("button", { name: "Save printer" }),
+    );
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "update_printer",
+        expect.objectContaining({
+          id: 1,
+          req: expect.objectContaining({
+            name: "Dock Zebra",
+            address: "10.0.0.6:9100",
+          }),
+        }),
+      ),
+    );
+    expect(
+      invoke.mock.calls.some(([cmd]) => cmd === "delete_printer"),
+    ).toBe(false);
+  });
+
   it("explains an empty group and offers a next step", async () => {
     invoke.mockImplementation(async (cmd: string) =>
       cmd === "list_printers" ? [] : [],
