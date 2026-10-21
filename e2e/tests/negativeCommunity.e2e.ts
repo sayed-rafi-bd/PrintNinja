@@ -44,9 +44,9 @@ test("withdrawn templates still print from the saved copy", async ({
   });
   const card = page.locator("li", { hasText: "Withdrawn Label" }).first();
   await card.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(
-    card.getByRole("button", { name: "Saved" }),
-  ).toBeVisible({ timeout: 15_000 });
+  await expect(card.getByRole("button", { name: "Saved" })).toBeVisible({
+    timeout: 15_000,
+  });
 
   // The author withdraws; the saved copy keeps working offline-first.
   await apiUnpublish(auth.token, serverId);
@@ -71,9 +71,7 @@ test("withdrawn templates still print from the saved copy", async ({
   expect(calls).toBe(1);
 
   // And saving the withdrawn template directly is a 404.
-  await expect(apiSaveTemplate(auth.token, serverId)).rejects.toThrow(
-    /404/,
-  );
+  await expect(apiSaveTemplate(auth.token, serverId)).rejects.toThrow(/404/);
 });
 
 test("empty searches and duplicate saves behave", async ({ browser }) => {

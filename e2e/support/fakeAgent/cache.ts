@@ -15,6 +15,8 @@ export interface FakeVersion {
   created_by: string;
   label?: string | null;
   note?: string | null;
+  compiled_css?: string;
+  compiled_key?: string;
 }
 
 export interface FakeTemplateRow {
@@ -664,6 +666,14 @@ export function createFakeCache() {
           _current: i === 0,
         }));
     },
+    listLatestVersions(templateIds: number[]): Record<string, unknown>[] {
+      const out: Record<string, unknown>[] = [];
+      for (const id of templateIds) {
+        const latest = this.listVersions(id)[0];
+        if (latest) out.push(latest);
+      }
+      return out;
+    },
 
     createVersion(
       templateId: number,
@@ -742,6 +752,24 @@ export function createFakeCache() {
         created_at: row.updated_at,
         ...version,
       };
+    },
+    setVersionCompiled(
+      versionId: number,
+      compiledCss: string,
+      compiledKey: string,
+    ): Record<string, unknown> {
+      for (const row of templates.values()) {
+        const v = row.versions.find(
+          (x) => row.id * 1000 + x.version_no === versionId,
+        );
+        if (v) {
+          v.compiled_css = compiledCss;
+          v.compiled_key = compiledKey;
+          persist();
+          return { id: versionId, template_id: row.id, ...v };
+        }
+      }
+      throw new Error(`Version ${versionId} not found`);
     },
 
     deleteTemplate(id: number): void {

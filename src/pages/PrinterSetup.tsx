@@ -38,6 +38,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
+import { validatePrinterForm } from "@/lib/printerSchema";
 import type { PrinterRow } from "@/lib/agent/types";
 
 const PRINTER_TYPES = [
@@ -217,27 +218,12 @@ export function PrinterSetupPage() {
   };
 
   const addPrinter = async () => {
-    if (!form.name.trim()) {
-      toast.error("Printer name is required");
+    const parsed = validatePrinterForm(form);
+    if (!parsed.ok) {
+      toast.error(parsed.error);
       return;
     }
-    if (!form.address.trim()) {
-      toast.error("Address / port is required");
-      return;
-    }
-    if (form.printer_type === "ipp" && !/^https?:\/\//i.test(form.address)) {
-      toast.error("IPP address must start with http:// or https://");
-      return;
-    }
-
-    const req = {
-      name: form.name.trim(),
-      printer_type: form.printer_type,
-      address: form.address.trim(),
-      language: form.language,
-      paper_width_mm: Number(form.paper_width_mm),
-      dpi: Number(form.dpi),
-    };
+    const req = parsed.req;
     try {
       if (editingId === null) {
         await agent("add_printer", { req });
@@ -620,40 +606,44 @@ export function PrinterSetupPage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div className={field}>
-                <Label htmlFor="printer-paper">Paper width</Label>
-                <Select
+                <Label htmlFor="printer-paper">Paper width (mm)</Label>
+                <Input
+                  id="printer-paper"
+                  type="number"
+                  min="1"
+                  max="1000"
+                  list="printer-paper-widths"
                   value={form.paper_width_mm}
-                  onValueChange={(v) =>
-                    setForm((f) => ({ ...f, paper_width_mm: v }))
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, paper_width_mm: e.target.value }))
                   }
-                >
-                  <SelectTrigger id="printer-paper" aria-label="Paper width">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAPERS.map((x) => (
-                      <SelectItem key={x.value} value={x.value}>
-                        {x.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                />
+                <datalist id="printer-paper-widths">
+                  {PAPERS.map((x) => (
+                    <option key={x.value} value={x.value}>
+                      {x.label}
+                    </option>
+                  ))}
+                </datalist>
               </div>
               <div className={field}>
                 <Label htmlFor="printer-dpi">DPI</Label>
-                <Select
+                <Input
+                  id="printer-dpi"
+                  type="number"
+                  min="50"
+                  max="2400"
+                  list="printer-dpis"
                   value={form.dpi}
-                  onValueChange={(v) => setForm((f) => ({ ...f, dpi: v }))}
-                >
-                  <SelectTrigger id="printer-dpi" aria-label="DPI">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="203">203</SelectItem>
-                    <SelectItem value="300">300</SelectItem>
-                    <SelectItem value="600">600</SelectItem>
-                  </SelectContent>
-                </Select>
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, dpi: e.target.value }))
+                  }
+                />
+                <datalist id="printer-dpis">
+                  <option value="203" />
+                  <option value="300" />
+                  <option value="600" />
+                </datalist>
               </div>
             </div>
           </div>

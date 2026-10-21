@@ -158,6 +158,7 @@ export interface PrintHtmlReq {
   template_version_id?: number | null;
   data?: unknown;
   data_url?: string | null;
+  http_method?: string | null;
   test?: boolean | null;
   source?: string | null;
   idempotency_key?: string | null;

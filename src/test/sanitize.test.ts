@@ -82,9 +82,7 @@ describe("stripScriptsAndHandlers", () => {
 
   it("returns pure text byte-identical (padded helper output)", () => {
     expect(stripScriptsAndHandlers("   42")).toBe("   42");
-    expect(stripScriptsAndHandlers("a < b and c > d")).toBe(
-      "a < b and c > d",
-    );
+    expect(stripScriptsAndHandlers("a < b and c > d")).toBe("a < b and c > d");
   });
 });
 

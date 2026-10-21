@@ -9,6 +9,12 @@ import {
 } from "@/components/BackgroundAndroid";
 import { parseSection, type SettingsSection } from "@/lib/setup/checklist";
 import { agent } from "@/lib/agent/commands";
+import {
+  isWebMode,
+  readSetting,
+  settingsLsKey,
+  writeSetting,
+} from "@/lib/settings";
 import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
 import type { ApiStatus, FontRow } from "@/lib/agent/types";
 import { useTranslation } from "react-i18next";
@@ -51,38 +57,6 @@ import { normalizeServiceUrl } from "@/lib/share/session";
 
 const DEFAULT_KEY = "— not generated —";
 
-/**
- * Settings are stored in SQLite via Tauri. In web mode (browser preview,
- * CI) the command is unavailable, so fall back to localStorage so the page
- * stays usable instead of silently discarding every write.
- */
-const isWebMode = () =>
-  typeof window !== "undefined" && !(window as any).__TAURI_INTERNALS__;
-
-const lsKey = (key: string) => `printninja-setting:${key}`;
-
-async function readSetting(key: string): Promise<string | null> {
-  if (isWebMode()) return localStorage.getItem(lsKey(key));
-  try {
-    return await agent("get_setting", { key });
-  } catch {
-    return localStorage.getItem(lsKey(key));
-  }
-}
-
-async function writeSetting(key: string, value: string): Promise<boolean> {
-  localStorage.setItem(lsKey(key), value);
-  if (isWebMode()) return true;
-  try {
-    await agent("set_setting", { key, value });
-    return true;
-  } catch (e) {
-    // Persisted locally at least; surface the backend problem.
-    console.warn(`set_setting(${key}) failed, kept in localStorage:`, e);
-    return true;
-  }
-}
-
 export function SettingsPage() {
   const { t } = useTranslation();
   const [appVersion, setAppVersion] = useState<string>("");
@@ -109,6 +83,11 @@ export function SettingsPage() {
 
   const [allowedDomains, setAllowedDomains] = useState("");
   const [blockPrivate, setBlockPrivate] = useState(true);
+  const [domainsError, setDomainsError] = useState("");
+  const [allowAllOpen, setAllowAllOpen] = useState(false);
+  // Last persisted value: clearing a non-empty allowlist is allow-all,
+  // which needs an explicit confirm.
+  const lastSavedDomains = useRef<string | null>(null);
 
   const [launchAtStartup, setLaunchAtStartup] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
@@ -207,6 +186,7 @@ export function SettingsPage() {
       if (days) setRetentionDays(days);
       if (max) setMaxRecords(max);
       if (domains) setAllowedDomains(domains);
+      lastSavedDomains.current = domains ?? "";
       if (block !== null) setBlockPrivate(block === "true");
       if (startup !== null)
         setLaunchAtStartup(startup === "true" || startup === "1");
@@ -219,7 +199,7 @@ export function SettingsPage() {
 
       try {
         if (isWebMode()) {
-          const raw = localStorage.getItem(lsKey("trusted_sources"));
+          const raw = localStorage.getItem(settingsLsKey("trusted_sources"));
           setTrusted(raw ? (JSON.parse(raw) as string[]) : []);
         } else {
           setTrusted((await agent("get_trusted_sources", {})) ?? []);
@@ -361,22 +341,78 @@ export function SettingsPage() {
     }
   };
 
+  // Single write path for trusted sources: the dedicated command in
+  // app mode, localStorage in web mode (or when the backend is down).
+  // Previously add/remove wrote the raw setting key while load read
+  // through get_trusted_sources — two formats that could diverge.
+  const persistTrusted = async (next: string[]) => {
+    const clean = [...new Set(next.map((s) => s.trim()).filter(Boolean))];
+    if (isWebMode()) {
+      localStorage.setItem(
+        settingsLsKey("trusted_sources"),
+        JSON.stringify(clean),
+      );
+    } else {
+      try {
+        await agent("set_trusted_sources", { sources: clean });
+      } catch {
+        localStorage.setItem(
+          settingsLsKey("trusted_sources"),
+          JSON.stringify(clean),
+        );
+      }
+    }
+    setTrusted(clean);
+  };
+
   const addTrusted = async () => {
     const value = newTrusted.trim();
     if (!value) return;
-    const next = [...trusted, value];
-    if (await writeSetting("trusted_sources", JSON.stringify(next))) {
-      setTrusted(next);
-      setNewTrusted("");
-      toast.success(`Trusted source added`);
+    if (trusted.includes(value)) {
+      toast.info("That source is already trusted");
+      return;
     }
+    await persistTrusted([...trusted, value]);
+    setNewTrusted("");
+    toast.success(`Trusted source added`);
   };
 
   const removeTrusted = async (value: string) => {
-    const next = trusted.filter((x) => x !== value);
-    if (await writeSetting("trusted_sources", JSON.stringify(next))) {
-      setTrusted(next);
+    await persistTrusted(trusted.filter((x) => x !== value));
+  };
+
+  // Hostnames only: no scheme, path, port-range or spaces. An empty
+  // field means allow-all, so clearing a non-empty list asks first.
+  const saveAllowedDomains = async (raw: string) => {
+    const entries = raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const bad = entries.find(
+      (e) =>
+        !/^(?=.{1,253}$)[a-z0-9]([a-z0-9.-]*[a-z0-9])?(?::\d{1,5})?$/i.test(
+          e,
+        ) || e.includes(".."),
+    );
+    if (bad) {
+      setDomainsError(
+        `“${bad}” is not a domain — use hostnames like api.example.com, comma-separated`,
+      );
+      return;
     }
+    setDomainsError("");
+    const normalized = entries.join(", ");
+    if (normalized === "") {
+      if (lastSavedDomains.current) {
+        setAllowAllOpen(true);
+        return;
+      }
+      return;
+    }
+    await writeSetting("allowed_domains", normalized);
+    if (normalized !== raw) setAllowedDomains(normalized);
+    lastSavedDomains.current = normalized;
+    toast.success("Allowed domains updated");
   };
 
   const saveShareUrl = async () => {
@@ -1004,11 +1040,25 @@ export function SettingsPage() {
                     id="allowed-domains"
                     placeholder="api.example.com, pos.local"
                     value={allowedDomains}
-                    onChange={(e) => setAllowedDomains(e.target.value)}
-                    onBlur={() =>
-                      writeSetting("allowed_domains", allowedDomains)
+                    aria-invalid={!!domainsError}
+                    aria-describedby={
+                      domainsError ? "allowed-domains-error" : undefined
                     }
+                    onChange={(e) => {
+                      setAllowedDomains(e.target.value);
+                      setDomainsError("");
+                    }}
+                    onBlur={() => void saveAllowedDomains(allowedDomains)}
                   />
+                  {domainsError && (
+                    <p
+                      id="allowed-domains-error"
+                      role="alert"
+                      className="text-xs text-danger"
+                    >
+                      {domainsError}
+                    </p>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     Comma-separated. Leave empty to allow any domain.
                   </p>
@@ -1162,6 +1212,38 @@ export function SettingsPage() {
           </TabsContent>
         </div>
       </Tabs>
+
+      {/* Clearing the allowlist means any domain can feed data URLs. */}
+      <Dialog open={allowAllOpen} onOpenChange={setAllowAllOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Allow data from any domain?</DialogTitle>
+            <DialogDescription>
+              An empty list allows every domain. Live data URLs could then pull
+              content from anywhere — keep at least your own hosts listed unless
+              you mean it.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAllowAllOpen(false)}>
+              Keep the list
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                void (async () => {
+                  await writeSetting("allowed_domains", "");
+                  lastSavedDomains.current = "";
+                  setAllowAllOpen(false);
+                  toast.success("Allowed domains cleared — any domain allowed");
+                })();
+              }}
+            >
+              Allow all
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Full-reset confirmation: the wipe cannot be undone. */}
       <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>

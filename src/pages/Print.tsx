@@ -153,25 +153,20 @@ export function PrintPage() {
 
         // A version saved before per-template compilation existed (or whose
         // compile failed) has no stored Tailwind CSS. Compile it now so the
-        // preview matches the Designer, and save the result so the actual
-        // print job (which reads the stored stylesheet) is styled too.
+        // preview matches the Designer, and store the result on the same
+        // row so the actual print job (which reads the stored stylesheet)
+        // is styled too. This updates the version in place: previews must
+        // not mint new versions just for being looked at.
         let compiledCss = latest.compiled_css ?? "";
         if (!compiledCss.trim() && !cssBackfilled.current.has(latest.id)) {
           cssBackfilled.current.add(latest.id);
           const built = await compileTemplateCss(latest.html);
           compiledCss = built.css;
           if (built.css.trim() && !cancelled) {
-            agent("create_version", {
-              req: {
-                template_id: template.id,
-                html: latest.html,
-                css: latest.css,
-                compiled_css: built.css,
-                compiled_key: built.key,
-                label: null,
-                note: "Compiled Tailwind CSS",
-                created_by: "autosave",
-              },
+            agent("set_version_compiled", {
+              id: latest.id,
+              compiled_css: built.css,
+              compiled_key: built.key,
             })
               .then(() => notifyLocalEdit())
               .catch((e) => console.warn("Could not store compiled CSS:", e));
@@ -425,6 +420,7 @@ export function PrintPage() {
           source: store.useTestData ? "test" : "ui",
           data: store.useTestData ? DEFAULT_MOCK_DATA : undefined,
           data_url: store.useTestData ? undefined : store.dataUrl || undefined,
+          http_method: store.useTestData ? undefined : store.httpMethod,
         },
       });
 
@@ -639,6 +635,33 @@ export function PrintPage() {
                   onChange={(e) => store.setDataUrl(e.target.value)}
                   disabled={store.useTestData}
                 />
+                <div className="flex items-center gap-2 pt-1">
+                  <Label
+                    htmlFor="http-method"
+                    className="text-xs text-muted-foreground"
+                  >
+                    Method
+                  </Label>
+                  <Select
+                    value={store.httpMethod}
+                    onValueChange={(v: "GET" | "POST") =>
+                      store.setHttpMethod(v)
+                    }
+                    disabled={store.useTestData}
+                  >
+                    <SelectTrigger
+                      id="http-method"
+                      aria-label="HTTP method"
+                      className="h-7 w-[5.5rem] text-xs"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="GET">GET</SelectItem>
+                      <SelectItem value="POST">POST</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 {store.useTestData && (
                   <p className="text-xs text-muted-foreground">
                     Sample data: {DEFAULT_MOCK_DATA.store.name}, order #

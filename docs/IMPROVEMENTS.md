@@ -15,9 +15,15 @@
 > inspected locally), Linux system-Chromium render, E2E done (§4:
 > 23 → 40 specs plus harness, contract and server-side gaps),
 > Android foreground service (real plugin crate, debug APK proven:
-> dex classes, merged manifest, unit tests). P1 UX-debt queue in
-> progress (CSV parser, batch polling, templates fixes, printer
-> edit, retention purge done); P2 hardening untouched so far.
+> dex classes, merged manifest, unit tests). P1 UX-debt queue done:
+> CSV parser, batch polling, templates fixes (debounce, bounded
+> withdrawn check, CSS preview, conflict queue), printer edit flow,
+> retention purge, DOM sanitizer, store cleanup, IPC redaction,
+> history confirms/search/export/isTest, http_method end-to-end,
+> dataset JSON mode, settings validation (trusted path, domains,
+> single module), printer Zod schema, version backfill command,
+> compile memo fix, designer batched hydration + working diff
+> dialog with viewer; P2 hardening untouched so far.
 
 Audited from the working tree (develop). Each item names the file that proves it.
 Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt with user impact, **P2** = hardening/polish.

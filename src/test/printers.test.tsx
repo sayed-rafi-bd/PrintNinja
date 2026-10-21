@@ -149,6 +149,56 @@ describe("Printers page", () => {
     );
   });
 
+  it("validates raw TCP addresses and custom numbers", async () => {
+    renderPage();
+    await screen.findByText("Dock Zebra");
+    fireEvent.click(screen.getByRole("button", { name: /Add printer/i }));
+    const panel = await screen.findByRole("dialog");
+    fireEvent.change(within(panel).getByLabelText("Printer name"), {
+      target: { value: "Raw One" },
+    });
+    // Connection select: raw TCP needs host:port, not a bare host.
+    fireEvent.click(within(panel).getByLabelText("Connection"));
+    fireEvent.click(
+      await screen.findByRole("option", {
+        name: "Wi-Fi / LAN (Raw TCP 9100)",
+      }),
+    );
+    fireEvent.change(within(panel).getByLabelText("Address"), {
+      target: { value: "10.0.0.7" },
+    });
+    fireEvent.click(
+      within(panel).getByRole("button", { name: "Save printer" }),
+    );
+    expect(invoke.mock.calls.some((c) => c[0] === "add_printer")).toBe(false);
+    fireEvent.change(within(panel).getByLabelText("Address"), {
+      target: { value: "10.0.0.7:9100" },
+    });
+    // Custom numbers outside the old fixed selects are accepted.
+    fireEvent.change(within(panel).getByLabelText(/Paper width/), {
+      target: { value: "110" },
+    });
+    fireEvent.change(within(panel).getByLabelText("DPI"), {
+      target: { value: "600" },
+    });
+    fireEvent.click(
+      within(panel).getByRole("button", { name: "Save printer" }),
+    );
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "add_printer",
+        expect.objectContaining({
+          req: expect.objectContaining({
+            printer_type: "raw_tcp",
+            address: "10.0.0.7:9100",
+            paper_width_mm: 110,
+            dpi: 600,
+          }),
+        }),
+      ),
+    );
+  });
+
   it("edits a printer in place without delete and re-add", async () => {
     renderPage();
     await screen.findByText("Dock Zebra");
@@ -178,9 +228,9 @@ describe("Printers page", () => {
         }),
       ),
     );
-    expect(
-      invoke.mock.calls.some(([cmd]) => cmd === "delete_printer"),
-    ).toBe(false);
+    expect(invoke.mock.calls.some(([cmd]) => cmd === "delete_printer")).toBe(
+      false,
+    );
   });
 
   it("explains an empty group and offers a next step", async () => {

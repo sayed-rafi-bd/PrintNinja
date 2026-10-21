@@ -322,6 +322,7 @@ pub async fn test_printer(
         template_version_id: None,
         data: None,
         data_url: None,
+        http_method: None,
         test: Some(true),
         source: Some("test".into()),
         idempotency_key: None,

@@ -89,6 +89,19 @@ export function TemplatesPage() {
   /** Rows the server refused with 409. The dialog resolves them. */
   const [conflicts, setConflicts] = useState<ConflictedRow[]>([]);
   const [conflictOpen, setConflictOpen] = useState(false);
+  // Position in the conflict queue: resolving one advances to the next
+  // instead of dropping the rest (the old code only ever showed [0]).
+  const [conflictIdx, setConflictIdx] = useState(0);
+
+  const advanceConflict = () => {
+    if (conflictIdx + 1 < conflicts.length) {
+      setConflictIdx(conflictIdx + 1);
+    } else {
+      setConflictOpen(false);
+      setConflictIdx(0);
+    }
+    void loadMine();
+  };
 
   const loadMine = useCallback(async () => {
     try {
@@ -544,7 +557,10 @@ export function TemplatesPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setConflictOpen(true)}
+                onClick={() => {
+                  setConflictIdx(0);
+                  setConflictOpen(true);
+                }}
               >
                 Review
               </Button>
@@ -738,11 +754,10 @@ export function TemplatesPage() {
       />
 
       <ConflictDialog
-        conflict={conflictOpen ? (conflicts[0] ?? null) : null}
+        conflict={conflictOpen ? (conflicts[conflictIdx] ?? null) : null}
+        position={{ index: conflictIdx, total: conflicts.length }}
         onOpenChange={setConflictOpen}
-        onResolved={() => {
-          void loadMine();
-        }}
+        onResolved={advanceConflict}
       />
 
       <ConfirmDialog

@@ -16,14 +16,11 @@ describe("printStore", () => {
       fitMode: "fit-width",
       copies: 1,
       useTestData: false,
-      selectedDataset: "Sample Order",
       pageRange: "",
       grayscale: false,
       status: "idle",
       error: "",
       durationMs: 0,
-      batchMode: false,
-      batchData: "",
       batchMode2: "per_record",
     });
   });

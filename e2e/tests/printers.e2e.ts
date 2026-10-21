@@ -53,7 +53,9 @@ test("printers add, reject duplicates, test and remove", async ({
 
   // Edit changes the address in place: no duplicate row, no re-add.
   await page.getByRole("button", { name: "Edit E2E JetDirect" }).click();
-  await expect(page.getByRole("heading", { name: "Edit printer" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Edit printer" }),
+  ).toBeVisible();
   await page.getByLabel(/address|host|port/i).fill("127.0.0.1:9102");
   await page.getByRole("button", { name: "Save printer" }).click();
   await expect(page.getByText('Saved "E2E JetDirect"')).toBeVisible({

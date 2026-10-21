@@ -100,7 +100,12 @@ export interface AgentCommands {
   clear_publish_info: [{ req: { id: number } }, TemplateRow];
   // Versions
   list_versions: [{ template_id: number }, TemplateVersionRow[]];
+  list_latest_versions: [{ template_ids: number[] }, TemplateVersionRow[]];
   create_version: [{ req: CreateVersionReq }, TemplateVersionRow];
+  set_version_compiled: [
+    { id: number; compiled_css: string; compiled_key: string },
+    TemplateVersionRow,
+  ];
   restore_version: [{ id: number }, TemplateVersionRow];
   delete_version: [{ id: number }, null];
   diff_versions: [{ from_id: number; to_id: number }, VersionDiff];

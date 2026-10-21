@@ -6,12 +6,18 @@ import { testids } from "../support/testids";
 // (commands/template.rs + version.rs, mirrored in the fake agent) are
 // surfaced in the UI as toasts, not silent failures.
 
-async function invoke(page: Page, cmd: string, args: unknown): Promise<unknown> {
+async function invoke(
+  page: Page,
+  cmd: string,
+  args: unknown,
+): Promise<unknown> {
   return page.evaluate(
     ({ c, a }: { c: string; a: unknown }) =>
       (
         window as unknown as {
-          __TAURI_INTERNALS__: { invoke: (c: string, a: unknown) => Promise<unknown> };
+          __TAURI_INTERNALS__: {
+            invoke: (c: string, a: unknown) => Promise<unknown>;
+          };
         }
       ).__TAURI_INTERNALS__.invoke(c, a),
     { c: cmd, a: args },

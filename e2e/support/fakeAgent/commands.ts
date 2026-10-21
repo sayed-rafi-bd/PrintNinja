@@ -272,10 +272,22 @@ const implemented: Record<string, Handler> = {
       .find((t) => t["id"] === Number(req["id"] ?? 0));
   },
   list_versions: (args) => cache.listVersions(Number(args["template_id"] ?? 0)),
+  list_latest_versions: (args) =>
+    cache.listLatestVersions(
+      Array.isArray(args["template_ids"])
+        ? (args["template_ids"] as unknown[]).map(Number)
+        : [],
+    ),
   create_version: (args) => {
     const req = (args["req"] ?? args) as Record<string, unknown>;
     return cache.createVersion(Number(req["template_id"] ?? 0), req);
   },
+  set_version_compiled: (args) =>
+    cache.setVersionCompiled(
+      Number(args["id"] ?? 0),
+      String(args["compiled_css"] ?? ""),
+      String(args["compiled_key"] ?? ""),
+    ),
   delete_template: (args) => {
     cache.deleteTemplate(Number(args["id"] ?? 0));
     return null;

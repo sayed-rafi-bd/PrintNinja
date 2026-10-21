@@ -88,6 +88,7 @@ fn print_request(printer: &str) -> PrintRequest {
         template_version_id: None,
         data: None,
         data_url: None,
+        http_method: None,
         test: None,
         source: Some("ui".to_string()),
         idempotency_key: None,

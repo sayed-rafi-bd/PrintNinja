@@ -462,8 +462,7 @@ describe("Templates page", () => {
     expect(share.fetchCommunityTemplates).not.toHaveBeenCalled();
     // One request after the pause, with the final query.
     await waitFor(
-      () =>
-        expect(share.fetchCommunityTemplates).toHaveBeenCalledTimes(1),
+      () => expect(share.fetchCommunityTemplates).toHaveBeenCalledTimes(1),
       { timeout: 2000 },
     );
     expect(share.fetchCommunityTemplates).toHaveBeenLastCalledWith({
@@ -591,6 +590,43 @@ describe("conflict banner and dialog", () => {
         }),
       ),
     );
+  });
+
+  it("walks a queue of conflicts instead of stopping at the first", async () => {
+    const TWO = [
+      { id: 2, server_id: "r2", name: "Receipt" },
+      { id: 3, server_id: "r3", name: "Invoice" },
+    ];
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_templates") return LIST;
+      if (cmd === "cache_list_conflicted") return TWO;
+      if (cmd === "list_versions")
+        return [{ html: "<p>local</p>", css: ".l{}" }];
+      return null;
+    });
+    share.fetchRemoteTemplate.mockImplementation(
+      async (id: string) => ({ ...REMOTE, id }) as never,
+    );
+    renderPage();
+    expect(
+      await screen.findByText("2 templates changed on another PC."),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    expect(await screen.findByTestId("conflict-dialog")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /“Receipt”.*\(1 of 2\)/ }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("conflict-keep-mine"));
+    // Resolving the first advances to the second without closing.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: /“Invoice”.*\(2 of 2\)/ }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("“Receipt” changed")).not.toBeInTheDocument();
+    expect(
+      invoke.mock.calls.filter((c) => c[0] === "cache_resolve_conflict"),
+    ).toHaveLength(1);
   });
 
   it("Keep both copies the local content to a new template, then takes the server", async () => {

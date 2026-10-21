@@ -55,6 +55,11 @@ pub struct PrintRequest {
     pub data: Option<serde_json::Value>,
     #[serde(default)]
     pub data_url: Option<String>,
+    /// HTTP method for fetching `data_url`: GET (default) or POST.
+    /// Anything else is rejected on intake so the preview (which uses
+    /// the same choice) and the pipeline can never disagree.
+    #[serde(default)]
+    pub http_method: Option<String>,
     #[serde(default)]
     pub test: Option<bool>,
     #[serde(default)]
@@ -351,6 +356,19 @@ pub fn validate_page_range(raw: Option<&str>) -> AppResult<()> {
     Ok(())
 }
 
+/// HTTP method for fetching `data_url`: GET (default) or POST.
+/// Anything else is rejected so the preview (which offers the same
+/// choice) and the pipeline can never disagree on how data loads.
+pub fn validate_http_method(raw: Option<&str>) -> AppResult<String> {
+    match raw.map(str::trim).unwrap_or("") {
+        "" | "GET" | "get" => Ok("GET".to_string()),
+        "POST" | "post" => Ok("POST".to_string()),
+        other => Err(AppError::Validation(format!(
+            "invalid HTTP method {other:?}: expected GET or POST"
+        ))),
+    }
+}
+
 /// Tauri command wrapper around [`run_print`].
 #[tauri::command]
 pub async fn print_html(
@@ -396,6 +414,8 @@ pub async fn run_print_with(
         return Err(AppError::Validation("Select a printer first".into()));
     }
     validate_page_range(req.page_range.as_deref())?;
+    // Fail fast on an unsupported fetch method, before the job row exists.
+    validate_http_method(req.http_method.as_deref())?;
     let copies = req.copies.unwrap_or(1).max(1);
 
     // ── 1. Resolve content ───────────────────────────────────────────
@@ -633,9 +653,10 @@ async fn run_stages(
     if !req.test.unwrap_or(false) {
         if let Some(url) = &req.data_url {
             if !url.trim().is_empty() {
+                let method = validate_http_method(req.http_method.as_deref())?;
                 let opts = crate::data::fetcher::FetchOptions {
                     url: url.clone(),
-                    method: "GET".to_string(),
+                    method,
                     headers: None,
                     timeout_secs: 15,
                     max_size_bytes: 5 * 1024 * 1024,
@@ -1043,6 +1064,7 @@ fn begin_job(
         "orientation": req.orientation,
         "page_range": req.page_range,
         "grayscale": req.grayscale.unwrap_or(false),
+        "http_method": req.http_method,
         "margins": {
             "top": req.margin_top, "right": req.margin_right,
             "bottom": req.margin_bottom, "left": req.margin_left,
@@ -1294,6 +1316,10 @@ fn load_job_request(db: &DbState, job_id: i64) -> AppResult<(PrintRequest, Optio
             .and_then(|v| v.as_str())
             .map(String::from),
         grayscale: settings.get("grayscale").and_then(|v| v.as_bool()),
+        http_method: settings
+            .get("http_method")
+            .and_then(|v| v.as_str())
+            .map(String::from),
         template_id,
         template_version_id,
         data,
@@ -1348,6 +1374,7 @@ pub async fn spike_test_print(
         template_version_id: None,
         data: None,
         data_url: None,
+        http_method: None,
         test: None,
         source: Some("test".into()),
         idempotency_key: None,
@@ -1379,6 +1406,7 @@ mod tests {
             template_version_id: None,
             data: None,
             data_url: None,
+            http_method: None,
             test: Some(true),
             source: None,
             idempotency_key: None,
@@ -1424,6 +1452,20 @@ mod tests {
         for invalid in ["0", "1-0", "5-2", "a", "1-", "-3", "1,,2", "1.5", ","] {
             assert!(
                 validate_page_range(Some(invalid)).is_err(),
+                "expected err for {invalid:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn http_method_defaults_to_get_and_rejects_the_rest() {
+        assert_eq!(validate_http_method(None).unwrap(), "GET");
+        assert_eq!(validate_http_method(Some("")).unwrap(), "GET");
+        assert_eq!(validate_http_method(Some("GET")).unwrap(), "GET");
+        assert_eq!(validate_http_method(Some("post")).unwrap(), "POST");
+        for invalid in ["PUT", "DELETE", "getx", "javascript:alert(1)"] {
+            assert!(
+                validate_http_method(Some(invalid)).is_err(),
                 "expected err for {invalid:?}"
             );
         }

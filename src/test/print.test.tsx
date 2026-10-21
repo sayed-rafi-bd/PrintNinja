@@ -126,9 +126,9 @@ describe("Print page", () => {
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith("Select a template first"),
     );
-    expect(
-      invoke.mock.calls.some(([cmd]) => cmd === "create_batch"),
-    ).toBe(false);
+    expect(invoke.mock.calls.some(([cmd]) => cmd === "create_batch")).toBe(
+      false,
+    );
   });
 
   it("reports an unresolvable batch printer instead of sending id 0", async () => {
@@ -153,9 +153,9 @@ describe("Print page", () => {
         "Could not resolve printer — re-select it",
       ),
     );
-    expect(
-      invoke.mock.calls.some(([cmd]) => cmd === "create_batch"),
-    ).toBe(false);
+    expect(invoke.mock.calls.some(([cmd]) => cmd === "create_batch")).toBe(
+      false,
+    );
   });
 
   it("announces success, and failure with a retry", async () => {
@@ -212,6 +212,27 @@ describe("Print page", () => {
     );
   });
 
+  it("sends the chosen data-url HTTP method with the print request", async () => {
+    usePrintStore.setState({
+      dataUrl: "https://api.example.com/orders/123",
+      httpMethod: "POST",
+    });
+    renderPage();
+    const print = await screen.findByRole("button", { name: /^Print$/ });
+    await waitFor(() => expect(print).toBeEnabled());
+    fireEvent.click(print);
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "print_html",
+        expect.objectContaining({
+          req: expect.objectContaining({
+            data_url: "https://api.example.com/orders/123",
+            http_method: "POST",
+          }),
+        }),
+      ),
+    );
+  });
   it("shows that the printer is ready before anything is printed", async () => {
     renderPage();
     expect(await screen.findByText("Printer is ready")).toBeInTheDocument();

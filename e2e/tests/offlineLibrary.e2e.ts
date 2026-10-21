@@ -125,7 +125,10 @@ test("offline library edits queue dirty and replay on recovery", async ({
     timeout: 15_000,
   });
   await expect(async () => {
-    const sync = await apiSyncChanges(auth.token, "dataset,profile,font,setting");
+    const sync = await apiSyncChanges(
+      auth.token,
+      "dataset,profile,font,setting",
+    );
     const names = sync.changes.map(
       (c) =>
         `${c.entity}:${c.op}:${(c.data as { name?: string; key?: string } | undefined)?.name ?? (c.data as { key?: string } | undefined)?.key ?? (c.data as { printer_name?: string } | undefined)?.printer_name}`,

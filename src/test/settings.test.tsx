@@ -102,6 +102,71 @@ describe("Settings page", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("routes trusted sources through the dedicated command", async () => {
+    // App mode: the backend answers, so the page must use the
+    // get/set_trusted_sources commands (not the raw setting key).
+    (window as any).__TAURI_INTERNALS__ = {};
+    try {
+      invoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "get_trusted_sources") return ["https://ok.example"];
+        return null;
+      });
+      renderPage();
+      open("API and automation");
+      expect(await screen.findByText("https://ok.example")).toBeInTheDocument();
+      const box = screen.getByLabelText("Trusted source");
+      fireEvent.change(box, { target: { value: "https://new.example" } });
+      fireEvent.click(screen.getByRole("button", { name: "Add" }));
+      await waitFor(() =>
+        expect(invoke).toHaveBeenCalledWith("set_trusted_sources", {
+          sources: ["https://ok.example", "https://new.example"],
+        }),
+      );
+      // Never through the raw setting key.
+      expect(
+        invoke.mock.calls.some(
+          (c) => c[0] === "set_setting" && c[1]?.key === "trusted_sources",
+        ),
+      ).toBe(false);
+    } finally {
+      (window as any).__TAURI_INTERNALS__ = undefined;
+    }
+  });
+
+  it("rejects a bad domain and confirms before allowing all", async () => {
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "get_setting") return "api.example.com";
+      return null;
+    });
+    renderPage();
+    open("Data sources");
+    const input = await screen.findByLabelText(/allowed domains/i);
+    fireEvent.change(input, { target: { value: "https://evil.example/path" } });
+    fireEvent.blur(input);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "is not a domain",
+    );
+    expect(
+      invoke.mock.calls.some(
+        (c) => c[0] === "set_setting" && c[1]?.key === "allowed_domains",
+      ),
+    ).toBe(false);
+
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.blur(input);
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText("Allow data from any domain?"),
+    ).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Allow all" }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("set_setting", {
+        key: "allowed_domains",
+        value: "",
+      }),
+    );
+  });
+
   it("keeps API and deep-link settings together under one section", async () => {
     renderPage();
     open("API and automation");

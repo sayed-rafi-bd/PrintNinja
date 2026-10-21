@@ -439,6 +439,7 @@ async fn print_job(
             .and_then(|v| v.as_str())
             .map(str::to_string),
         grayscale: settings.get("grayscale").and_then(|v| v.as_bool()),
+        http_method: settings.get("http_method").and_then(|v| v.as_str()).map(str::to_string),
         template_id,
         template_version_id: version_id,
         data: req.data.clone(),
