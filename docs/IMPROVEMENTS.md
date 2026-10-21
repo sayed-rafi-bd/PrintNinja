@@ -13,7 +13,10 @@
 > desktop tray + autostart + single-instance + Background settings,
 > Linux CI (deb + AppImage, bundle proven locally), Linux
 > system-Chromium render, E2E done (§4: 23 → 40 specs plus harness,
-> contract and server-side gaps). Only open: Android foreground service.
+> contract and server-side gaps), Android foreground service (real
+> plugin crate, debug APK proven: dex classes, merged manifest,
+> unit tests). No open items remain from this plan; the P1 UX-debt
+> and P2 hardening queues in §6 are untouched by design in this pass.
 
 Audited from the working tree (develop). Each item names the file that proves it.
 Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt with user impact, **P2** = hardening/polish.
