@@ -13,10 +13,10 @@
 > desktop tray + autostart + single-instance + Background settings
 > (slice A; toolchain-verified). Linux CI ships deb + AppImage
 > (bundle proven locally: PrintNinja_0.5.0_amd64.deb, 84 MiB).
-> Still open: Android foreground service and the E2E specs. Linux
-> print pipeline is implemented (system-Chromium PDF + screenshot
-> render with root-sandbox retry, proven by fake-browser and real
-> Chromium tests); Linux CI/packaging is done.
+> Still open: Android foreground service. E2E is started: the
+> virtual printer runs in the stack, print-path (harness wire) and
+> print-submit (UI request shape) specs are in, with per-worker DB
+> isolation and the fake-agent contract still to do.
 
 Audited from the working tree (develop). Each item names the file that proves it.
 Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt with user impact, **P2** = hardening/polish.
