@@ -1,5 +1,12 @@
-import { ForbiddenError, ValidationError } from "./errors.js";
+import {
+  ForbiddenError,
+  PayloadTooLargeError,
+  ValidationError,
+} from "./errors.js";
 import type { SettingRepository, SettingView } from "./libraryPorts.js";
+
+/** Mirror the schema char cap in bytes. */
+export const SETTING_VALUE_MAX_BYTES = 65_536;
 
 /**
  * Account preferences (REFACTORING.md question 23): only keys on the
@@ -26,6 +33,14 @@ export async function putSetting(
   if (!isAllowedSettingKey(key)) {
     throw new ValidationError(`Unknown setting '${key}'`, [
       { path: "key", message: "Not an account preference" },
+    ]);
+  }
+  if (Buffer.byteLength(value, "utf8") > SETTING_VALUE_MAX_BYTES) {
+    throw new PayloadTooLargeError([
+      {
+        path: "value",
+        message: `Over the ${SETTING_VALUE_MAX_BYTES} byte cap`,
+      },
     ]);
   }
   const existing = await repos.settings.findByKey(ownerId, key);

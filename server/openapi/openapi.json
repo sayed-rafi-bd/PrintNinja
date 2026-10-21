@@ -1163,10 +1163,12 @@
                         ]
                       },
                       "label": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 200
                       },
                       "note": {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 2000
                       }
                     }
                   }

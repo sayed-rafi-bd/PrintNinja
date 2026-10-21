@@ -209,6 +209,16 @@ describe("putTemplate", () => {
     );
     await expect(big).rejects.toBeInstanceOf(PayloadTooLargeError);
   });
+
+  it("rejects multibyte names and unbounded version notes by bytes", async () => {
+    const r = repos();
+    await expect(
+      putTemplate(r, write({ name: "é".repeat(120) }), OWNER_ID),
+    ).rejects.toBeInstanceOf(PayloadTooLargeError);
+    await expect(
+      putTemplate(r, write({ version: { note: "n".repeat(2001) } }), OWNER_ID),
+    ).rejects.toBeInstanceOf(PayloadTooLargeError);
+  });
 });
 
 describe("visibility and ownership", () => {

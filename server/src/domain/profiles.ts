@@ -1,6 +1,7 @@
 import {
   ForbiddenError,
   NotFoundError,
+  PayloadTooLargeError,
   RevisionConflictError,
   RevisionRequiredError,
   ValidationError,
@@ -10,6 +11,10 @@ import type {
   ProfileView,
   ProfileWrite,
 } from "./libraryPorts.js";
+
+/** Mirror the schema char caps in bytes: multibyte input must not pass. */
+export const PRINTER_NAME_MAX_BYTES = 100;
+export const SETTINGS_JSON_MAX_BYTES = 65_536;
 
 export interface PutProfileInput {
   id: string;
@@ -46,7 +51,23 @@ function checkWrite(input: PutProfileInput): {
       { path: "printerName", message: "Required" },
     ]);
   }
+  if (Buffer.byteLength(printerName, "utf8") > PRINTER_NAME_MAX_BYTES) {
+    throw new PayloadTooLargeError([
+      {
+        path: "printerName",
+        message: `Over the ${PRINTER_NAME_MAX_BYTES} byte cap`,
+      },
+    ]);
+  }
   const settingsJson = input.settingsJson ?? "{}";
+  if (Buffer.byteLength(settingsJson, "utf8") > SETTINGS_JSON_MAX_BYTES) {
+    throw new PayloadTooLargeError([
+      {
+        path: "settingsJson",
+        message: `Over the ${SETTINGS_JSON_MAX_BYTES} byte cap`,
+      },
+    ]);
+  }
   try {
     JSON.parse(settingsJson);
   } catch {
