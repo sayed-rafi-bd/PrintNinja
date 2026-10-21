@@ -86,6 +86,74 @@ const batchHandlers: Record<string, Handler> = {
   },
 };
 
+/**
+ * Mirrors parse_deep_link in src-tauri/src/deeplink.rs: same actions,
+ * same defaults (confirm unless 0/false, test only on 1/true, copies
+ * parsed or dropped), same unknown-action error. Serde's externally
+ * tagged enum shape is reproduced ({ Print: {...} } etc.) so specs
+ * assert the exact wire the app would get.
+ */
+function parseDeepLink(url: string): unknown {
+  const rest = url.startsWith("printninja://")
+    ? url.slice("printninja://".length)
+    : url;
+  const queryIndex = rest.indexOf("?");
+  const path = queryIndex === -1 ? rest : rest.slice(0, queryIndex);
+  const query = queryIndex === -1 ? "" : rest.slice(queryIndex + 1);
+  const params = new Map<string, string>();
+  for (const pair of query.split("&")) {
+    const equals = pair.indexOf("=");
+    if (equals !== -1) {
+      params.set(
+        decodeQueryComponent(pair.slice(0, equals)),
+        decodeQueryComponent(pair.slice(equals + 1)),
+      );
+    }
+  }
+  if (path === "print") {
+    // Rust parses copies as u32: digits only, in range, else dropped.
+    const copiesRaw = params.get("copies");
+    const copiesNum =
+      copiesRaw !== undefined && /^\d+$/.test(copiesRaw)
+        ? Number.parseInt(copiesRaw, 10)
+        : NaN;
+    const testFlag = params.get("test");
+    const confirmFlag = params.get("confirm");
+    return {
+      Print: {
+        preset: params.get("preset") ?? null,
+        template: params.get("template") ?? null,
+        printer: params.get("printer") ?? null,
+        url: params.get("url") ?? null,
+        copies:
+          Number.isInteger(copiesNum) && copiesNum <= 4294967295
+            ? copiesNum
+            : null,
+        orientation: params.get("orientation") ?? null,
+        fit: params.get("fit") ?? null,
+        test: testFlag === "1" || testFlag === "true",
+        confirm: !(confirmFlag === "0" || confirmFlag === "false"),
+        callback: params.get("callback") ?? null,
+      },
+    };
+  }
+  if (path.startsWith("open/")) {
+    return { Open: path.slice("open/".length) };
+  }
+  if (path.startsWith("template/")) {
+    return { Template: path.slice("template/".length) };
+  }
+  throw new Error(`Unknown deep link action: ${path}`);
+}
+
+function decodeQueryComponent(s: string): string {
+  try {
+    return decodeURIComponent(s.replace(/\+/g, " "));
+  } catch {
+    return s.replace(/\+/g, " ");
+  }
+}
+
 type Handler = (args: Record<string, unknown>) => unknown;
 
 // One cache per browser context (module scope = the injected page).
@@ -377,13 +445,13 @@ const acknowledgedStubs: string[] = [
   "stop_api_server",
   "get_api_status",
   "regenerate_api_key",
-  "parse_deeplink",
   "refresh_background",
 ];
 
 const commands: Record<string, Handler> = {
   ...implemented,
   ...batchHandlers,
+  parse_deeplink: (args) => parseDeepLink(String(args["url"] ?? "")),
 };
 for (const name of acknowledgedStubs) {
   commands[name] = () => {
