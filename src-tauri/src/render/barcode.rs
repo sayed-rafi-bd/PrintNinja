@@ -128,7 +128,7 @@ fn encode_linear(kind: &str, value: &str) -> Option<Vec<u8>> {
         "upca" if all_digits && value.len() == 12 => {
             EAN13::new(format!("0{value}")).ok().map(|b| b.encode())
         }
-        "itf" if all_digits && value.len() % 2 == 0 => {
+        "itf" if all_digits && value.len().is_multiple_of(2) => {
             TF::interleaved(value).ok().map(|b| b.encode())
         }
         "codabar" => Codabar::new(value.to_uppercase()).ok().map(|b| b.encode()),
