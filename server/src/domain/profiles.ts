@@ -37,9 +37,12 @@ function checkWrite(input: PutProfileInput): {
   printerName: string;
   settingsJson: string;
 } {
+  // Details paths use the wire names (template_id, printer_name,
+  // settings_json), not the domain's camelCase, so API clients can map
+  // them onto the request body they sent.
   if (!input.templateId) {
     throw new ValidationError("templateId required", [
-      { path: "templateId", message: "Required" },
+      { path: "template_id", message: "Required" },
     ]);
   }
   // Printer names match case-insensitively (question 20): the key is
@@ -48,13 +51,13 @@ function checkWrite(input: PutProfileInput): {
   const printerName = (input.printerName ?? "").trim().toLowerCase();
   if (printerName.length === 0) {
     throw new ValidationError("printerName required", [
-      { path: "printerName", message: "Required" },
+      { path: "printer_name", message: "Required" },
     ]);
   }
   if (Buffer.byteLength(printerName, "utf8") > PRINTER_NAME_MAX_BYTES) {
     throw new PayloadTooLargeError([
       {
-        path: "printerName",
+        path: "printer_name",
         message: `Over the ${PRINTER_NAME_MAX_BYTES} byte cap`,
       },
     ]);
@@ -63,7 +66,7 @@ function checkWrite(input: PutProfileInput): {
   if (Buffer.byteLength(settingsJson, "utf8") > SETTINGS_JSON_MAX_BYTES) {
     throw new PayloadTooLargeError([
       {
-        path: "settingsJson",
+        path: "settings_json",
         message: `Over the ${SETTINGS_JSON_MAX_BYTES} byte cap`,
       },
     ]);
@@ -72,7 +75,7 @@ function checkWrite(input: PutProfileInput): {
     JSON.parse(settingsJson);
   } catch {
     throw new ValidationError("settings_json is not valid JSON", [
-      { path: "settingsJson", message: "Must be valid JSON" },
+      { path: "settings_json", message: "Must be valid JSON" },
     ]);
   }
   return { printerName, settingsJson };
