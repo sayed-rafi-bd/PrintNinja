@@ -114,6 +114,50 @@ describe("Print page", () => {
     expect(screen.getByRole("group", { name: /Margins/ })).toBeInTheDocument();
   });
 
+  it("refuses a batch with a non-numeric template id before any IPC", async () => {
+    usePrintStore.setState({ printerId: "Dock Zebra", templateId: "abc" });
+    renderPage();
+    await screen.findByRole("button", { name: /^Print$/ });
+    fireEvent.click(screen.getByRole("button", { name: "New batch" }));
+    fireEvent.change(screen.getByPlaceholderText(/"name":"Tea"/), {
+      target: { value: '[{"name":"Tea"}]' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start Batch" }));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Select a template first"),
+    );
+    expect(
+      invoke.mock.calls.some(([cmd]) => cmd === "create_batch"),
+    ).toBe(false);
+  });
+
+  it("reports an unresolvable batch printer instead of sending id 0", async () => {
+    usePrintStore.setState({ printerId: "Ghost Printer", templateId: "7" });
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_versions")
+        return [{ id: 1, html: "<p>Hi</p>", css: "" }];
+      if (cmd === "list_batches") return [];
+      if (cmd === "list_printers") return [];
+      if (cmd === "enumerate_system_printers") return [];
+      return null;
+    });
+    renderPage();
+    await screen.findByRole("button", { name: /^Print$/ });
+    fireEvent.click(screen.getByRole("button", { name: "New batch" }));
+    fireEvent.change(screen.getByPlaceholderText(/"name":"Tea"/), {
+      target: { value: '[{"name":"Tea"}]' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start Batch" }));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Could not resolve printer — re-select it",
+      ),
+    );
+    expect(
+      invoke.mock.calls.some(([cmd]) => cmd === "create_batch"),
+    ).toBe(false);
+  });
+
   it("announces success, and failure with a retry", async () => {
     renderPage();
     const print = await screen.findByRole("button", { name: /^Print$/ });

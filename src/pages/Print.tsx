@@ -225,11 +225,20 @@ export function PrintPage() {
       setBatches(list ?? []);
     } catch {}
   };
+  // Poll while the dialog is open (live progress on submit) or while
+  // any batch is still active. Idle pages do not poll: the old effect
+  // re-created the interval on every dialog toggle and kept it
+  // running with the dialog closed.
+  const hasActiveBatch = batches.some(
+    (b) => b.status === "queued" || b.status === "printing",
+  );
   useEffect(() => {
     refreshBatches();
+    if (!showBatchDialog && !hasActiveBatch) return;
     const id = setInterval(refreshBatches, 5000);
     return () => clearInterval(id);
-  }, [showBatchDialog]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showBatchDialog, hasActiveBatch]);
 
   const rebuildBatchJson = (
     headers: string[],
@@ -295,7 +304,8 @@ export function PrintPage() {
       );
       return;
     }
-    if (!store.templateId) {
+    const templateId = Number(store.templateId);
+    if (!Number.isInteger(templateId) || templateId <= 0) {
       toast.error("Select a template first");
       return;
     }
@@ -303,23 +313,32 @@ export function PrintPage() {
       toast.error("Select a printer first");
       return;
     }
-    const printer = printers.find((p) => p.name === store.printerId);
-    let printerId = printer ? Number(printer.id) || 0 : 0;
-    if (!printerId) {
+    const resolvePrinterId = async (): Promise<number | null> => {
+      const system = printers.find((p) => p.name === store.printerId);
+      const systemId =
+        system && Number.isInteger(Number(system.id)) && Number(system.id) > 0
+          ? Number(system.id)
+          : null;
+      // System-printer ids are strings ("printer-3"); only the device
+      // list carries numeric row ids, so fall through to it.
+      if (systemId !== null) return systemId;
       try {
         const all = await agent("list_printers", {});
-        const match = all.find((p) => p.name === store.printerId);
-        if (match) printerId = match.id;
-      } catch {}
-    }
-    if (!printerId) {
+        const match = (all ?? []).find((p) => p.name === store.printerId);
+        return typeof match?.id === "number" && match.id > 0 ? match.id : null;
+      } catch {
+        return null;
+      }
+    };
+    const printerId = await resolvePrinterId();
+    if (printerId === null) {
       toast.error("Could not resolve printer — re-select it");
       return;
     }
     try {
       await agent("create_batch", {
         req: {
-          template_id: Number(store.templateId) || 0,
+          template_id: templateId,
           printer_id: printerId,
           data,
           mode: store.batchMode2,
