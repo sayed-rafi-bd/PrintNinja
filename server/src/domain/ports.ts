@@ -55,6 +55,12 @@ export interface SessionRepository {
   deleteByTokenHash(tokenHash: string): Promise<void>;
   /** Deletes sessions expired at or before now. Returns the count. */
   deleteExpired(now: Date): Promise<number>;
+  /**
+   * Keeps only the newest keepNewest sessions of a user (by creation),
+   * deleting the rest oldest-first. Returns the deleted count. Bounds
+   * per-user session growth from devices that log in but never log out.
+   */
+  deleteOldestForUser(userId: string, keepNewest: number): Promise<number>;
 }
 
 export interface PasswordHasher {

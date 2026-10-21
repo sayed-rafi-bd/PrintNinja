@@ -39,6 +39,27 @@ export function createSessionRepository(db: DbClient): SessionRepository {
       });
       return result.count;
     },
+
+    async deleteOldestForUser(
+      userId: string,
+      keepNewest: number,
+    ): Promise<number> {
+      const rows = await db.session.findMany({
+        where: { userId },
+        orderBy: [{ createdAt: "desc" }, { tokenHash: "desc" }],
+        select: { tokenHash: true },
+      });
+      const surplus = rows.slice(Math.max(keepNewest, 0));
+      if (surplus.length === 0) {
+        return 0;
+      }
+      const result = await db.session.deleteMany({
+        where: {
+          tokenHash: { in: surplus.map((row) => row.tokenHash) },
+        },
+      });
+      return result.count;
+    },
   };
 }
 

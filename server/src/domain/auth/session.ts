@@ -1,6 +1,14 @@
 import { UnauthorizedError } from "../errors.js";
 import type { AuthDeps, UserRecord } from "../ports.js";
 
+/**
+ * Sessions kept per user. Logins mint a row each; devices rarely log
+ * out, so without pruning one user grows a row per login until the
+ * 30-day TTL purge. 20 covers a phone, a tablet, a desktop and plenty
+ * of reinstalls.
+ */
+export const MAX_SESSIONS_PER_USER = 20;
+
 export interface SessionResult {
   user: UserRecord;
 }

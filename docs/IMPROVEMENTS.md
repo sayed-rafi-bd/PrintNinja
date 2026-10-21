@@ -1,5 +1,10 @@
 # Improvements & E2E testing backlog
 
+> Status (feat/improvements-backlog): slices 1–3 are implemented —
+> print page_range/grayscale end-to-end, server body limits + /v2/ready,
+> auth timing-oracle fix + session cap + Argon2 clamps. Everything below
+> that is not marked implemented is still open.
+
 Audited from the working tree (develop). Each item names the file that proves it.
 Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt with user impact, **P2** = hardening/polish.
 

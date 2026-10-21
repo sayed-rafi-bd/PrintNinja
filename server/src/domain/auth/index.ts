@@ -4,6 +4,7 @@ export { loginUser } from "./login.js";
 export type { LoginInput, LoginResult } from "./login.js";
 export {
   logoutUser,
+  MAX_SESSIONS_PER_USER,
   purgeExpiredSessions,
   validateSession,
 } from "./session.js";

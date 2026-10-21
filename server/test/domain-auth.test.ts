@@ -10,6 +10,7 @@ import {
 import {
   loginUser,
   logoutUser,
+  MAX_SESSIONS_PER_USER,
   purgeExpiredSessions,
   registerUser,
   validateSession,
@@ -131,6 +132,47 @@ describe("loginUser", () => {
     await expect(unknownHandle).rejects.toBeInstanceOf(InvalidCredentialsError);
     await expect(wrongPassword).rejects.toThrow("Invalid handle or password");
     await expect(unknownHandle).rejects.toThrow("Invalid handle or password");
+  });
+
+  it("still verifies a password for an unknown handle (no timing oracle)", async () => {
+    const d = deps();
+    await registered(d, "bob");
+    let verifications = 0;
+    const inner = d.hasher.verify.bind(d.hasher);
+    d.hasher = {
+      ...d.hasher,
+      verify: async (storedHash, password) => {
+        verifications += 1;
+        return inner(storedHash, password);
+      },
+    };
+
+    await expect(
+      loginUser(d, { handle: "nobody", password: PASSWORD }),
+    ).rejects.toBeInstanceOf(InvalidCredentialsError);
+    expect(verifications).toBe(1);
+  });
+
+  it("caps sessions per user, keeping the newest", async () => {
+    const d = deps();
+    const first = await registered(d, "carol");
+    expect(first.token).toBe("token-1");
+
+    let last = "";
+    for (let i = 0; i < 25; i++) {
+      last = (await loginUser(d, { handle: "carol", password: PASSWORD }))
+        .token;
+    }
+
+    // 1 register + 25 logins, capped at MAX_SESSIONS_PER_USER.
+    const survivors: string[] = [];
+    for (let i = 1; i <= 26; i++) {
+      const session = await validateSession(d, `token-${i}`).catch(() => null);
+      if (session) survivors.push(`token-${i}`);
+    }
+    expect(survivors).toHaveLength(MAX_SESSIONS_PER_USER);
+    expect(survivors).toContain(last);
+    expect(survivors).not.toContain("token-1");
   });
 
   it("rehashes a legacy scrypt password to the current algorithm on login", async () => {

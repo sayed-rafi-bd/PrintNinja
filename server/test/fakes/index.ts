@@ -84,6 +84,17 @@ export function createFakeSessions(users: {
       }
       return count;
     },
+    async deleteOldestForUser(userId, keepNewest) {
+      const owned = [...byHash.values()]
+        .filter((session) => session.userId === userId)
+        // Map iteration order is insertion order: oldest first.
+        .map((session) => session.tokenHash);
+      const surplus = owned.slice(0, Math.max(owned.length - keepNewest, 0));
+      for (const hash of surplus) {
+        byHash.delete(hash);
+      }
+      return surplus.length;
+    },
   };
 }
 
