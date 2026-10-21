@@ -1,4 +1,4 @@
-import { ForbiddenError, NotFoundError } from "../errors.js";
+import { ForbiddenError, NotFoundError, RateLimitedError } from "../errors.js";
 import type { Page } from "../pagination.js";
 import type {
   PageQuery,
@@ -113,16 +113,34 @@ export async function listCommunity(
 }
 
 /**
+ * Daily use budget per user and template (UTC day). Gaming the
+ * community "used" sort needs a fresh account every day past this.
+ */
+export const MAX_USE_PER_USER_TEMPLATE_PER_DAY = 1000;
+
+/**
  * Counts prints of a published template. Missing or private is the same
- * 404, so the counter cannot probe for private ids either.
+ * 404, so the counter cannot probe for private ids either. The day's
+ * budget is checked before the counter moves, so a rejected call never
+ * inflates use_count; concurrent calls can overshoot by the racing
+ * batch, which a popularity counter tolerates.
  */
 export async function recordUse(
   repos: { templates: TemplateRepository },
   id: string,
+  userId: string,
   count: number,
+  day: Date,
 ): Promise<void> {
+  const spent = await repos.templates.getDailyUse(userId, id, day);
+  if (spent + count > MAX_USE_PER_USER_TEMPLATE_PER_DAY) {
+    throw new RateLimitedError(
+      `Daily use budget of ${MAX_USE_PER_USER_TEMPLATE_PER_DAY} reached for this template; resets at midnight UTC`,
+    );
+  }
   const counted = await repos.templates.incrementUseCount(id, count);
   if (!counted) {
     throw new NotFoundError();
   }
+  await repos.templates.addDailyUse(userId, id, day, count);
 }

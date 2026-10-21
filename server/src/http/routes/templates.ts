@@ -33,6 +33,13 @@ export interface TemplateRouteOptions {
   deps: AuthDeps & { templates: TemplateRepository; saved: SavedRepository };
 }
 
+/** Start of the current UTC day: the use-count budget resets at midnight. */
+function utcDay(now = new Date()): Date {
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+}
+
 /**
  * Endpoints 5-10 and 12: create/update, read, delete, publish,
  * unpublish, own list and use counter.
@@ -277,7 +284,9 @@ export async function templateRoutes(
       await recordUse(
         { templates: deps.templates },
         request.params.id,
+        request.authUser.id,
         request.body?.count ?? 1,
+        utcDay(),
       );
       return reply.status(204).send(null);
     },

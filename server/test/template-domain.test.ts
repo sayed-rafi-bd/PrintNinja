@@ -22,6 +22,7 @@ import {
 import {
   ForbiddenError,
   NotFoundError,
+  RateLimitedError,
   RemoteReferenceError,
   PayloadTooLargeError,
   RevisionConflictError,
@@ -490,14 +491,33 @@ describe("lists, search and use", () => {
   it("counts uses only for published templates", async () => {
     const { r, a, b } = await seeded();
     const deps = { templates: r.templates };
-    await recordUse(deps, b, 3);
+    const day = new Date("2026-10-20T00:00:00Z");
+    await recordUse(deps, b, OWNER_ID, 3, day);
     const got = await getTemplate(r, b, null);
     expect(got.useCount).toBe(3);
 
-    await expect(recordUse(deps, a, 1)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(recordUse(deps, a, OWNER_ID, 1, day)).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
     await expect(
-      recordUse(deps, "99999999-9999-4999-8999-999999999999", 1),
+      recordUse(deps, "99999999-9999-4999-8999-999999999999", OWNER_ID, 1, day),
     ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("caps one user's daily counts per template at 429", async () => {
+    const { r, b } = await seeded();
+    const deps = { templates: r.templates };
+    const day = new Date("2026-10-20T00:00:00Z");
+    await recordUse(deps, b, OWNER_ID, 1000, day);
+    await expect(recordUse(deps, b, OWNER_ID, 1, day)).rejects.toBeInstanceOf(
+      RateLimitedError,
+    );
+    // A new UTC day gets a fresh budget, and other users are unaffected.
+    const next = new Date("2026-10-21T00:00:00Z");
+    await recordUse(deps, b, OWNER_ID, 1, next);
+    await recordUse(deps, b, OTHER_ID, 1, day);
+    const got = await getTemplate(r, b, null);
+    expect(got.useCount).toBe(1002);
   });
 });
 

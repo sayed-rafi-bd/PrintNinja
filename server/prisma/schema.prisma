@@ -28,6 +28,7 @@ model User {
   fonts        Font[]
   sync         UserSync?
   tombstones   Tombstone[]
+  useDaily     TemplateUseDaily[]
 
   @@map("users")
 }
@@ -185,6 +186,23 @@ model SavedTemplate {
   @@id([userId, templateId])
   @@index([templateId])
   @@map("saved_templates")
+}
+
+// Per-user, per-template, per-day print counters behind the use-count
+// abuse cap: one account can add at most MAX_USE_PER_USER_TEMPLATE_PER_DAY
+// counts to one template per UTC day, so gaming the community "used"
+// sort needs a fresh account every day. Bare templateId like SavedTemplate:
+// use rows must survive a template delete (the cap still applies on 404s,
+// and the rows are tiny).
+model TemplateUseDaily {
+  userId     String   @map("user_id") @db.Uuid
+  templateId String   @map("template_id") @db.Uuid
+  day        DateTime @map("day") @db.Date
+  count      Int      @default(0)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, templateId, day])
+  @@map("template_use_daily")
 }
 
 // Every content-changing PUT appends one row (Phase 2, deliverable 4).

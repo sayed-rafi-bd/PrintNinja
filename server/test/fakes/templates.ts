@@ -53,6 +53,8 @@ export interface FakeTemplateStore {
     deletedAt: Date;
   }[];
   saved: Map<string, SavedRow[]>;
+  /** Per-user, per-template, per-day use counts, keyed user/template/day. */
+  useDaily: Map<string, number>;
   tick: number;
 }
 
@@ -71,8 +73,12 @@ export function createFakeTemplateRepos(users: {
     seqs: new Map(),
     tombstones: [],
     saved: new Map(),
+    useDaily: new Map(),
     tick: 0,
   };
+
+  const useDailyKey = (userId: string, templateId: string, day: Date): string =>
+    `${userId}\n${templateId}\n${day.toISOString()}`;
 
   const now = () => new Date(BASE_MS + store.tick++ * 1000);
   // Mirrors user_sync.next_seq (@default(1)) with bump-then-hand: the
@@ -367,6 +373,17 @@ export function createFakeTemplateRepos(users: {
       }
       stored.useCount += by;
       return true;
+    },
+
+    async getDailyUse(userId, templateId, day) {
+      return store.useDaily.get(useDailyKey(userId, templateId, day)) ?? 0;
+    },
+
+    async addDailyUse(userId, templateId, day, by) {
+      const key = useDailyKey(userId, templateId, day);
+      const total = (store.useDaily.get(key) ?? 0) + by;
+      store.useDaily.set(key, total);
+      return total;
     },
   };
 

@@ -282,6 +282,31 @@ export function createTemplateRepository(db: DbClient): TemplateRepository {
       return result.count > 0;
     },
 
+    async getDailyUse(
+      userId: string,
+      templateId: string,
+      day: Date,
+    ): Promise<number> {
+      const row = await db.templateUseDaily.findUnique({
+        where: { userId_templateId_day: { userId, templateId, day } },
+      });
+      return row?.count ?? 0;
+    },
+
+    async addDailyUse(
+      userId: string,
+      templateId: string,
+      day: Date,
+      by: number,
+    ): Promise<number> {
+      const row = await db.templateUseDaily.upsert({
+        where: { userId_templateId_day: { userId, templateId, day } },
+        update: { count: { increment: by } },
+        create: { userId, templateId, day, count: by },
+      });
+      return row.count;
+    },
+
     async listVersions(templateId: string, query: PageQuery) {
       const where = { templateId };
       const [total, rows] = await Promise.all([
