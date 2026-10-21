@@ -140,14 +140,14 @@ test("F8 version history on the server", async ({ browser }) => {
 
   // Restoring the first makes a new revision; nothing is lost.
   await pageB.getByRole("button", { name: "Restore version 1" }).click();
-  await expect(pageB.getByTestId("version-row-4")).toBeVisible({
+  await expect(pageB.getByTestId(testids.versionRow(4))).toBeVisible({
     timeout: 30_000,
   });
   await expect(pageB.getByTestId(testids.versionList)).toContainText("Second");
 
   // Deleting the older one removes it; the current one is protected.
   await pageB.getByRole("button", { name: "Delete version 2" }).click();
-  await expect(pageB.getByTestId("version-row-2")).toBeHidden({
+  await expect(pageB.getByTestId(testids.versionRow(2))).toBeHidden({
     timeout: 30_000,
   });
   await expect(

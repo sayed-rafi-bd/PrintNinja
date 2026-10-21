@@ -164,7 +164,7 @@ async function setupConflict(
   // B comes back: its pull skips the dirty row, its push 409s.
   await pcB.context.unroute("**/*");
   await pageB.reload();
-  await expect(pageB.getByTestId("conflict-banner")).toBeVisible({
+  await expect(pageB.getByTestId(testids.conflictBanner)).toBeVisible({
     timeout: 30_000,
   });
   return { auth, pageA, pageB, serverId };
@@ -173,9 +173,9 @@ async function setupConflict(
 test("F6 conflict: keep mine", async ({ browser }) => {
   const { auth, pageB, serverId } = await setupConflict(browser, "f6mine");
   await pageB.getByRole("button", { name: "Review" }).click();
-  await pageB.getByTestId("conflict-keep-mine").click();
+  await pageB.getByTestId(testids.conflictKeepMine).click();
   // The banner leaves and the push retries against the new revision.
-  await expect(pageB.getByTestId("conflict-banner")).toBeHidden({
+  await expect(pageB.getByTestId(testids.conflictBanner)).toBeHidden({
     timeout: 30_000,
   });
   await expect(async () => {
@@ -192,8 +192,8 @@ test("F6 conflict: keep mine", async ({ browser }) => {
 test("F6 conflict: take server", async ({ browser }) => {
   const { pageB } = await setupConflict(browser, "f6theirs");
   await pageB.getByRole("button", { name: "Review" }).click();
-  await pageB.getByTestId("conflict-take-server").click();
-  await expect(pageB.getByTestId("conflict-banner")).toBeHidden({
+  await pageB.getByTestId(testids.conflictTakeServer).click();
+  await expect(pageB.getByTestId(testids.conflictBanner)).toBeHidden({
     timeout: 30_000,
   });
   await expect(async () => {
@@ -215,10 +215,10 @@ test("F6 conflict: take server", async ({ browser }) => {
 test("F6 conflict: keep both", async ({ browser }) => {
   const { pageB } = await setupConflict(browser, "f6both");
   await pageB.getByRole("button", { name: "Review" }).click();
-  await pageB.getByTestId("conflict-keep-both").click();
+  await pageB.getByTestId(testids.conflictKeepBoth).click();
   // The local content becomes a second template; the original takes
   // the server copy.
-  await expect(pageB.getByTestId("conflict-banner")).toBeHidden({
+  await expect(pageB.getByTestId(testids.conflictBanner)).toBeHidden({
     timeout: 30_000,
   });
   await expect(pageB.getByText("Contended (copy)")).toBeVisible({

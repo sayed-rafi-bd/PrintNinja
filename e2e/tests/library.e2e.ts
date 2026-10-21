@@ -229,7 +229,7 @@ test("F10 font follows the user with states, wrong content is refused", async ({
     buffer: Buffer.from(tinyTtf()),
   });
   const fontRow = pageA
-    .locator('[data-testid^="font-row-"]')
+    .locator(`[data-testid^="${testids.fontRowPrefix}"]`)
     .filter({ hasText: "body" });
   await expect(fontRow).toBeVisible({ timeout: 15_000 });
   await pageA.reload();

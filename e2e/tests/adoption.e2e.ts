@@ -71,7 +71,7 @@ test("F14 first sync of a migrated install", async ({ browser }) => {
 
   // The changed row was not overwritten: it shows conflict, and the
   // server copy is untouched.
-  await expect(page.getByTestId("conflict-banner")).toBeVisible({
+  await expect(page.getByTestId(testids.conflictBanner)).toBeVisible({
     timeout: 30_000,
   });
   const kept = await page.evaluate(

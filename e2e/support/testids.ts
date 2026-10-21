@@ -24,6 +24,12 @@ export const testids = {
   offlineBanner: "offline-banner",
   /** Banner on Templates when rows are conflicted. */
   conflictBanner: "conflict-banner",
+  /** Designer version row N (parameterized in the app). */
+  versionRow: (versionNo: number) => `version-row-${versionNo}`,
+  /** Settings font row id (parameterized in the app). */
+  fontRow: (id: number | string) => `font-row-${id}`,
+  /** Prefix for "any font row" locators. */
+  fontRowPrefix: "font-row-",
   /** The three-way conflict dialog. */
   conflictDialog: "conflict-dialog",
   /** Conflict dialog: keep pushing the local edits. */
