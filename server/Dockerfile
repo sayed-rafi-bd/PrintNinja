@@ -4,6 +4,12 @@
 # production dependencies only. Base image pinned by the Phase 1 spike.
 FROM node:22-bookworm-slim AS build
 
+# Prisma needs the `openssl` command to pick the right engine; the slim
+# image only has the libraries.
+RUN apt-get update -y \
+    && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN corepack enable && corepack prepare pnpm@10.34.7 --activate
 
 WORKDIR /app
@@ -36,6 +42,11 @@ RUN cd /deploy \
     && chmod 755 docker-entrypoint.sh
 
 FROM node:22-bookworm-slim AS runtime
+
+# Same reason as in the build stage: Prisma's migrate step runs here.
+RUN apt-get update -y \
+    && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
