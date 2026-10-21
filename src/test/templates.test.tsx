@@ -22,6 +22,7 @@ const share = vi.hoisted(() => ({
     updated_at: string;
   }) => !!t.remote_id && !!t.published_at && t.updated_at > t.published_at,
   fetchRemoteTemplate: vi.fn(async (_id: string) => ({ id: _id })),
+  fetchCommunityTemplates: vi.fn(async () => []),
   saveRemoteTemplate: vi.fn(async () => {}),
   unsaveRemoteTemplate: vi.fn(async () => {}),
   RemoteTemplateNotFoundError: class extends Error {},
@@ -432,6 +433,66 @@ describe("Templates page", () => {
     expect(
       await screen.findByText("Share service not set up"),
     ).toBeInTheDocument();
+  });
+
+  it("waits for a pause before searching the community", async () => {
+    share.getServiceUrl.mockResolvedValue("http://127.0.0.1:9");
+    share.fetchCommunityTemplates.mockClear();
+    renderPage();
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: "Community" }));
+    await waitFor(() =>
+      expect(share.fetchCommunityTemplates).toHaveBeenCalledTimes(1),
+    );
+    expect(share.fetchCommunityTemplates).toHaveBeenLastCalledWith({
+      q: "",
+      sort: "updated",
+    });
+
+    share.fetchCommunityTemplates.mockClear();
+    const box = screen.getByLabelText("Search templates");
+    fireEvent.change(box, { target: { value: "a" } });
+    fireEvent.change(box, { target: { value: "ab" } });
+    fireEvent.change(box, { target: { value: "abc" } });
+    // No request while typing.
+    await new Promise((r) => setTimeout(r, 120));
+    expect(share.fetchCommunityTemplates).not.toHaveBeenCalled();
+    // One request after the pause, with the final query.
+    await waitFor(
+      () =>
+        expect(share.fetchCommunityTemplates).toHaveBeenCalledTimes(1),
+      { timeout: 2000 },
+    );
+    expect(share.fetchCommunityTemplates).toHaveBeenLastCalledWith({
+      q: "abc",
+      sort: "updated",
+    });
+  });
+
+  it("community preview keeps the template's own CSS", async () => {
+    share.getServiceUrl.mockResolvedValue("http://127.0.0.1:9");
+    share.fetchCommunityTemplates.mockResolvedValue([
+      {
+        id: "c1",
+        name: "Community Card",
+        page_w_mm: 100,
+        page_h_mm: 150,
+      },
+    ]);
+    share.fetchRemoteTemplate.mockResolvedValueOnce({
+      id: "c1",
+      body: '<p class="hl">Hi</p>',
+      css: ".hl{color:red}",
+    });
+    renderPage();
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: "Community" }));
+    await screen.findByText("Community Card");
+    fireEvent.click(screen.getAllByRole("button", { name: "Preview" })[0]);
+    const frame = await screen.findByTitle("Template preview");
+    await waitFor(() => {
+      const src = frame.getAttribute("srcdoc") ?? "";
+      expect(src).toContain("color:red");
+      expect(src).toContain("Hi</p>");
+    });
   });
 });
 describe("conflict banner and dialog", () => {
