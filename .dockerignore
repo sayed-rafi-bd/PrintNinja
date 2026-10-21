@@ -12,4 +12,14 @@ test-results/
 playwright-report/
 coverage/
 *.tsbuildinfo
-.env
+**/.env
+**/.env.*
+!**/.env.sample
+
+# Not read by the server build (keeps the context small).
+src-tauri/
+src/
+docs/
+public/
+scripts/
+*.db

@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # PrintNinja v2 service (REFACTORING.md Phase 1, packaging).
 # Multi-stage: build with the full toolchain, ship compiled JS plus the
 # production dependencies only. Base image pinned by the Phase 1 spike.
@@ -20,7 +21,19 @@ WORKDIR /app/server
 # --legacy deploy mis-resolves the pinned zod (3.25 instead of 4.6.7).
 RUN DATABASE_URL=postgresql://localhost:5432/printninja_build_dummy \
     pnpm db:generate && pnpm build \
-    && npm_config_inject_workspace_packages=true pnpm --filter server deploy /deploy
+    && npm_config_inject_workspace_packages=true pnpm --filter server --prod deploy /deploy
+
+# Ship only what the service needs at runtime: the compiled bundle, the
+# production dependencies, the migrations and the entrypoint. Sources,
+# tests, docs, env files and build configs are removed HERE, so they never
+# enter a runtime layer. The entrypoint is forced to LF and executable so a
+# Windows checkout (CRLF, no mode bits) cannot break the container.
+RUN cd /deploy \
+    && rm -rf src test scripts openapi Dockerfile .dockerignore docker-compose.yml \
+       .env .env.sample tsconfig.json tsconfig.build.json vitest.config.ts \
+       vitest.e2e.config.mts .dependency-cruiser.mjs \
+    && sed -i 's/\r$//' docker-entrypoint.sh \
+    && chmod 755 docker-entrypoint.sh
 
 FROM node:22-bookworm-slim AS runtime
 
@@ -30,19 +43,11 @@ ENV NODE_ENV=production \
     PATH="/srv/node_modules/.bin:${PATH}"
 
 WORKDIR /srv
-COPY --from=build /deploy ./
-
-# Ship only what the service needs at runtime: the compiled bundle, the
-# production dependencies, the migrations and the entrypoint. Sources,
-# tests, docs and build configs stay in the build stage.
-RUN rm -rf src test scripts openapi Dockerfile .dockerignore docker-compose.yml \
-    tsconfig.json tsconfig.build.json vitest.config.ts .dependency-cruiser.mjs
-
-# The service writes nothing to disk (logs go to stdout), but it must not
-# run as root either.
-RUN useradd --create-home --shell /usr/sbin/nologin appuser \
-    && chown -R appuser:appuser /srv
-USER appuser
+# --chown on COPY avoids a second, full-size `chown -R` layer. The node
+# image already ships an unprivileged `node` user (uid 1000); the service
+# writes nothing to disk (logs go to stdout) and must not run as root.
+COPY --from=build --chown=node:node /deploy ./
+USER node
 
 EXPOSE 3001
 

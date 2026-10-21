@@ -14,3 +14,9 @@ allowBuilds:
   cpu-features: false
   protobufjs: false
   ssh2: false
+
+# Temporary: pkg-types@2.4.0 (transitive) was published less than the
+# minimumReleaseAge ago when the lockfile was generated. Remove this entry
+# once the version is old enough to pass the policy on its own.
+minimumReleaseAgeExclude:
+  - pkg-types@2.4.0
