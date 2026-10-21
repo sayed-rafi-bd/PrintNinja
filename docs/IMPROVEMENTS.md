@@ -8,7 +8,8 @@
 > tombstone→user cascade, settings PUT status from the repository,
 > shared ETag matcher, restore nullish bodies, profile error details in
 > wire names, sync hasMore per-stream + batched head versions,
-> paged saved manifest under savedRoutes. Everything below that is
+> paged saved manifest under savedRoutes, daily use-count cap per
+> user and template (429 past 1000). Everything below that is
 > still open.
 
 Audited from the working tree (develop). Each item names the file that proves it.
