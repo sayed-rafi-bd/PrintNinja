@@ -97,6 +97,40 @@ describe("readChanges", () => {
     ).toContain("delete:a1");
   });
 
+  it("does not report more across exhausted streams that add up past the limit", async () => {
+    const { repos } = setup();
+    await repos.templates.create(write("a1", "a"), version);
+    await repos.templates.deleteWithTombstone("a1");
+    await repos.templates.create(write("b1", "b"), version);
+    await repos.templates.create(write("c1", "c"), version);
+    await repos.templates.deleteWithTombstone("c1");
+
+    // Tombstone floor is the first delete's seq; starting there keeps
+    // the run incremental (a lower cursor would reset and re-read).
+    const floor = await repos.sync.tombstoneFloor("owner-1");
+    // One live row plus one tombstone above the floor, limit 1: the old
+    // merged count (2 > 1) cried hasMore with every stream exhausted.
+    const first = await readChanges(
+      repos,
+      "owner-1",
+      { cursor: floor, limit: 1, types: ["template"] },
+      8 * 1024 * 1024,
+    );
+    expect(first.reset).toBe(false);
+    expect(first.changes).toHaveLength(1);
+    expect(first.hasMore).toBe(false);
+
+    const second = await readChanges(
+      repos,
+      "owner-1",
+      { cursor: first.nextCursor, limit: 1, types: ["template"] },
+      8 * 1024 * 1024,
+    );
+    expect(second.changes).toHaveLength(1);
+    expect(second.hasMore).toBe(false);
+    expect(second.changes[0].seq).not.toBe(first.changes[0].seq);
+  });
+
   it("parses and validates cursors and type filters", async () => {
     expect(parseCursor(undefined)).toBeNull();
     expect(parseCursor("")).toBeNull();
