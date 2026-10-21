@@ -11,7 +11,14 @@ import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 interface DataTableProps<T> {
   /** Accessible name for the table, read by screen readers. */
@@ -20,12 +27,19 @@ interface DataTableProps<T> {
   data: T[];
   getRowId?: (row: T, index: number) => string;
   loading?: boolean;
-  empty?: { title: string; description?: string; action?: { label: string; onClick: () => void } };
+  empty?: {
+    title: string;
+    description?: string;
+    action?: { label: string; onClick: () => void };
+  };
   /** Called on click, Enter, or Space. Makes rows focusable and arrow-key navigable. */
   onRowActivate?: (row: T) => void;
   selectedRowId?: string;
   /** Adds a checkbox column. Ids come from `getRowId`. */
-  selection?: { selectedIds: ReadonlySet<string>; onChange: (ids: Set<string>) => void };
+  selection?: {
+    selectedIds: ReadonlySet<string>;
+    onChange: (ids: Set<string>) => void;
+  };
   /** Scroll the body inside this height and keep the header visible. */
   maxHeight?: string;
   className?: string;
@@ -35,10 +49,13 @@ interface DataTableProps<T> {
 const SKELETON_ROWS = 5;
 
 /** The checkbox itself stays small; this padded label makes the touch target ~40px. */
-const CHECK_HIT = "-m-2.5 inline-flex cursor-pointer items-center justify-center p-2.5";
+const CHECK_HIT =
+  "-m-2.5 inline-flex cursor-pointer items-center justify-center p-2.5";
 
 /** Per-column responsive classes, e.g. `{ meta: { className: "hidden md:table-cell" } }`. */
-const metaClass = (col: { columnDef: { meta?: unknown } }): string | undefined =>
+const metaClass = (col: {
+  columnDef: { meta?: unknown };
+}): string | undefined =>
   (col.columnDef.meta as { className?: string } | undefined)?.className;
 
 export function DataTable<T>({
@@ -90,14 +107,19 @@ export function DataTable<T>({
     } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       const sibling =
-        e.key === "ArrowDown" ? e.currentTarget.nextElementSibling : e.currentTarget.previousElementSibling;
+        e.key === "ArrowDown"
+          ? e.currentTarget.nextElementSibling
+          : e.currentTarget.previousElementSibling;
       if (sibling instanceof HTMLElement) sibling.focus();
     }
   };
 
   return (
     <div className={cn("rounded-lg border bg-card", className)}>
-      <div className="overflow-auto" style={maxHeight ? { maxHeight } : undefined}>
+      <div
+        className="overflow-auto"
+        style={maxHeight ? { maxHeight } : undefined}
+      >
         <Table>
           <caption className="sr-only">{caption}</caption>
           <TableHeader className="sticky top-0 z-10 bg-card shadow-[0_1px_0_hsl(var(--border))]">
@@ -110,8 +132,18 @@ export function DataTable<T>({
                     <TableHead
                       key={header.id}
                       className={metaClass(header.column)}
-                      aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : undefined}
-                      style={header.getSize() !== 150 ? { width: header.getSize() } : undefined}
+                      aria-sort={
+                        sorted === "asc"
+                          ? "ascending"
+                          : sorted === "desc"
+                            ? "descending"
+                            : undefined
+                      }
+                      style={
+                        header.getSize() !== 150
+                          ? { width: header.getSize() }
+                          : undefined
+                      }
                     >
                       {header.column.id === "__select" && selection ? (
                         <label className={CHECK_HIT}>
@@ -119,15 +151,32 @@ export function DataTable<T>({
                             type="checkbox"
                             aria-label="Select all rows"
                             className="h-5 w-5 accent-primary"
-                            checked={rows.length > 0 && rows.every((r) => selection.selectedIds.has(r.id))}
+                            checked={
+                              rows.length > 0 &&
+                              rows.every((r) => selection.selectedIds.has(r.id))
+                            }
                             ref={(el) => {
-                              if (el) el.indeterminate = rows.some((r) => selection.selectedIds.has(r.id)) && !rows.every((r) => selection.selectedIds.has(r.id));
+                              if (el)
+                                el.indeterminate =
+                                  rows.some((r) =>
+                                    selection.selectedIds.has(r.id),
+                                  ) &&
+                                  !rows.every((r) =>
+                                    selection.selectedIds.has(r.id),
+                                  );
                             }}
                             onChange={(e) =>
                               selection.onChange(
                                 e.target.checked
-                                  ? new Set([...selection.selectedIds, ...rows.map((r) => r.id)])
-                                  : new Set([...selection.selectedIds].filter((id) => !rows.some((r) => r.id === id))),
+                                  ? new Set([
+                                      ...selection.selectedIds,
+                                      ...rows.map((r) => r.id),
+                                    ])
+                                  : new Set(
+                                      [...selection.selectedIds].filter(
+                                        (id) => !rows.some((r) => r.id === id),
+                                      ),
+                                    ),
                               )
                             }
                           />
@@ -138,17 +187,32 @@ export function DataTable<T>({
                           onClick={header.column.getToggleSortingHandler()}
                           className="inline-flex min-h-9 items-center gap-1 rounded-sm hover:text-foreground"
                         >
-                          {flexRender(header.column.columnDef.header, header.getContext())}
+                          {flexRender(
+                            header.column.columnDef.header,
+                            header.getContext(),
+                          )}
                           {sorted === "asc" ? (
-                            <ArrowUp className="h-3.5 w-3.5" aria-hidden="true" />
+                            <ArrowUp
+                              className="h-3.5 w-3.5"
+                              aria-hidden="true"
+                            />
                           ) : sorted === "desc" ? (
-                            <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
+                            <ArrowDown
+                              className="h-3.5 w-3.5"
+                              aria-hidden="true"
+                            />
                           ) : (
-                            <ChevronsUpDown className="h-3.5 w-3.5 opacity-60" aria-hidden="true" />
+                            <ChevronsUpDown
+                              className="h-3.5 w-3.5 opacity-60"
+                              aria-hidden="true"
+                            />
                           )}
                         </button>
                       ) : (
-                        flexRender(header.column.columnDef.header, header.getContext())
+                        flexRender(
+                          header.column.columnDef.header,
+                          header.getContext(),
+                        )
                       )}
                     </TableHead>
                   );
@@ -159,7 +223,11 @@ export function DataTable<T>({
           <TableBody>
             {loading ? (
               Array.from({ length: SKELETON_ROWS }, (_, i) => (
-                <TableRow key={i} className="hover:bg-transparent" aria-hidden="true">
+                <TableRow
+                  key={i}
+                  className="hover:bg-transparent"
+                  aria-hidden="true"
+                >
                   {Array.from({ length: colCount }, (_, c) => (
                     <TableCell key={c}>
                       <Skeleton className="h-4 w-full max-w-[12rem]" />
@@ -178,15 +246,26 @@ export function DataTable<T>({
                 <TableRow
                   key={row.id}
                   data-state={selectedRowId === row.id ? "selected" : undefined}
-                  aria-selected={onRowActivate ? selectedRowId === row.id : undefined}
+                  aria-selected={
+                    onRowActivate ? selectedRowId === row.id : undefined
+                  }
                   tabIndex={onRowActivate ? 0 : undefined}
-                  className={cn(onRowActivate && "cursor-pointer focus-visible:bg-accent")}
-                  onClick={onRowActivate ? () => onRowActivate(row.original) : undefined}
+                  className={cn(
+                    onRowActivate && "cursor-pointer focus-visible:bg-accent",
+                  )}
+                  onClick={
+                    onRowActivate
+                      ? () => onRowActivate(row.original)
+                      : undefined
+                  }
                   onKeyDown={(e) => onKeyDown(e, row.original)}
                 >
                   {row.getVisibleCells().map((cell) =>
                     cell.column.id === "__select" && selection ? (
-                      <TableCell key={cell.id} onClick={(e) => e.stopPropagation()}>
+                      <TableCell
+                        key={cell.id}
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <label className={CHECK_HIT}>
                           <input
                             type="checkbox"
@@ -203,8 +282,14 @@ export function DataTable<T>({
                         </label>
                       </TableCell>
                     ) : (
-                      <TableCell key={cell.id} className={metaClass(cell.column)}>
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      <TableCell
+                        key={cell.id}
+                        className={metaClass(cell.column)}
+                      >
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext(),
+                        )}
                       </TableCell>
                     ),
                   )}
@@ -214,7 +299,11 @@ export function DataTable<T>({
           </TableBody>
         </Table>
       </div>
-      {footer && <div className="border-t px-3 py-2 text-xs text-muted-foreground">{footer}</div>}
+      {footer && (
+        <div className="border-t px-3 py-2 text-xs text-muted-foreground">
+          {footer}
+        </div>
+      )}
     </div>
   );
 }

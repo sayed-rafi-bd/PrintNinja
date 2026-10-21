@@ -38,7 +38,8 @@ export function useGlobalShortcuts({ onPalette, onHelp, onGoto }: Handlers) {
         onPalette();
         return;
       }
-      if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target))
+        return;
 
       if (pendingGoto.current != null) {
         const handled = onGoto(e.key.toLowerCase());

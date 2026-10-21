@@ -57,12 +57,34 @@ pub struct PrintRequest {
     pub idempotency_key: Option<String>,
 }
 
+/// Where one job's time went, in whole milliseconds per pipeline stage.
+///
+/// Logged as the `print job timing` line, stored on the job row
+/// (`print_jobs.timings_json`) so History can show it, and returned in the
+/// [`PrintResponse`] so the Print page can show it right after the print.
+///
+/// A stage the job never reached stays `0`. `render_ms` is the PDF/raster
+/// render, `send_ms` the hand-off to the printer (queue wait included) and
+/// `history_ms` the write that closes the job row.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StageTimings {
+    pub fetch_ms: u64,
+    pub template_ms: u64,
+    pub layout_ms: u64,
+    pub render_ms: u64,
+    pub send_ms: u64,
+    pub history_ms: u64,
+    pub total_ms: u64,
+}
+
 #[derive(Debug, Serialize)]
 pub struct PrintResponse {
     pub success: bool,
     pub job_id: String,
     pub duration_ms: u128,
     pub error: Option<String>,
+    /// Per-stage breakdown; `None` when the job failed before any stage ran.
+    pub timings: Option<StageTimings>,
 }
 
 /// The render stage of the print pipeline, as a trait.
@@ -383,6 +405,7 @@ pub async fn run_claimed_job(
                 job_id: job_id.to_string(),
                 duration_ms: 0,
                 error: Some(e.to_string()),
+                timings: None,
             });
         }
     };
@@ -414,6 +437,7 @@ pub async fn run_claimed_job(
                     job_id: job_id.to_string(),
                     duration_ms: 0,
                     error: Some(msg),
+                    timings: None,
                 });
             }
         },
@@ -493,6 +517,36 @@ fn resolve_content(db: &DbState, req: &PrintRequest) -> AppResult<ResolvedConten
     })
 }
 
+/// Whole milliseconds since `since`, for the per-stage timing log.
+fn ms(since: Instant) -> u64 {
+    since.elapsed().as_millis() as u64
+}
+
+/// Store a job's stage breakdown on its history row (`timings_json`).
+///
+/// Best-effort: the print already happened, so a failed write here is logged
+/// and never turns a finished job into an error. Not guarded on status — a
+/// job cancelled mid-print keeps its timings too.
+fn save_timings(db: &DbState, job_id: i64, timings: &StageTimings) {
+    let json = match serde_json::to_string(timings) {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::warn!(job_id, error = %e, "could not encode job timings");
+            return;
+        }
+    };
+    let Ok(guard) = db.lock() else {
+        tracing::warn!(job_id, "DB lock poisoned; job timings not saved");
+        return;
+    };
+    if let Err(e) = guard.connection().execute(
+        "UPDATE print_jobs SET timings_json = ?2 WHERE id = ?1",
+        rusqlite::params![job_id, json],
+    ) {
+        tracing::warn!(job_id, error = %e, "could not save job timings");
+    }
+}
+
 /// Everything after the job row exists: fetch, template render, layout,
 /// PDF, the per-printer permit, the send and the history write.
 async fn run_stages(
@@ -518,7 +572,12 @@ async fn run_stages(
     } = content;
     let copies = req.copies.unwrap_or(1).max(1);
 
+    // Where the time goes, filled in as each stage finishes and saved on the
+    // job row on every exit path, so History can show it.
+    let mut timings = StageTimings::default();
+
     // Fetch live data when a URL is supplied and test mode is off.
+    let t_fetch = Instant::now();
     let mut fetched: Option<serde_json::Value> = req.data.clone();
     if !req.test.unwrap_or(false) {
         if let Some(url) = &req.data_url {
@@ -545,6 +604,9 @@ async fn run_stages(
                             &req,
                             start.elapsed().as_millis() as i64,
                         )?;
+                        timings.fetch_ms = ms(t_fetch);
+                        timings.total_ms = ms(start);
+                        save_timings(db, job_id, &timings);
                         return Err(AppError::Internal(format!("Data fetch failed: {}", e)));
                     }
                 }
@@ -552,7 +614,11 @@ async fn run_stages(
         }
     }
 
+    let fetch_ms = ms(t_fetch);
+    timings.fetch_ms = fetch_ms;
+
     // ── 2. Template render ──────────────────────────────────────────
+    let t_template = Instant::now();
     // P14: always run the engine — with the job's data, or an empty context
     // when it has none, exactly like the preview (handlebars.js). It used to
     // be skipped without data and to swallow errors with `unwrap_or(html)`,
@@ -575,18 +641,28 @@ async fn run_stages(
                     &req,
                     start.elapsed().as_millis() as i64,
                 )?;
+                timings.template_ms = ms(t_template);
+                timings.total_ms = ms(start);
+                save_timings(db, job_id, &timings);
                 return Ok(PrintResponse {
                     success: false,
                     job_id: job_id.to_string(),
                     duration_ms: start.elapsed().as_millis(),
                     error: Some(msg),
+                    timings: Some(timings),
                 });
             }
         };
     }
 
+    let template_ms = ms(t_template);
+    timings.template_ms = template_ms;
+
     // ── 3. Layout ───────────────────────────────────────────────────
+    let t_layout = Instant::now();
     let final_html = apply_layout(&html, &css, w_mm, h_mm, &req);
+    let layout_ms = ms(t_layout);
+    timings.layout_ms = layout_ms;
 
     // ── 4. Render ────────────────────────────────────────────────────
     // What the printer takes is a property of its stored row: a PDF printer
@@ -612,6 +688,7 @@ async fn run_stages(
         .unwrap_or(203)
         .clamp(1, 1200) as u32;
 
+    let t_render = Instant::now();
     let rendered: anyhow::Result<(Vec<u8>, &'static str)> = match language {
         crate::transport::PrinterLanguage::Pdf => renderer
             .render(
@@ -638,10 +715,22 @@ async fn run_stages(
                 })
         }
     };
+    let render_ms = ms(t_render);
+    timings.render_ms = render_ms;
     let (payload, mime_type) = match rendered {
         Ok(v) => v,
         Err(e) => {
             let msg = e.to_string();
+            tracing::warn!(
+                job_id,
+                printer = %req.printer_name,
+                fetch_ms,
+                template_ms,
+                layout_ms,
+                render_ms,
+                total_ms = ms(start),
+                "print render failed"
+            );
             finish_job(
                 db,
                 job_id,
@@ -651,11 +740,14 @@ async fn run_stages(
                 &req,
                 start.elapsed().as_millis() as i64,
             )?;
+            timings.total_ms = ms(start);
+            save_timings(db, job_id, &timings);
             return Ok(PrintResponse {
                 success: false,
                 job_id: job_id.to_string(),
                 duration_ms: start.elapsed().as_millis(),
                 error: Some(msg),
+                timings: Some(timings),
             });
         }
     };
@@ -681,6 +773,7 @@ async fn run_stages(
     // same physical printer must never overlap, or their bytes interleave
     // and the label comes out garbled. Jobs for *different* printers are
     // unaffected — the semaphore is keyed per printer id.
+    let t_send = Instant::now();
     let result = queue
         .with_permit(&req.printer_name, async {
             // `copies` used to be ignored entirely: exactly one copy reached
@@ -710,6 +803,9 @@ async fn run_stages(
             Ok(())
         })
         .await;
+    // Includes any wait for this printer's turn, not just the transport.
+    let send_ms = ms(t_send);
+    timings.send_ms = send_ms;
 
     let duration = start.elapsed().as_millis();
     let (status, err) = match result {
@@ -721,6 +817,7 @@ async fn run_stages(
     };
 
     // ── 6. History ──────────────────────────────────────────────────
+    let t_history = Instant::now();
     finish_job(
         db,
         job_id,
@@ -730,12 +827,39 @@ async fn run_stages(
         &req,
         duration as i64,
     )?;
+    let history_ms = ms(t_history);
+    timings.history_ms = history_ms;
+
+    // One line per job with where the time went, so a slow print can be
+    // read off the log instead of guessed at. `render_ms` is the Edge render
+    // (the `rendered PDF with Edge` line next to it splits it further);
+    // `send_ms` is the hand-off to the printer, queue wait included.
+    tracing::info!(
+        job_id,
+        printer = %req.printer_name,
+        status,
+        copies,
+        fetch_ms,
+        template_ms,
+        layout_ms,
+        render_ms,
+        send_ms,
+        history_ms,
+        total_ms = ms(start),
+        "print job timing"
+    );
+
+    // The history write cannot time itself, so the breakdown goes onto the
+    // row in a second, best-effort write once every stage is known.
+    timings.total_ms = ms(start);
+    save_timings(db, job_id, &timings);
 
     Ok(PrintResponse {
         success: status == "success",
         job_id: job_id.to_string(),
         duration_ms: duration,
         error: err,
+        timings: Some(timings),
     })
 }
 

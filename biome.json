@@ -3,13 +3,27 @@
   "vcs": { "enabled": false },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["src/**/*.{ts,tsx}", "index.html", "vite.config.ts"]
+    "includes": [
+      "src/**/*.{ts,tsx}",
+      "index.html",
+      "vite.config.ts",
+      "server/src/**/*.ts",
+      "server/test/**/*.ts",
+      "e2e/**/*.ts",
+      "!server/src/infra/prisma/generated/**",
+      "!server/dist/**",
+      "!src/lib/api/schema.d.ts"
+    ]
   },
-  "formatter": { "enabled": false },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2
+  },
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": false,
+      "preset": "none",
       "correctness": {
         "noUnusedImports": "off"
       }
@@ -24,6 +38,6 @@
     }
   },
   "javascript": {
-    "formatter": { "enabled": false }
+    "formatter": { "enabled": true }
   }
 }

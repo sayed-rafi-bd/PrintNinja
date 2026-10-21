@@ -31,7 +31,7 @@ In a browser (no Tauri IPC) settings fall back to the `localStorage` key `printn
 - In a template, write every class name in full in each branch (`{{#if urgent}}bg-red-600{{else}}bg-green-600{{/if}}`). A name built from data (`bg-{{color}}-500`) cannot be compiled; use a CSS variable (`style="--c:{{color}}" class="bg-[var(--c)]"`).
 - Changing `compileTemplateCss` output (its input CSS or post-processing)? Bump `COMPILER_REV`, which is part of the key stored with each compiled stylesheet. Existing versions are not recompiled automatically; they pick up the change when their template is next saved.
 - Barcodes: `bwip-js` `toSVG()` → inline SVG via `buildBarcodeHtml` (no `canvas.toDataURL`). Friendly id → `bcid` mapping lives in `src/lib/utils/barcode.ts` (`itf→interleaved2of5`, `codabar→rationalizedCodabar`, `aztec→azteccode`, `qr→qrcode`).
-- `renderTemplate` registers Handlebars helpers once (`helpersRegistered`); `padLeft` honours the pad char and `date` parses RFC 3339.
+- `renderTemplate` registers Handlebars helpers once (`helpersRegistered`); `padLeft` honours the pad char and `date` parses RFC 3339. The `barcode` and `qrcode` helpers exist twice, in `src/lib/utils/barcode.ts` (bwip-js, for the preview) and `src-tauri/src/render/barcode.rs` (for printing); both support only the symbologies in `PRINT_SYMBOLOGIES` / `SYMBOLOGIES`, so change both together.
 - `PrintQueue` is `Clone + Send + Sync` (`Arc<Mutex<HashMap<String, Semaphore>>>`, `&self` everywhere, `with_permit`). `PrinterTransport::discover(&self)` must stay `dyn`-dispatchable.
 - `POST /v1/print` runs the real pipeline (`run_print` with `cache_dir` + `DbState` + `PrintQueue`) — it must not return a fake `202 queued`.
 

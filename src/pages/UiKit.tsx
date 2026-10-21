@@ -18,17 +18,45 @@ interface Row {
 }
 
 const ROWS: Row[] = [
-  { id: "1", name: "Shipping label 4x6", printer: "Dock Zebra", status: "success", copies: 12 },
-  { id: "2", name: "Pick list A4", printer: "Office HP", status: "failed", copies: 1 },
-  { id: "3", name: "Receipt 80 mm", printer: "Front desk", status: "queued", copies: 3 },
-  { id: "4", name: "Pallet tag", printer: "Dock Zebra", status: "printing", copies: 40 },
+  {
+    id: "1",
+    name: "Shipping label 4x6",
+    printer: "Dock Zebra",
+    status: "success",
+    copies: 12,
+  },
+  {
+    id: "2",
+    name: "Pick list A4",
+    printer: "Office HP",
+    status: "failed",
+    copies: 1,
+  },
+  {
+    id: "3",
+    name: "Receipt 80 mm",
+    printer: "Front desk",
+    status: "queued",
+    copies: 3,
+  },
+  {
+    id: "4",
+    name: "Pallet tag",
+    printer: "Dock Zebra",
+    status: "printing",
+    copies: 40,
+  },
 ];
 
 const COLUMNS: ColumnDef<Row>[] = [
   { accessorKey: "name", header: "Template", enableSorting: true },
   { accessorKey: "printer", header: "Printer", enableSorting: true },
   { accessorKey: "copies", header: "Copies", enableSorting: true },
-  { accessorKey: "status", header: "Status", cell: (c) => <StatusBadge status={c.getValue<StatusKey>()} /> },
+  {
+    accessorKey: "status",
+    header: "Status",
+    cell: (c) => <StatusBadge status={c.getValue<StatusKey>()} />,
+  },
 ];
 
 /** Development-only reference for every primitive. Served at /__ui. */
@@ -37,7 +65,10 @@ export default function UiKitPage() {
   const [selected, setSelected] = useState<string>();
   return (
     <div className="space-y-6">
-      <PageHeader title="UI kit" description="Every shared component in each state. Development only.">
+      <PageHeader
+        title="UI kit"
+        description="Every shared component in each state. Development only."
+      >
         <Button variant="outline">Secondary action</Button>
         <Button>
           <Plus className="h-4 w-4" aria-hidden="true" />
@@ -94,12 +125,20 @@ export default function UiKitPage() {
           selectedRowId={selected}
           onRowActivate={(r) => setSelected(r.id)}
         />
-        <DataTable caption="Loading example" columns={COLUMNS} data={[]} loading />
+        <DataTable
+          caption="Loading example"
+          columns={COLUMNS}
+          data={[]}
+          loading
+        />
         <DataTable
           caption="Empty example"
           columns={COLUMNS}
           data={[]}
-          empty={{ title: "No print jobs yet", description: "Jobs appear here after you print." }}
+          empty={{
+            title: "No print jobs yet",
+            description: "Jobs appear here after you print.",
+          }}
         />
       </section>
 

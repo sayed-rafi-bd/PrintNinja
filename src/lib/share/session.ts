@@ -6,6 +6,7 @@
  * could not be reached (show the "cannot reach server" screen).
  */
 import { getServiceUrl, getSessionToken, setSessionToken } from "./client";
+import { agent } from "@/lib/agent/commands";
 
 export type SessionCheck =
   | { state: "signed_in"; handle: string }
@@ -14,7 +15,10 @@ export type SessionCheck =
 
 const TIMEOUT_MS = 5_000;
 
-async function fetchWithTimeout(url: string, init: RequestInit = {}): Promise<Response> {
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit = {},
+): Promise<Response> {
   const ctrl = new AbortController();
   const timer = window.setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
@@ -49,7 +53,7 @@ export async function checkSession(): Promise<SessionCheck> {
   const token = await getSessionToken();
   try {
     if (token) {
-      const res = await fetchWithTimeout(`${url}/v1/auth/me`, {
+      const res = await fetchWithTimeout(`${url}/v2/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -64,9 +68,25 @@ export async function checkSession(): Promise<SessionCheck> {
     }
 
     // No session yet: make sure the server is there before asking for a password.
-    const res = await fetchWithTimeout(`${url}/health`);
-    return res.ok ? { state: "signed_out", url } : { state: "unreachable", url };
+    const res = await fetchWithTimeout(`${url}/v2/health`);
+    return res.ok
+      ? { state: "signed_out", url }
+      : { state: "unreachable", url };
   } catch {
     return { state: "unreachable", url };
+  }
+}
+
+/** Never throws. True when the app can open without the server: a stored
+ * session plus at least one cached template to work with. Anything else
+ * (no token, empty cache, no local agent) means the unreachable screen. */
+export async function canOpenOffline(): Promise<boolean> {
+  try {
+    const token = await getSessionToken();
+    if (!token) return false;
+    const templates = await agent("list_templates");
+    return Array.isArray(templates) && templates.length > 0;
+  } catch {
+    return false;
   }
 }

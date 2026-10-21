@@ -12,6 +12,7 @@ import {
   type SettingsSection,
 } from "@/lib/setup/checklist";
 import { tauriInvoke } from "@/lib/tauriGuard";
+import { agent } from "@/lib/agent/commands";
 
 const EMPTY: ChecklistInput = {
   printers: null,
@@ -41,7 +42,9 @@ async function loadStatus(): Promise<ChecklistInput> {
   ]);
   let apiRunning: boolean | null = null;
   try {
-    const status = await tauriInvoke<{ running?: boolean } | null>("get_api_status");
+    // Static command: typed. countOf above keeps the raw invoke on
+    // purpose — its command name is dynamic.
+    const status = await agent("get_api_status", {});
     apiRunning = status ? Boolean(status.running) : null;
   } catch {
     apiRunning = null;
@@ -58,7 +61,11 @@ async function loadStatus(): Promise<ChecklistInput> {
   };
 }
 
-export function SetupChecklist({ onOpenSection }: { onOpenSection: (s: SettingsSection) => void }) {
+export function SetupChecklist({
+  onOpenSection,
+}: {
+  onOpenSection: (s: SettingsSection) => void;
+}) {
   const [status, setStatus] = useState<ChecklistInput>(EMPTY);
   const [loaded, setLoaded] = useState(false);
 
@@ -70,7 +77,9 @@ export function SetupChecklist({ onOpenSection }: { onOpenSection: (s: SettingsS
         setLoaded(true);
       }
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const items = buildChecklist(status);
@@ -93,11 +102,18 @@ export function SetupChecklist({ onOpenSection }: { onOpenSection: (s: SettingsS
       <CardContent>
         <ol className="divide-y rounded-md border">
           {items.map((item) => (
-            <li key={item.id} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:gap-4">
+            <li
+              key={item.id}
+              className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:gap-4"
+            >
               <div className="min-w-0 flex-1">
                 <p className="font-medium">
                   {item.title}
-                  {!item.required && <span className="ml-2 text-xs font-normal text-muted-foreground">Optional</span>}
+                  {!item.required && (
+                    <span className="ml-2 text-xs font-normal text-muted-foreground">
+                      Optional
+                    </span>
+                  )}
                 </p>
                 <p className="text-sm text-muted-foreground">
                   {item.description}
@@ -105,9 +121,17 @@ export function SetupChecklist({ onOpenSection }: { onOpenSection: (s: SettingsS
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-3">
-                {loaded && item.done === true && <StatusBadge status="success" label="Done" />}
-                {loaded && item.done === false && item.required && <StatusBadge status="queued" label="To do" />}
-                {loaded && item.done === null && <span className="text-xs text-muted-foreground">Not checked</span>}
+                {loaded && item.done === true && (
+                  <StatusBadge status="success" label="Done" />
+                )}
+                {loaded && item.done === false && item.required && (
+                  <StatusBadge status="queued" label="To do" />
+                )}
+                {loaded && item.done === null && (
+                  <span className="text-xs text-muted-foreground">
+                    Not checked
+                  </span>
+                )}
                 {item.target.kind === "page" ? (
                   <Button asChild variant="outline" size="sm">
                     <Link to={item.target.path}>{item.action}</Link>
@@ -116,7 +140,10 @@ export function SetupChecklist({ onOpenSection }: { onOpenSection: (s: SettingsS
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => item.target.kind === "section" && onOpenSection(item.target.section)}
+                    onClick={() =>
+                      item.target.kind === "section" &&
+                      onOpenSection(item.target.section)
+                    }
                   >
                     {item.action}
                   </Button>

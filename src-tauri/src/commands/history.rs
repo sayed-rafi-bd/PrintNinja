@@ -25,6 +25,9 @@ pub struct PrintJob {
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
     pub duration_ms: Option<i64>,
+    /// Per-stage timing breakdown as JSON (`StageTimings`), `None` for a job
+    /// that has not run yet or ran before timings were recorded.
+    pub timings_json: Option<String>,
 }
 
 // The command bodies live in `*_conn` functions that take the shared
@@ -151,7 +154,7 @@ pub fn retry_job_conn(conn: &Connection, id: i64) -> AppResult<PrintJob> {
     let affected = conn.execute(
         "UPDATE print_jobs
          SET status = 'queued', error = NULL, started_at = NULL,
-             finished_at = NULL, duration_ms = NULL
+             finished_at = NULL, duration_ms = NULL, timings_json = NULL
          WHERE id = ?1 AND status IN ('failed', 'cancelled')",
         [id],
     )?;
@@ -176,7 +179,7 @@ pub fn delete_job_conn(conn: &Connection, id: i64) -> AppResult<()> {
 const SELECT_JOB_COLUMNS: &str = "SELECT id, batch_id, record_index, template_id,
             template_version_id, printer_id, source, source_url, status, error,
             copies, settings_json, rendered_html, idempotency_key, is_test,
-            started_at, finished_at, duration_ms
+            started_at, finished_at, duration_ms, timings_json
      FROM print_jobs";
 
 fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrintJob> {
@@ -199,5 +202,6 @@ fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrintJob> {
         started_at: row.get(15)?,
         finished_at: row.get(16)?,
         duration_ms: row.get(17)?,
+        timings_json: row.get(18)?,
     })
 }

@@ -16,8 +16,12 @@ describe("patch-android-theme", () => {
   });
   it("sets light status and navigation bars", () => {
     expect(out).toContain('<item name="android:statusBarColor">#FFFFFF</item>');
-    expect(out).toContain('<item name="android:windowLightStatusBar">true</item>');
-    expect(out).toContain('<item name="android:windowLightNavigationBar">true</item>');
+    expect(out).toContain(
+      '<item name="android:windowLightStatusBar">true</item>',
+    );
+    expect(out).toContain(
+      '<item name="android:windowLightNavigationBar">true</item>',
+    );
   });
   it("is idempotent", () => {
     expect(patchThemes(out)).toBe(out);

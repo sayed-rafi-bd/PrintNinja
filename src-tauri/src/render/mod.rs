@@ -1,6 +1,13 @@
 use anyhow::{anyhow, Result};
 use std::path::PathBuf;
 
+pub mod barcode;
+// Launches headless Edge. Windows runs it for real; the unit tests build it
+// everywhere so the profile logic is tested without Edge.
+#[cfg(any(windows, test))]
+mod cdp;
+#[cfg(any(windows, test))]
+mod edge;
 pub mod handlebars;
 pub mod raster;
 
@@ -65,54 +72,77 @@ impl PdfRenderer {
 
     #[cfg(windows)]
     async fn webview2_print_to_pdf(&self, html_path: &PathBuf) -> Result<Vec<u8>> {
-        use std::os::windows::process::CommandExt;
-        use std::process::Command;
-        use windows::Win32::System::Threading::CREATE_NO_WINDOW;
-
         // Unique per job: a shared `output.pdf` could be stale (Edge exits 0
         // without writing when it hands off to a running instance) or be
         // overwritten by a concurrent job.
         let job = uuid::Uuid::new_v4();
         let pdf_path = self.cache_dir.join(format!("output-{job}.pdf"));
-        // A throwaway profile makes headless Edge start its own process
-        // instead of delegating to the user's already-open Edge window.
-        let profile_dir = self.cache_dir.join(format!("edge-profile-{job}"));
 
-        let edge_paths = [
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-        ];
-
-        let edge_path = edge_paths
-            .iter()
-            .find(|p| std::path::Path::new(p).exists())
-            .ok_or_else(|| {
-                anyhow!(
-                    "Microsoft Edge not found (looked in {}) — PDF rendering needs \
-                     Edge/WebView2; the job cannot print without it",
-                    edge_paths.join(", ")
-                )
-            })?;
-
+        let edge_path = find_edge("PDF rendering")?;
         let html_url = format!("file:///{}", html_path.to_string_lossy().replace('\\', "/"));
-        let output = Command::new(edge_path)
-            .args(&[
-                "--headless",
-                "--disable-gpu",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--print-to-pdf-no-header",
-                "--no-pdf-header-footer",
-                &format!("--user-data-dir={}", profile_dir.to_string_lossy()),
-                &format!("--print-to-pdf={}", pdf_path.to_string_lossy()),
-                &html_url,
-            ])
-            .creation_flags(CREATE_NO_WINDOW.0)
-            .output()?;
 
-        remove_edge_profile(&profile_dir).await;
+        // The persistent Edge first: no process start, no new profile — a tab
+        // opens, prints and closes. Any failure there falls through to the
+        // one-shot launcher below, so printing never depends on it.
+        if cdp::enabled() {
+            let started = std::time::Instant::now();
+            let cfg = cdp::Config::new(std::path::Path::new(edge_path), &self.cache_dir);
+            match cdp::shared().print_pdf(&cfg, &html_url).await {
+                Ok(bytes) => {
+                    tracing::info!(
+                        html = %html_url,
+                        bytes = bytes.len(),
+                        edge_ms = started.elapsed().as_millis() as u64,
+                        persistent = true,
+                        "rendered PDF with Edge"
+                    );
+                    // Debug copy, off the print's critical path.
+                    let last = self.cache_dir.join("last-render.pdf");
+                    let copy = bytes.clone();
+                    tokio::spawn(async move {
+                        let _ = tokio::fs::write(last, copy).await;
+                    });
+                    return Ok(bytes);
+                }
+                Err(e) => tracing::warn!(
+                    error = %e,
+                    "persistent Edge could not render; using one-shot Edge"
+                ),
+            }
+        }
 
-        if output.status.success() && pdf_path.exists() {
+        let mut args: Vec<String> = [
+            "--headless",
+            "--disable-gpu",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--print-to-pdf-no-header",
+            "--no-pdf-header-footer",
+        ]
+        .iter()
+        .map(|a| a.to_string())
+        .collect();
+        args.push(format!("--print-to-pdf={}", pdf_path.to_string_lossy()));
+        args.push(html_url.clone());
+
+        // The profile (reusable, or a throwaway) is the launcher's business.
+        let run = match edge::shared()
+            .run(
+                std::path::Path::new(edge_path),
+                &self.cache_dir,
+                &args,
+                &pdf_path,
+            )
+            .await
+        {
+            Ok(run) => run,
+            Err(e) => {
+                let _ = std::fs::remove_file(&pdf_path);
+                return Err(e);
+            }
+        };
+
+        if run.output.status.success() && pdf_path.exists() {
             let bytes = tokio::fs::read(&pdf_path).await;
             // Keep the newest render next to last-render.html so it can be
             // opened directly to tell "Edge output is unstyled" apart from
@@ -124,6 +154,9 @@ impl PdfRenderer {
                 html = %html_url,
                 pdf = %last.display(),
                 bytes = bytes.as_ref().map_or(0, |b| b.len()),
+                edge_ms = run.edge_ms,
+                profile_cleanup_ms = run.cleanup_ms,
+                warm_profile = run.warm,
                 "rendered PDF with Edge"
             );
             return bytes.map_err(Into::into);
@@ -131,11 +164,11 @@ impl PdfRenderer {
 
         // Edge failed or wrote nothing. Report it; do not fall back to a
         // placeholder (P5).
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = String::from_utf8_lossy(&run.output.stderr);
         let _ = std::fs::remove_file(&pdf_path);
         Err(anyhow!(
             "Edge print-to-pdf did not produce a PDF (status {}, stderr: {})",
-            output.status,
+            run.output.status,
             stderr.trim()
         ))
     }
@@ -178,62 +211,87 @@ impl PdfRenderer {
         w_px: usize,
         h_px: usize,
     ) -> Result<crate::render::raster::RasterImage> {
-        use std::os::windows::process::CommandExt;
-        use std::process::Command;
-        use windows::Win32::System::Threading::CREATE_NO_WINDOW;
-
         // Unique per job, like the PDF path: no shared screenshot target,
         // no stale hand-offs between concurrent jobs.
         let job = uuid::Uuid::new_v4();
         let png_path = self.cache_dir.join(format!("shot-{job}.png"));
-        let profile_dir = self.cache_dir.join(format!("edge-profile-{job}"));
 
-        let edge_paths = [
-            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-        ];
-
-        let edge_path = edge_paths
-            .iter()
-            .find(|p| std::path::Path::new(p).exists())
-            .ok_or_else(|| {
-                anyhow!(
-                    "Microsoft Edge not found (looked in {}) — raster printing needs \
-                     Edge/WebView2; the job cannot print without it",
-                    edge_paths.join(", ")
-                )
-            })?;
-
+        let edge_path = find_edge("raster printing")?;
         let html_url = format!("file:///{}", html_path.to_string_lossy().replace('\\', "/"));
-        let output = Command::new(edge_path)
-            .args(&[
-                "--headless",
-                "--disable-gpu",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--hide-scrollbars",
-                // 1 CSS px = 1 printer dot: the PNG comes out exactly the
-                // label in dots — no HiDPI scaling, no scrollbar gutters.
-                "--force-device-scale-factor=1",
-                &format!("--window-size={w_px},{h_px}"),
-                &format!("--user-data-dir={}", profile_dir.to_string_lossy()),
-                &format!("--screenshot={}", png_path.to_string_lossy()),
-                &html_url,
-            ])
-            .creation_flags(CREATE_NO_WINDOW.0)
-            .output()?;
 
-        remove_edge_profile(&profile_dir).await;
+        // Persistent Edge first, as in `webview2_print_to_pdf`.
+        if cdp::enabled() {
+            let started = std::time::Instant::now();
+            let cfg = cdp::Config::new(std::path::Path::new(edge_path), &self.cache_dir);
+            match cdp::shared()
+                .screenshot(&cfg, &html_url, w_px as u32, h_px as u32)
+                .await
+            {
+                Ok(bytes) => {
+                    let edge_ms = started.elapsed().as_millis() as u64;
+                    tokio::fs::write(&png_path, &bytes).await?;
+                    tracing::info!(edge_ms, persistent = true, "rendered screenshot with Edge");
+                    let decoded = png_to_raster(&png_path);
+                    let _ =
+                        tokio::fs::copy(&png_path, self.cache_dir.join("last-render.png")).await;
+                    let _ = tokio::fs::remove_file(&png_path).await;
+                    return decoded.map_err(|e| anyhow!("screenshot decode: {e}"));
+                }
+                Err(e) => tracing::warn!(
+                    error = %e,
+                    "persistent Edge could not render; using one-shot Edge"
+                ),
+            }
+        }
 
-        if !(output.status.success() && png_path.exists()) {
-            let stderr = String::from_utf8_lossy(&output.stderr);
+        let mut args: Vec<String> = [
+            "--headless",
+            "--disable-gpu",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--hide-scrollbars",
+            // 1 CSS px = 1 printer dot: the PNG comes out exactly the
+            // label in dots — no HiDPI scaling, no scrollbar gutters.
+            "--force-device-scale-factor=1",
+        ]
+        .iter()
+        .map(|a| a.to_string())
+        .collect();
+        args.push(format!("--window-size={w_px},{h_px}"));
+        args.push(format!("--screenshot={}", png_path.to_string_lossy()));
+        args.push(html_url);
+
+        let run = match edge::shared()
+            .run(
+                std::path::Path::new(edge_path),
+                &self.cache_dir,
+                &args,
+                &png_path,
+            )
+            .await
+        {
+            Ok(run) => run,
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&png_path).await;
+                return Err(e);
+            }
+        };
+
+        if !(run.output.status.success() && png_path.exists()) {
+            let stderr = String::from_utf8_lossy(&run.output.stderr);
             let _ = tokio::fs::remove_file(&png_path).await;
             return Err(anyhow!(
                 "Edge screenshot did not produce a PNG (status {}, stderr: {})",
-                output.status,
+                run.output.status,
                 stderr.trim()
             ));
         }
+        tracing::info!(
+            edge_ms = run.edge_ms,
+            profile_cleanup_ms = run.cleanup_ms,
+            warm_profile = run.warm,
+            "rendered screenshot with Edge"
+        );
 
         let raster = png_to_raster(&png_path).map_err(|e| anyhow!("screenshot decode: {e}"))?;
 
@@ -245,13 +303,130 @@ impl PdfRenderer {
     }
 }
 
+/// Where Edge lives. Both Program Files locations are checked; `purpose`
+/// names the render in the error so the operator knows what failed.
+#[cfg(windows)]
+fn find_edge(purpose: &str) -> Result<&'static str> {
+    const EDGE_PATHS: [&str; 2] = [
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    ];
+    EDGE_PATHS
+        .iter()
+        .copied()
+        .find(|p| std::path::Path::new(p).exists())
+        .ok_or_else(|| {
+            anyhow!(
+                "Microsoft Edge not found (looked in {}) — {purpose} needs \
+                 Edge/WebView2; the job cannot print without it",
+                EDGE_PATHS.join(", ")
+            )
+        })
+}
+
+/// Start headless Edge once, in the background, so the first real print does
+/// not pay for Edge's start-up.
+///
+/// The persistent Edge (`cdp.rs`) is started and primed with one page; only if
+/// that fails is the one-shot launcher's reusable profile warmed instead.
+///
+/// Call from app setup after `sweep_leftover_edge_profiles` and **before the
+/// worker spawns**: the profile is claimed synchronously here, and a job that
+/// arrives while the warm-up runs waits for it (bounded) instead of building a
+/// cold throwaway profile. Never blocks startup and never fails it: if Edge is
+/// missing or the warm-up fails, it is logged and the first job falls back to
+/// the old behaviour.
+#[cfg(windows)]
+pub fn warm_up_edge(cache_dir: PathBuf) {
+    let Ok(edge_path) = find_edge("warm-up") else {
+        tracing::warn!("Edge not found; skipping warm-up");
+        return;
+    };
+    let Some(claim) = edge::shared().claim_warm_up() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        let id = uuid::Uuid::new_v4();
+        let html = cache_dir.join(format!("warmup-{id}.html"));
+        let pdf = cache_dir.join(format!("warmup-{id}.pdf"));
+        if let Err(e) = tokio::fs::create_dir_all(&cache_dir).await {
+            tracing::warn!(error = %e, "Edge warm-up: cache dir unavailable");
+            return;
+        }
+        // Text, an @page rule and a web font family exercise the same paths
+        // a label does, so font and print-pipeline set-up happen here too.
+        let doc = "<!doctype html><html><head><meta charset=\"utf-8\">\
+                   <style>@page{size:50mm 30mm;margin:0}\
+                   body{font-family:Arial,sans-serif;font-size:12px}</style></head>\
+                   <body>PrintNinja warm-up 0123456789</body></html>";
+        if tokio::fs::write(&html, doc).await.is_err() {
+            return;
+        }
+        let url = format!("file:///{}", html.to_string_lossy().replace('\\', "/"));
+
+        // Preferred: start the persistent Edge and print one page through
+        // it, which also warms its renderer, fonts and print pipeline. Then
+        // the one-shot profile is not needed unless a render falls back.
+        if cdp::enabled() {
+            let cfg = cdp::Config::new(std::path::Path::new(edge_path), &cache_dir);
+            let started = std::time::Instant::now();
+            let primed = match cdp::shared().start(&cfg).await {
+                Ok(()) => cdp::shared().print_pdf(&cfg, &url).await.map(|_| ()),
+                Err(e) => Err(e),
+            };
+            match primed {
+                Ok(()) => {
+                    tracing::info!(
+                        warm_up_ms = started.elapsed().as_millis() as u64,
+                        "persistent Edge is running and warm"
+                    );
+                    let _ = tokio::fs::remove_file(&html).await;
+                    return; // `claim` drops: the one-shot profile stays free.
+                }
+                Err(e) => tracing::warn!(
+                    error = %e,
+                    "persistent Edge did not start; warming one-shot Edge instead"
+                ),
+            }
+        }
+        // Same switches as `webview2_print_to_pdf`, so the same code paths load.
+        let mut args: Vec<String> = [
+            "--headless",
+            "--disable-gpu",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--print-to-pdf-no-header",
+            "--no-pdf-header-footer",
+        ]
+        .iter()
+        .map(|a| a.to_string())
+        .collect();
+        args.push(format!("--print-to-pdf={}", pdf.to_string_lossy()));
+        args.push(url);
+        claim
+            .run(std::path::Path::new(edge_path), &cache_dir, &args, &pdf)
+            .await;
+        let _ = tokio::fs::remove_file(&html).await;
+    });
+}
+
+/// Close the persistent Edge. Called once when the app exits: the handle is a
+/// `static`, so nothing drops it, and an Edge left running would keep its
+/// profile locked for the next start.
+#[cfg(windows)]
+pub fn shutdown_edge() {
+    tauri::async_runtime::block_on(cdp::shared().shutdown());
+}
+
 /// Startup sweep: remove throwaway Edge profiles left behind by earlier
 /// runs (P17 follow-up — the stray `.pem` next to `last-render.pdf`).
 ///
-/// Every print makes a fresh `edge-profile-{uuid}` dir and removes it after
-/// the render (with retries — see the helper below). A run killed mid-render
-/// still leaves its profile in the cache dir, certificate-transparency
-/// material included, which looked like the app had written a key file.
+/// A print that cannot use the reusable `edge-warm-profile` makes a fresh
+/// `edge-profile-{uuid}` dir and removes it after the render (with retries —
+/// see `edge.rs`). A run killed mid-render still leaves its profile in the
+/// cache dir, certificate-transparency material included, which looked like
+/// the app had written a key file. The reusable profile is not swept: keeping
+/// it is the point.
 ///
 /// Called once from app setup **before the worker spawns**, so nothing in
 /// flight owns these directories. `min_age` guards the one remaining race —
@@ -290,38 +465,6 @@ pub fn sweep_leftover_edge_profiles(dir: &std::path::Path, min_age: std::time::D
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => {
                 tracing::warn!(dir = name, error = %e, "could not remove a leftover Edge profile")
-            }
-        }
-    }
-}
-
-/// Best-effort removal of a throwaway Edge profile, with retries.
-///
-/// Edge can still hold handles briefly after it exits; a single
-/// fire-and-forget `remove_dir_all` then left the whole profile in the
-/// cache dir — its certificate-transparency and trust material showed up
-/// as a stray `.pem` next to `last-render.pdf`, looking like the app had
-/// written a key file. Retry, and log if the profile really cannot go.
-#[cfg(windows)]
-async fn remove_edge_profile(dir: &std::path::Path) {
-    for attempt in 0..5u32 {
-        match tokio::fs::remove_dir_all(dir).await {
-            Ok(()) => return,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
-            Err(e) if attempt < 4 => {
-                tracing::debug!(error = %e, "Edge still holds its profile; retrying removal");
-                tokio::time::sleep(std::time::Duration::from_millis(
-                    80 * u64::from(attempt + 1),
-                ))
-                .await;
-            }
-            Err(e) => {
-                tracing::warn!(
-                    dir = %dir.display(),
-                    error = %e,
-                    "leftover Edge profile could not be removed; it holds no secrets \
-                     but should not accumulate in the cache dir"
-                );
             }
         }
     }

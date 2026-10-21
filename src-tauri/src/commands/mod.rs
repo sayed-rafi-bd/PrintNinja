@@ -1,5 +1,7 @@
 pub mod api;
 pub mod batch;
+pub mod cache;
+pub mod datasets;
 pub mod deeplink_cmd;
 pub mod font;
 pub mod history;

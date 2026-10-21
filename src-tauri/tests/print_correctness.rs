@@ -19,7 +19,7 @@
 
 #[cfg(not(windows))]
 use printninja_lib::commands::print::run_print;
-use printninja_lib::commands::print::{run_print_with, JobRenderer, PrintRequest};
+use printninja_lib::commands::print::{run_print_with, JobRenderer, PrintRequest, StageTimings};
 use printninja_lib::db::Database;
 use printninja_lib::queue::PrintQueue;
 use printninja_lib::render::PdfRenderer;
@@ -351,6 +351,39 @@ async fn a_template_error_fails_the_job_instead_of_printing_the_source() {
     assert!(
         error.is_some_and(|e| e.contains("Template render failed")),
         "the row carries the template error"
+    );
+}
+
+/// A job's per-stage timing is returned to the caller and stored on its
+/// history row, so History can show where the time went.
+#[tokio::test]
+async fn a_job_records_its_stage_timings_on_the_history_row() {
+    let db = test_db();
+    seed_printer(&db, "Mock", "127.0.0.1:1");
+    let queue = PrintQueue::new();
+
+    let res = run_print_with(
+        &cache_dir(),
+        &db,
+        &queue,
+        print_request("Mock"),
+        &FakeRenderer,
+    )
+    .await
+    .expect("a send failure is an outcome, not a pipeline error");
+    let returned = res.timings.expect("the response carries the breakdown");
+
+    let stored: String = db
+        .lock()
+        .unwrap()
+        .connection()
+        .query_row("SELECT timings_json FROM print_jobs", [], |r| r.get(0))
+        .expect("the row carries timings_json");
+    let stored: StageTimings = serde_json::from_str(&stored).expect("timings_json is valid");
+    assert_eq!(stored, returned, "the row and the response agree");
+    assert!(
+        stored.total_ms >= stored.render_ms + stored.send_ms,
+        "total covers the stages it is made of: {stored:?}"
     );
 }
 

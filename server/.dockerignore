@@ -1,8 +1,0 @@
-target/
-.git/
-*.db
-*.db-journal
-.env
-.env.*
-Dockerfile
-.dockerignore

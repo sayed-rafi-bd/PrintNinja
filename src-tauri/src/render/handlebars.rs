@@ -1,3 +1,4 @@
+use super::barcode;
 use anyhow::Result;
 use handlebars::Handlebars;
 
@@ -19,6 +20,8 @@ impl TemplateEngine {
         hb.register_helper("lower", Box::new(lower_helper));
         hb.register_helper("padLeft", Box::new(pad_left_helper));
         hb.register_helper("number", Box::new(number_helper));
+        hb.register_helper("barcode", Box::new(barcode_helper));
+        hb.register_helper("qrcode", Box::new(qrcode_helper));
     }
 
     pub fn render(&self, template: &str, data: &serde_json::Value) -> Result<String> {
@@ -310,9 +313,144 @@ fn number_helper(
     Ok(())
 }
 
+/// A helper argument as text: strings as-is, numbers and booleans formatted,
+/// anything else (missing, null, objects) as empty.
+fn value_as_text(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        _ => String::new(),
+    }
+}
+
+/// `{{barcode "code128" order.id}}`, optionally `width=50` (mm) and `text=false`.
+fn barcode_helper(
+    h: &handlebars::Helper,
+    _: &handlebars::Handlebars,
+    _: &handlebars::Context,
+    _: &mut handlebars::RenderContext,
+    out: &mut dyn handlebars::Output,
+) -> handlebars::HelperResult {
+    let kind = h
+        .param(0)
+        .map(|v| value_as_text(v.value()))
+        .unwrap_or_default();
+    let value = h
+        .param(1)
+        .map(|v| value_as_text(v.value()))
+        .unwrap_or_default();
+    let width = h
+        .hash_get("width")
+        .and_then(|v| v.value().as_f64())
+        .unwrap_or(barcode::DEFAULT_BARCODE_WIDTH_MM);
+    let show_text = hash_flag(h, "text", true);
+
+    // An unencodable value prints nothing; it must not fail the whole job.
+    if let Some(html) = barcode::barcode_html(&kind, &value, width, show_text) {
+        out.write(&html)?;
+    }
+    Ok(())
+}
+
+/// `{{qrcode order.url}}`, optionally `size=30` (mm).
+fn qrcode_helper(
+    h: &handlebars::Helper,
+    _: &handlebars::Handlebars,
+    _: &handlebars::Context,
+    _: &mut handlebars::RenderContext,
+    out: &mut dyn handlebars::Output,
+) -> handlebars::HelperResult {
+    let value = h
+        .param(0)
+        .map(|v| value_as_text(v.value()))
+        .unwrap_or_default();
+    let size = h
+        .hash_get("size")
+        .and_then(|v| v.value().as_f64())
+        .unwrap_or(barcode::DEFAULT_QR_SIZE_MM);
+
+    if let Some(html) = barcode::qr_html(&value, size) {
+        out.write(&html)?;
+    }
+    Ok(())
+}
+
+/// A boolean hash option: `false` / `"false"` / `0` turn it off.
+fn hash_flag(h: &handlebars::Helper, name: &str, default: bool) -> bool {
+    match h.hash_get(name).map(|v| v.value()) {
+        Some(serde_json::Value::Bool(b)) => *b,
+        Some(serde_json::Value::String(s)) => !s.eq_ignore_ascii_case("false"),
+        Some(serde_json::Value::Number(n)) => n.as_f64() != Some(0.0),
+        _ => default,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn barcode_helper_reads_the_value_from_data() {
+        let engine = TemplateEngine::new();
+        let data = serde_json::json!({ "order": { "id": "ORD-1042" } });
+        let out = engine
+            .render("{{barcode \"code128\" order.id}}", &data)
+            .unwrap();
+        assert!(out.contains("<svg"));
+        assert!(out.contains(">ORD-1042</text>"));
+    }
+
+    #[test]
+    fn barcode_helper_accepts_numbers_and_hash_options() {
+        let engine = TemplateEngine::new();
+        let data = serde_json::json!({ "n": 1042 });
+        let out = engine
+            .render("{{barcode \"code128\" n width=60 text=false}}", &data)
+            .unwrap();
+        assert!(out.contains("width=\"60mm\""));
+        assert!(!out.contains("<text"));
+    }
+
+    #[test]
+    fn barcode_helper_prints_nothing_for_missing_or_invalid_values() {
+        let engine = TemplateEngine::new();
+        let data = serde_json::json!({ "bad": "123" });
+        assert_eq!(
+            engine
+                .render("{{barcode \"code128\" nope}}", &data)
+                .unwrap(),
+            ""
+        );
+        // EAN-13 needs 13 digits.
+        assert_eq!(
+            engine.render("{{barcode \"ean13\" bad}}", &data).unwrap(),
+            ""
+        );
+        assert_eq!(
+            engine
+                .render("{{barcode \"datamatrix\" bad}}", &data)
+                .unwrap(),
+            ""
+        );
+    }
+
+    #[test]
+    fn qrcode_helper_reads_the_value_from_data() {
+        let engine = TemplateEngine::new();
+        let data = serde_json::json!({ "url": "https://example.com/o/1" });
+        let out = engine.render("{{qrcode url size=30}}", &data).unwrap();
+        assert!(out.contains("width=\"30mm\" height=\"30mm\""));
+    }
+
+    #[test]
+    fn barcode_survives_the_sanitizer() {
+        let engine = TemplateEngine::new();
+        let data = serde_json::json!({ "id": "A1" });
+        let out = engine.render("{{barcode \"code39\" id}}", &data).unwrap();
+        assert!(out.contains("<path d=\"M"));
+        assert!(out.contains("<rect"));
+    }
 
     #[test]
     fn test_currency_helper() {

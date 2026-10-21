@@ -63,7 +63,9 @@ pub type DbState = Arc<Mutex<Database>>;
 /// Called by `Database::open` and by tests; nothing else may apply schema.
 pub fn init(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(include_str!("schema.sql"))?;
-    ensure_v2_schema(conn)
+    ensure_v2_schema(conn)?;
+    ensure_sync_schema(conn)?;
+    ensure_library_schema(conn)
 }
 
 /// Check whether a column exists via `PRAGMA table_info` (V2.md §5.1).
@@ -149,6 +151,10 @@ pub fn ensure_v2_schema(conn: &Connection) -> rusqlite::Result<()> {
     )?;
     if has_print_jobs > 0 && !column_exists(conn, "print_jobs", "data_json")? {
         conn.execute("ALTER TABLE print_jobs ADD COLUMN data_json TEXT", [])?;
+    }
+    // Per-stage timing breakdown shown in History. Old rows keep NULL.
+    if has_print_jobs > 0 && !column_exists(conn, "print_jobs", "timings_json")? {
+        conn.execute("ALTER TABLE print_jobs ADD COLUMN timings_json TEXT", [])?;
     }
 
     // `POST /v1/print` replays are atomic only if an idempotency key names
@@ -257,5 +263,266 @@ fn ensure_created_by_allows_sync(conn: &Connection) -> rusqlite::Result<()> {
         let _ = conn.execute_batch("PRAGMA foreign_keys = ON;");
     }
     result?;
+    Ok(())
+}
+
+/// Phase 3 sync bookkeeping (REFACTORING.md section 6). Guarded ALTERs
+/// plus a one-time backfill; idempotent like the rest of this file. Must
+/// run after `ensure_v2_schema` (it backfills from `origin`).
+///
+/// - `server_id`: the sync identity, unique across PCs. Existing rows
+///   copy `remote_id`; local-only rows get a fresh v4 UUID.
+/// - `server_revision` / `base_revision`: NULL until the first sync.
+/// - `sync_state`: synced | dirty | deleted_pending | conflict. Rows
+///   that already came from the server start synced; local-only rows
+///   start dirty with no server copy.
+/// - `kind`: own | saved, backfilled from `origin`.
+/// - `owner_handle`: backfilled from `origin_owner` for saved rows.
+/// - `synced_at`: NULL until the first successful pull.
+/// - `sync_state` table: one row with the account id, server URL,
+///   cursor, last pull time and last error.
+pub fn ensure_sync_schema(conn: &Connection) -> rusqlite::Result<()> {
+    if !column_exists(conn, "templates", "server_id")? {
+        conn.execute("ALTER TABLE templates ADD COLUMN server_id TEXT", [])?;
+    }
+    if !column_exists(conn, "templates", "server_revision")? {
+        conn.execute(
+            "ALTER TABLE templates ADD COLUMN server_revision INTEGER",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "templates", "base_revision")? {
+        conn.execute("ALTER TABLE templates ADD COLUMN base_revision INTEGER", [])?;
+    }
+    if !column_exists(conn, "templates", "sync_state")? {
+        conn.execute(
+            "ALTER TABLE templates ADD COLUMN sync_state TEXT NOT NULL DEFAULT 'synced' \
+             CHECK(sync_state IN ('synced', 'dirty', 'deleted_pending', 'conflict'))",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "templates", "kind")? {
+        conn.execute(
+            "ALTER TABLE templates ADD COLUMN kind TEXT NOT NULL DEFAULT 'own' \
+             CHECK(kind IN ('own', 'saved'))",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "templates", "owner_handle")? {
+        conn.execute("ALTER TABLE templates ADD COLUMN owner_handle TEXT", [])?;
+    }
+    if !column_exists(conn, "templates", "synced_at")? {
+        conn.execute("ALTER TABLE templates ADD COLUMN synced_at TEXT", [])?;
+    }
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_templates_server_id ON templates(server_id)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS sync_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            account_handle TEXT,
+            server_url TEXT,
+            cursor TEXT,
+            last_pull_at TEXT,
+            last_error TEXT
+        )",
+        [],
+    )?;
+
+    // Backfill. Every UPDATE is conditional, so a second call is a no-op.
+    conn.execute(
+        "UPDATE templates SET server_id = remote_id WHERE server_id IS NULL AND remote_id IS NOT NULL",
+        [],
+    )?;
+    // Local-only rows: fresh sync identities, dirty, no server copy.
+    let ids: Vec<i64> = {
+        let mut stmt = conn.prepare("SELECT id FROM templates WHERE server_id IS NULL")?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<Vec<i64>>>()?
+    };
+    for id in ids {
+        conn.execute(
+            "UPDATE templates SET server_id = ?1, sync_state = 'dirty' WHERE id = ?2",
+            rusqlite::params![uuid::Uuid::new_v4().to_string(), id],
+        )?;
+    }
+    conn.execute(
+        "UPDATE templates SET kind = 'saved' WHERE origin = 'saved' AND kind <> 'saved'",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE templates SET owner_handle = origin_owner \
+         WHERE kind = 'saved' AND owner_handle IS NULL AND origin_owner IS NOT NULL",
+        [],
+    )?;
+    // Whether this database predates the sync cache: any template with a
+    // legacy remote_id means a migrated install, which gets the first-sync
+    // adoption dialog instead of silently pushing local-only rows.
+    let migrated: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM templates WHERE remote_id IS NOT NULL",
+        [],
+        |r| r.get(0),
+    )?;
+    if migrated > 0 {
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('install_migrated', '1') ON CONFLICT(key) DO NOTHING",
+            [],
+        )?;
+    }
+    // Queued use-counts for the sync engine: the print worker increments
+    // the row, the engine sends POST /use and decrements on success.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS queued_uses (
+            server_template_id TEXT PRIMARY KEY,
+            count INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )",
+        [],
+    )?;
+    Ok(())
+}
+
+/// Phase 4 library sync (REFACTORING.md Phase 4). Account-level tables
+/// mirroring the server shape — datasets, profiles and the sync
+/// bookkeeping on `settings` and `fonts` — plus a one-time migration of
+/// pre-Phase-4 local profiles keyed by printer name (question 20,
+/// answered). Idempotent like the rest of this file; runs after
+/// `ensure_sync_schema` so template server ids already exist.
+pub fn ensure_library_schema(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS synced_datasets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            server_id TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            data_json TEXT NOT NULL DEFAULT '{}',
+            server_revision INTEGER,
+            base_revision INTEGER,
+            sync_state TEXT NOT NULL DEFAULT 'dirty'
+                CHECK(sync_state IN ('synced', 'dirty', 'deleted_pending', 'conflict')),
+            synced_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS synced_profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            server_id TEXT UNIQUE NOT NULL,
+            template_server_id TEXT NOT NULL,
+            printer_name TEXT NOT NULL,
+            settings_json TEXT NOT NULL DEFAULT '{}',
+            server_revision INTEGER,
+            base_revision INTEGER,
+            sync_state TEXT NOT NULL DEFAULT 'dirty'
+                CHECK(sync_state IN ('synced', 'dirty', 'deleted_pending', 'conflict')),
+            synced_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(template_server_id, printer_name)
+        );",
+    )?;
+
+    // Pre-Phase-4 profiles were keyed by local (printer_id, template_id).
+    // Upload them keyed by printer name: resolve each row's printer name
+    // and template server id, insert as dirty so the engine pushes them,
+    // then drop the old table. Rows whose printer or template is gone (or
+    // whose template never synced) cannot be keyed and are left behind
+    // with the dropped table.
+    let has_old: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'printer_profiles'",
+        [],
+        |r| r.get(0),
+    )?;
+    if has_old > 0 {
+        let rows: Vec<(String, String, String)> = {
+            let mut stmt = conn.prepare(
+                "SELECT pp.settings_json, LOWER(p.name), t.server_id
+                 FROM printer_profiles pp
+                 JOIN printers p ON p.id = pp.printer_id
+                 JOIN templates t ON t.id = pp.template_id
+                 WHERE t.server_id IS NOT NULL",
+            )?;
+            let mapped = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            mapped.collect::<rusqlite::Result<Vec<(String, String, String)>>>()?
+        };
+        for (settings_json, printer_name, template_server_id) in rows {
+            conn.execute(
+                "INSERT INTO synced_profiles (server_id, template_server_id, printer_name, settings_json)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(template_server_id, printer_name)
+                 DO UPDATE SET settings_json = excluded.settings_json",
+                rusqlite::params![
+                    uuid::Uuid::new_v4().to_string(),
+                    template_server_id,
+                    printer_name,
+                    settings_json
+                ],
+            )?;
+        }
+        conn.execute("DROP TABLE printer_profiles", [])?;
+    }
+
+    // Account preferences ride in the `settings` table itself; only
+    // allow-listed keys ever leave the device (the server 400s the rest).
+    // Device keys keep the 'synced' default forever and are never pushed.
+    if !column_exists(conn, "settings", "sync_state")? {
+        conn.execute(
+            "ALTER TABLE settings ADD COLUMN sync_state TEXT NOT NULL DEFAULT 'synced'
+             CHECK(sync_state IN ('synced', 'dirty', 'deleted_pending'))",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "settings", "synced_at")? {
+        conn.execute("ALTER TABLE settings ADD COLUMN synced_at TEXT", [])?;
+    }
+
+    // Fonts gain the sync identity plus the server's metadata. Existing
+    // rows were never pushed, so they get fresh server ids and start
+    // dirty; the engine uploads their metadata and bytes.
+    if !column_exists(conn, "fonts", "server_id")? {
+        conn.execute("ALTER TABLE fonts ADD COLUMN server_id TEXT", [])?;
+    }
+    if !column_exists(conn, "fonts", "server_revision")? {
+        conn.execute("ALTER TABLE fonts ADD COLUMN server_revision INTEGER", [])?;
+    }
+    if !column_exists(conn, "fonts", "base_revision")? {
+        conn.execute("ALTER TABLE fonts ADD COLUMN base_revision INTEGER", [])?;
+    }
+    if !column_exists(conn, "fonts", "sync_state")? {
+        conn.execute(
+            "ALTER TABLE fonts ADD COLUMN sync_state TEXT NOT NULL DEFAULT 'synced'
+             CHECK(sync_state IN ('synced', 'dirty', 'deleted_pending', 'conflict'))",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "fonts", "synced_at")? {
+        conn.execute("ALTER TABLE fonts ADD COLUMN synced_at TEXT", [])?;
+    }
+    if !column_exists(conn, "fonts", "sha256")? {
+        conn.execute(
+            "ALTER TABLE fonts ADD COLUMN sha256 TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+    if !column_exists(conn, "fonts", "size_bytes")? {
+        conn.execute(
+            "ALTER TABLE fonts ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_fonts_server_id ON fonts(server_id)",
+        [],
+    )?;
+    let unkeyed: Vec<i64> = {
+        let mut stmt = conn.prepare("SELECT id FROM fonts WHERE server_id IS NULL")?;
+        let mapped = stmt.query_map([], |r| r.get(0))?;
+        mapped.collect::<rusqlite::Result<Vec<i64>>>()?
+    };
+    for id in unkeyed {
+        conn.execute(
+            "UPDATE fonts SET server_id = ?1, sync_state = 'dirty' WHERE id = ?2",
+            rusqlite::params![uuid::Uuid::new_v4().to_string(), id],
+        )?;
+    }
     Ok(())
 }

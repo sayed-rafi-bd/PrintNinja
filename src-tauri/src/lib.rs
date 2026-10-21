@@ -75,6 +75,11 @@ pub fn run() {
                 &cache_dir,
                 std::time::Duration::from_secs(60 * 30),
             );
+            // Start headless Edge on the reusable profile now, in the
+            // background, so the first print is as fast as the rest. Before
+            // the worker so the profile is claimed before any job can ask.
+            #[cfg(windows)]
+            render::warm_up_edge(cache_dir.clone());
             worker::spawn(db_state, queue, cache_dir);
             Ok(())
         })
@@ -103,6 +108,27 @@ pub fn run() {
             commands::settings::set_setting,
             commands::settings::get_trusted_sources,
             commands::settings::set_trusted_sources,
+            commands::cache::cache_apply_changes,
+            commands::cache::cache_get_sync_state,
+            commands::cache::cache_list_dirty,
+            commands::cache::cache_mark_pushed,
+            commands::cache::cache_mark_conflicted,
+            commands::cache::cache_resolve_conflict,
+            commands::cache::cache_queue_use,
+            commands::cache::cache_list_queued_uses,
+            commands::cache::cache_clear_account,
+            commands::cache::cache_list_tombstoned,
+            commands::cache::cache_list_synced,
+            commands::cache::cache_forget_template,
+            commands::cache::cache_list_conflicted,
+            commands::datasets::list_datasets,
+            commands::datasets::save_dataset,
+            commands::datasets::delete_dataset,
+            commands::datasets::cache_list_dirty_datasets,
+            commands::datasets::cache_mark_dataset_pushed,
+            commands::datasets::cache_list_tombstoned_datasets,
+            commands::datasets::cache_list_synced_datasets,
+            commands::datasets::cache_forget_dataset,
             commands::print::print_html,
             commands::print::enumerate_system_printers,
             commands::print::spike_test_print,
@@ -117,6 +143,23 @@ pub fn run() {
             commands::profile::list_profiles,
             commands::profile::save_profile,
             commands::profile::delete_profile,
+            commands::profile::cache_list_dirty_profiles,
+            commands::profile::cache_mark_profile_pushed,
+            commands::profile::cache_list_tombstoned_profiles,
+            commands::profile::cache_list_synced_profiles,
+            commands::profile::cache_forget_profile,
+            commands::settings::cache_list_dirty_settings,
+            commands::settings::cache_mark_setting_pushed,
+            commands::settings::cache_list_tombstoned_settings,
+            commands::settings::cache_list_synced_settings,
+            commands::settings::cache_forget_setting,
+            commands::font::cache_list_dirty_fonts,
+            commands::font::cache_mark_font_pushed,
+            commands::font::cache_list_tombstoned_fonts,
+            commands::font::cache_list_synced_fonts,
+            commands::font::cache_forget_font,
+            commands::font::cache_read_font_file,
+            commands::font::cache_download_pending_fonts,
             commands::batch::create_batch,
             commands::batch::list_batches,
             commands::batch::get_batch,
@@ -128,6 +171,15 @@ pub fn run() {
             commands::api::regenerate_api_key,
             commands::deeplink_cmd::parse_deeplink,
         ]))
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // The persistent headless Edge must not outlive the app.
+            #[cfg(windows)]
+            if let tauri::RunEvent::Exit = event {
+                render::shutdown_edge();
+            }
+            #[cfg(not(windows))]
+            let _ = event;
+        });
 }

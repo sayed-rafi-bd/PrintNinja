@@ -15,11 +15,29 @@ interface Props {
 }
 
 /** The live page: the template rendered with the chosen sample data. */
-export function CanvasPane({ html, css, compiledCss, data, width, height, zoom = 1 }: Props) {
+export function CanvasPane({
+  html,
+  css,
+  compiledCss,
+  data,
+  width,
+  height,
+  zoom = 1,
+}: Props) {
   return (
     // The outer box takes the scaled size so scrolling matches what is drawn.
-    <div className="relative shrink-0 bg-white shadow-md ring-1 ring-border" style={{ width: width * zoom, height: height * zoom }}>
-      <div style={{ width, height, transform: `scale(${zoom})`, transformOrigin: "top left" }}>
+    <div
+      className="relative shrink-0 bg-white shadow-md ring-1 ring-border"
+      style={{ width: width * zoom, height: height * zoom }}
+    >
+      <div
+        style={{
+          width,
+          height,
+          transform: `scale(${zoom})`,
+          transformOrigin: "top left",
+        }}
+      >
         <iframe
           srcDoc={renderTemplate(html, css, data, compiledCss)}
           sandbox=""

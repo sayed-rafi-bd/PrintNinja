@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ServerUnreachableError, SessionExpiredError } from "@/lib/api/errors";
 import * as share from "@/lib/share/client";
 
 export type ShareStatus =
@@ -8,7 +9,6 @@ export type ShareStatus =
   | { state: "offline" };
 
 const POLL_MS = 120_000;
-const TIMEOUT_MS = 4_000;
 
 /** Connection to the share service, for the top bar. Never throws. */
 export function useShareStatus(): ShareStatus {
@@ -26,27 +26,19 @@ export function useShareStatus(): ShareStatus {
           if (!token) {
             next = { state: "signed_out" };
           } else {
-            const ctrl = new AbortController();
-            const timer = window.setTimeout(() => ctrl.abort(), TIMEOUT_MS);
             try {
-              const res = await fetch(`${url}/v1/auth/me`, {
-                headers: { Authorization: `Bearer ${token}` },
-                signal: ctrl.signal,
-              });
-              if (res.ok) {
-                const u = (await res.json()) as { handle?: string };
-                next = { state: "online", handle: u.handle ?? "" };
-              } else if (res.status === 401) {
+              const me = await share.fetchMe();
+              next = { state: "online", handle: me.handle ?? "" };
+            } catch (err) {
+              if (err instanceof SessionExpiredError) {
+                // The server no longer accepts this session: back to sign-in
+                // (callApi already cleared the token through onUnauthorized).
                 next = { state: "signed_out" };
-                // The server no longer accepts this session: back to sign-in.
-                void share.endSession("expired");
+              } else if (err instanceof ServerUnreachableError) {
+                next = { state: "offline" };
               } else {
                 next = { state: "offline" };
               }
-            } catch {
-              next = { state: "offline" };
-            } finally {
-              window.clearTimeout(timer);
             }
           }
         }

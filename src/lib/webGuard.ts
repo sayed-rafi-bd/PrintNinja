@@ -9,7 +9,9 @@ export const isWebMode = (): boolean => {
 
 export const requireNative = <T>(featureName: string): T | null => {
   if (isWebMode()) {
-    window.alert(`"${featureName}" requires the desktop app. Please run PrintNinja as a Tauri application.`);
+    window.alert(
+      `"${featureName}" requires the desktop app. Please run PrintNinja as a Tauri application.`,
+    );
     return null;
   }
   return undefined as any;
@@ -17,7 +19,9 @@ export const requireNative = <T>(featureName: string): T | null => {
 
 export const showWebLimitation = (feature: string) => {
   if (isWebMode()) {
-    alert(`"${feature}" is only available in the desktop app. Install PrintNinja on Windows or Android for full functionality.`);
+    alert(
+      `"${feature}" is only available in the desktop app. Install PrintNinja on Windows or Android for full functionality.`,
+    );
   }
 };
 
@@ -28,7 +32,9 @@ export const guardInvoke = async <T = unknown>(
 ): Promise<T | null> => {
   if (isWebMode()) {
     const name = featureName || cmd;
-    alert(`"${name}" requires native code and is not available in the browser. Please use the desktop app.`);
+    alert(
+      `"${name}" requires native code and is not available in the browser. Please use the desktop app.`,
+    );
     return null;
   }
 
