@@ -117,6 +117,7 @@ pub fn run() {
             commands::cache::cache_queue_use,
             commands::cache::cache_list_queued_uses,
             commands::cache::cache_clear_account,
+            commands::reset::reset_database,
             commands::cache::cache_list_tombstoned,
             commands::cache::cache_list_synced,
             commands::cache::cache_forget_template,

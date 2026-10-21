@@ -272,6 +272,18 @@ export interface FontDownloadReport {
   failed: number;
 }
 
+/** Counts from a full local wipe: everything the app owned on this PC. */
+export interface ResetReport {
+  templates: number;
+  template_versions: number;
+  print_jobs: number;
+  fonts: number;
+  datasets: number;
+  profiles: number;
+  printers: number;
+  batches: number;
+}
+
 export interface SaveProfileReq {
   printer_id: number;
   template_id: number;

@@ -116,3 +116,70 @@ describe("Settings page", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("Settings database reset", () => {
+  const stubReload = () => {
+    const original = Object.getOwnPropertyDescriptor(window, "location");
+    const reload = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { reload },
+    });
+    return {
+      reload,
+      restore: () => {
+        if (original) Object.defineProperty(window, "location", original);
+      },
+    };
+  };
+
+  it("asks for confirmation and wipes the database on confirm", async () => {
+    const { reload, restore } = stubReload();
+    try {
+      invoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "reset_database") {
+          return {
+            templates: 2,
+            template_versions: 3,
+            print_jobs: 1,
+            fonts: 0,
+            datasets: 0,
+            profiles: 0,
+            printers: 1,
+            batches: 0,
+          };
+        }
+        return null;
+      });
+      renderPage();
+      open("Retention");
+      fireEvent.click(screen.getByTestId("settings-reset-database"));
+      expect(
+        await screen.findByText("Erase everything on this PC?"),
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Erase everything" }));
+      await waitFor(() =>
+        expect(invoke).toHaveBeenCalledWith("reset_database", {}),
+      );
+      await waitFor(() => expect(reload).toHaveBeenCalled());
+    } finally {
+      restore();
+    }
+  });
+
+  it("does nothing when the confirmation is cancelled", async () => {
+    renderPage();
+    open("Retention");
+    fireEvent.click(screen.getByTestId("settings-reset-database"));
+    expect(
+      await screen.findByText("Erase everything on this PC?"),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Erase everything on this PC?")).toBeNull(),
+    );
+    expect(invoke.mock.calls.some((c) => c[0] === "reset_database")).toBe(
+      false,
+    );
+  });
+});

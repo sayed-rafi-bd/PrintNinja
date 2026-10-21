@@ -4,6 +4,9 @@ All notable changes to PrintNinja are documented here. The format is based on Ke
 
 ## [Unreleased] — Online-only server migration
 
+### Added
+- **Full local reset (Settings → Retention).** "Reset this PC" erases everything the app owns on this PC — templates and versions, print history, printers, fonts and their files, datasets, profiles, the sync state and every setting including the sign-in — after an explicit confirmation, and returns the app to the welcome screen. The server is untouched: signing back in pulls the account down again.
+
 ### Removed
 - **Legacy Rust share service (`server-legacy/`, Phase 3 cutover).** The hosted service is now `server/` only (TypeScript + Fastify + PostgreSQL, `/v2` API); the `server-test` CI job went with it. The `/v1` API is gone with no adapter — a clean break, per the answered question 2 (released tags never distributed the v1 client). To migrate an account off the old service, run the old server read-only, import with `pnpm --filter server db:import` (rehearsed by E9), compare counts, then point the app at the new address.
 

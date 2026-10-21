@@ -20,6 +20,7 @@ import type {
   PrintResponse,
   ProfileRow,
   QueuedUseRow,
+  ResetReport,
   SaveDatasetReq,
   SaveProfileReq,
   SyncStateRow,
@@ -124,6 +125,7 @@ export interface AgentCommands {
   cache_queue_use: [{ server_id: string; delta: number }, number];
   cache_list_queued_uses: [{}, QueuedUseRow[]];
   cache_clear_account: [{}, number];
+  reset_database: [{}, ResetReport];
   cache_list_tombstoned: [{}, string[]];
   cache_list_synced: [{}, string[]];
   cache_forget_template: [{ server_id: string }, boolean];

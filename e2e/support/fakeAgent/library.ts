@@ -837,10 +837,13 @@ export function createFakeLibrary(deps: {
       throw new Error(`unsupported sync entity '${entity}'`);
     },
 
-    clearLibrary(): void {
+    clearLibrary(includePrinters = false): void {
       datasets.clear();
       profiles.clear();
       fonts.clear();
+      if (includePrinters) {
+        printers.clear();
+      }
       dirtySettings.clear();
       persistAll();
     },

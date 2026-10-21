@@ -62,4 +62,6 @@ export const testids = {
   settingsApiPort: "settings-api-port",
   /** Settings fonts: upload button. */
   settingsFontUpload: "settings-font-upload",
+  /** Settings retention: open the full-reset confirmation. */
+  settingsResetDatabase: "settings-reset-database",
 } as const;

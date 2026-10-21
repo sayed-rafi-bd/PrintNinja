@@ -91,7 +91,7 @@ export interface SeedTemplate {
   server_revision?: number | null;
 }
 
-import { seedTemplates } from "./store.js";
+import { clearAllSettings, seedTemplates } from "./store.js";
 import { createFakeLibrary, type FakeLibrary } from "./library.js";
 
 const PERSIST_KEY = "fake-agent:templates";
@@ -754,6 +754,44 @@ export function createFakeCache() {
       sync.last_error = null;
       persist();
       return count;
+    },
+
+    /**
+     * Full local wipe (Settings → Retention → Reset): every template and
+     * version, job history is untouched by this cache (it lives in other
+     * tables the fake does not implement), every dataset, profile, font
+     * and printer, the sync state and every setting — including the
+     * session, so the app returns to sign-in. Counts mirror the Rust
+     * ResetReport; tables the fake does not implement report zero.
+     */
+    resetDatabase(): Record<string, number> {
+      let versions = 0;
+      for (const row of templates.values()) {
+        versions += row.versions.length;
+      }
+      const report = {
+        templates: templates.size,
+        template_versions: versions,
+        print_jobs: 0,
+        fonts: library._store.fonts.size,
+        datasets: library._store.datasets.size,
+        profiles: library._store.profiles.size,
+        printers: library._store.printers.size,
+        batches: 0,
+      };
+      templates.clear();
+      for (const key of [...queued.keys()]) {
+        queued.delete(key);
+      }
+      library.clearLibrary(true);
+      sync.account_handle = null;
+      sync.server_url = null;
+      sync.cursor = "";
+      sync.last_pull_at = null;
+      sync.last_error = null;
+      clearAllSettings();
+      persist();
+      return report;
     },
   };
 }

@@ -104,6 +104,13 @@ export function setSetting(key: string, value: string | null): void {
   save();
 }
 
+/** Wipe every setting, including the seeded defaults: a full reset
+ * leaves no account, no server address and no onboarding flag behind. */
+export function clearAllSettings(): void {
+  state.settings = {};
+  save();
+}
+
 /** Test hook: which commands the page has invoked so far. */
 export function agentCalls(): { cmd: string; args: unknown }[] {
   return (

@@ -31,6 +31,7 @@ const implemented: Record<string, Handler> = {
     cache.library.markSettingDirty(key, typeof value === "string" ? value : "");
     return null;
   },
+  reset_database: () => cache.resetDatabase(),
   ping: () => null,
   enumerate_system_printers: () =>
     seededPrinters.map((p, i) => ({

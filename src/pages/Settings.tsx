@@ -10,6 +10,14 @@ import type { ApiStatus, FontRow } from "@/lib/agent/types";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -103,6 +111,8 @@ export function SettingsPage() {
   const [fonts, setFonts] = useState<FontRow[]>([]);
   const [fontUploadError, setFontUploadError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const [showResetDialog, setShowResetDialog] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
 
   const [shareUrl, setShareUrl] = useState("");
   const [shareHandle, setShareHandle] = useState("");
@@ -912,6 +922,29 @@ export function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Reset this PC</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Erases everything the app owns on this PC: templates and
+                  versions, print history, printers, fonts and their files,
+                  datasets, profiles, the sync state and every setting —
+                  including the sign-in, so the app returns to the welcome
+                  screen. The server keeps the account; signing back in pulls it
+                  down again.
+                </p>
+                <Button
+                  variant="destructive"
+                  data-testid="settings-reset-database"
+                  onClick={() => setShowResetDialog(true)}
+                >
+                  <Trash2 className="h-3 w-3 mr-2" />
+                  Reset this PC…
+                </Button>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="diagnostics" className="mt-0 space-y-4">
@@ -941,6 +974,52 @@ export function SettingsPage() {
           </TabsContent>
         </div>
       </Tabs>
+
+      {/* Full-reset confirmation: the wipe cannot be undone. */}
+      <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Erase everything on this PC?</DialogTitle>
+            <DialogDescription>
+              Templates, print history, printers, fonts, datasets, profiles and
+              all settings will be permanently deleted from this PC. The server
+              keeps the account — sign back in to pull it down again.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowResetDialog(false)}
+              disabled={resetBusy}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={resetBusy}
+              onClick={() => {
+                void (async () => {
+                  setResetBusy(true);
+                  try {
+                    const report = await agent("reset_database", {});
+                    toast.success(
+                      `Cleared ${report.templates} templates, ${report.print_jobs} jobs and ${report.fonts} fonts`,
+                    );
+                    window.location.reload();
+                  } catch (e) {
+                    toast.error(`Reset failed: ${e}`);
+                  } finally {
+                    setResetBusy(false);
+                    setShowResetDialog(false);
+                  }
+                })();
+              }}
+            >
+              {resetBusy ? "Erasing…" : "Erase everything"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Version footer */}
       <div className="flex items-center justify-center gap-2 pt-4 text-xs text-muted-foreground border-t">
