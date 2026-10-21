@@ -568,14 +568,14 @@ export function HistoryPage() {
             <Input
               type="date"
               aria-label="From date"
-              className="w-full sm:w-[140px]"
+              className="w-full sm:w-[150px]"
               value={f.dateFrom}
               onChange={(e) => store.setFilter({ dateFrom: e.target.value })}
             />
             <Input
               type="date"
               aria-label="To date"
-              className="w-full sm:w-[140px]"
+              className="w-full sm:w-[150px]"
               value={f.dateTo}
               onChange={(e) => store.setFilter({ dateTo: e.target.value })}
             />
