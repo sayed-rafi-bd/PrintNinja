@@ -113,7 +113,9 @@ export async function versionRoutes(
         description:
           "Copy a version's body and CSS into the template as a new revision.",
         params: versionParams,
-        body: restoreBody,
+        // Like the use counter: Fastify hands null (not undefined) for
+        // a missing body, so the schema takes nullish, not optional.
+        body: restoreBody.nullish(),
         response: {
           200: templateSchema,
           400: errorBody,

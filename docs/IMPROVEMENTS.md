@@ -1,11 +1,13 @@
 # Improvements & E2E testing backlog
 
-> Status (feat/improvements-backlog): slices 1–6 are implemented —
-> print page_range/grayscale end-to-end, server body limits + /v2/ready,
-> auth timing-oracle fix + session cap + Argon2 clamps, domain byte caps
-> + version label/note limits + dataset depth guard, tombstone→user
-> cascade, settings PUT status from the repository. Everything below
-> that is not marked implemented is still open.
+> Status (feat/improvements-backlog): slices 1–7 are implemented —
+> print page_range/grayscale end-to-end (Rust+REST+OpenAPI+tests),
+> server body limits + /v2/ready (Docker healthcheck probes it),
+> auth timing-oracle fix + 20-session cap + Argon2 clamps, domain byte
+> caps + version label/note limits + dataset depth guard,
+> tombstone→user cascade, settings PUT status from the repository,
+> shared ETag matcher for template revisions and font downloads.
+> Everything below that is not marked implemented is still open.
 
 Audited from the working tree (develop). Each item names the file that proves it.
 Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt with user impact, **P2** = hardening/polish.
