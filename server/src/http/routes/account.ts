@@ -12,9 +12,10 @@ import { FONT_MAX_BYTES } from "../../domain/fonts.js";
 import { UnauthorizedError } from "../../domain/errors.js";
 import type { AuthDeps } from "../../domain/ports.js";
 import type {
-  FontRepository,
   SettingRepository,
+  FontRepository,
 } from "../../domain/libraryPorts.js";
+import { etagMatches } from "../etag.js";
 import { requireAuth } from "../plugins/auth.js";
 import { errorBody } from "../schemas/error.js";
 import {
@@ -256,7 +257,7 @@ export async function accountRoutes(
         request.authUser.id,
       );
       const etag = `"${file.sha256}"`;
-      if (request.headers["if-none-match"] === etag) {
+      if (etagMatches(request.headers["if-none-match"], file.sha256)) {
         return reply.status(304).send();
       }
       void reply.header("ETag", etag);

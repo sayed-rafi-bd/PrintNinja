@@ -17,6 +17,7 @@ import type {
   TemplateRepository,
 } from "../../domain/templatePorts.js";
 import { toTemplate, toTemplateSummary } from "../mappers.js";
+import { etagMatches } from "../etag.js";
 import { optionalAuth, requireAuth } from "../plugins/auth.js";
 import { errorBody } from "../schemas/error.js";
 import {
@@ -126,7 +127,9 @@ export async function templateRoutes(
         request.params.id,
         request.authUser?.id ?? null,
       );
-      if (ifNoneMatch(request.headers["if-none-match"], template.revision)) {
+      if (
+        etagMatches(request.headers["if-none-match"], String(template.revision))
+      ) {
         return reply.status(304).send();
       }
       reply.header("etag", `"${template.revision}"`);
@@ -279,22 +282,4 @@ export async function templateRoutes(
       return reply.status(204).send(null);
     },
   );
-}
-
-/** Matches If-None-Match against the revision, tolerating lists,
- * weak validators and bare numbers. */
-function ifNoneMatch(
-  header: string | string[] | undefined,
-  revision: number,
-): boolean {
-  if (!header) {
-    return false;
-  }
-  const targets = (Array.isArray(header) ? header.join(",") : header).split(
-    ",",
-  );
-  return targets.some((entry) => {
-    const tag = entry.trim().replace(/^W\//, "").replace(/^"|"$/g, "");
-    return tag === String(revision);
-  });
 }
