@@ -1,5 +1,13 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { readCachedSetting, readSetting, writeSetting } from "@/lib/settings";
+import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
 import {
   DEFAULT_APP_NAME,
   SETTING_KEYS,
@@ -35,7 +43,12 @@ const PrefsContext = createContext<Prefs>(DEFAULTS);
 export const usePrefs = () => useContext(PrefsContext);
 
 async function setNativeWindowTitle(title: string) {
-  if (typeof window === "undefined" || !(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) return;
+  if (
+    typeof window === "undefined" ||
+    !(window as unknown as { __TAURI_INTERNALS__?: unknown })
+      .__TAURI_INTERNALS__
+  )
+    return;
   try {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
     await getCurrentWindow().setTitle(title);
@@ -46,8 +59,12 @@ async function setNativeWindowTitle(title: string) {
 
 export function PrefsProvider({ children }: { children: React.ReactNode }) {
   // Start from the local cache so the first paint already has the right density and name.
-  const [density, setDensityState] = useState<Density>(() => parseDensity(readCachedSetting(SETTING_KEYS.density)));
-  const [appName, setAppNameState] = useState(() => sanitizeAppName(readCachedSetting(SETTING_KEYS.appName)));
+  const [density, setDensityState] = useState<Density>(() =>
+    parseDensity(readCachedSetting(SETTING_KEYS.density)),
+  );
+  const [appName, setAppNameState] = useState(() =>
+    sanitizeAppName(readCachedSetting(SETTING_KEYS.appName)),
+  );
   const [logo, setLogoState] = useState<string | null>(() => {
     const v = readCachedSetting(SETTING_KEYS.logo);
     return isValidLogoDataUrl(v) ? v : null;
@@ -55,7 +72,7 @@ export function PrefsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const readAll = async () => {
       const [d, n, l] = await Promise.all([
         readSetting(SETTING_KEYS.density),
         readSetting(SETTING_KEYS.appName),
@@ -65,8 +82,16 @@ export function PrefsProvider({ children }: { children: React.ReactNode }) {
       setDensityState(parseDensity(d));
       setAppNameState(sanitizeAppName(n));
       setLogoState(isValidLogoDataUrl(l) ? l : null);
-    })();
-    return () => { cancelled = true; };
+    };
+    void readAll();
+    // A completed pull may bring another PC's preferences; re-read so
+    // the new values apply with no reload (F11).
+    const onPulled = () => void readAll();
+    window.addEventListener("sync:pulled", onPulled);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("sync:pulled", onPulled);
+    };
   }, []);
 
   useEffect(() => {
@@ -82,22 +107,31 @@ export function PrefsProvider({ children }: { children: React.ReactNode }) {
   const setDensity = useCallback(async (d: Density) => {
     setDensityState(d);
     await writeSetting(SETTING_KEYS.density, d);
+    // An account preference: push it soon so the other PC pulls it.
+    notifyLocalEdit();
   }, []);
   const setAppName = useCallback(async (name: string) => {
     const clean = sanitizeAppName(name);
     setAppNameState(clean);
     // Store empty for the default so "reset" really clears the override.
-    await writeSetting(SETTING_KEYS.appName, clean === DEFAULT_APP_NAME ? "" : clean);
+    await writeSetting(
+      SETTING_KEYS.appName,
+      clean === DEFAULT_APP_NAME ? "" : clean,
+    );
+    notifyLocalEdit();
   }, []);
   const setLogo = useCallback(async (dataUrl: string | null) => {
     const next = isValidLogoDataUrl(dataUrl) ? dataUrl : null;
     setLogoState(next);
     await writeSetting(SETTING_KEYS.logo, next ?? "");
+    notifyLocalEdit();
   }, []);
 
   const value = useMemo(
     () => ({ density, appName, logo, setDensity, setAppName, setLogo }),
     [density, appName, logo, setDensity, setAppName, setLogo],
   );
-  return <PrefsContext.Provider value={value}>{children}</PrefsContext.Provider>;
+  return (
+    <PrefsContext.Provider value={value}>{children}</PrefsContext.Provider>
+  );
 }

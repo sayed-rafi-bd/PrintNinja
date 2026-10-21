@@ -9,7 +9,11 @@ export class DiagnosticLog {
   private entries: DiagnosticEntry[] = [];
   private maxEntries = 1000;
 
-  log(level: "info" | "warn" | "error", message: string, context?: Record<string, string>) {
+  log(
+    level: "info" | "warn" | "error",
+    message: string,
+    context?: Record<string, string>,
+  ) {
     const entry: DiagnosticEntry = {
       timestamp: new Date().toISOString(),
       level,
@@ -47,10 +51,19 @@ export class DiagnosticLog {
 
   private isSensitiveKey(key: string): boolean {
     const k = key.toLowerCase();
-    return k.includes("token") || k.includes("password") || k.includes("secret") || k === "api_key" || k.includes("authorization") || k.includes("credential");
+    return (
+      k.includes("token") ||
+      k.includes("password") ||
+      k.includes("secret") ||
+      k === "api_key" ||
+      k.includes("authorization") ||
+      k.includes("credential")
+    );
   }
 
-  private redactContext(context?: Record<string, string>): Record<string, string> | undefined {
+  private redactContext(
+    context?: Record<string, string>,
+  ): Record<string, string> | undefined {
     if (!context) return undefined;
     const out: Record<string, string> = {};
     for (const [k, v] of Object.entries(context)) {

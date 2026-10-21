@@ -1,5 +1,7 @@
 use crate::db::DbState;
 use crate::error::{AppError, AppResult};
+use crate::queue::PrintQueue;
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -17,7 +19,8 @@ pub struct Batch {
 }
 
 const VALID_MODES: &[&str] = &["single_job", "per_record"];
-const DEFAULT_MAX_RECORDS: usize = 5000;
+/// Same cap the REST `POST /v1/print/batch` applies to `data` (P3).
+pub const DEFAULT_MAX_RECORDS: usize = 5000;
 
 #[derive(Debug, Deserialize)]
 pub struct CreateBatchRequest {
@@ -30,7 +33,25 @@ pub struct CreateBatchRequest {
 }
 
 #[tauri::command]
-pub fn create_batch(db: State<DbState>, req: CreateBatchRequest) -> AppResult<Batch> {
+pub fn create_batch(
+    db: State<DbState>,
+    queue: State<PrintQueue>,
+    req: CreateBatchRequest,
+) -> AppResult<Batch> {
+    let batch = {
+        let guard = db
+            .lock()
+            .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+        create_batch_conn(guard.connection(), req)?
+    };
+    // The rows are `queued`; wake the worker that prints them (P3).
+    queue.kick();
+    Ok(batch)
+}
+
+/// The command body on a borrowed connection — the real insert path, so
+/// integration tests can drive what the worker consumes (Phase 0, P3).
+pub fn create_batch_conn(conn: &Connection, req: CreateBatchRequest) -> AppResult<Batch> {
     if !VALID_MODES.contains(&req.mode.as_str()) {
         return Err(AppError::Validation(format!(
             "Invalid mode '{}'. Expected one of {:?}",
@@ -58,11 +79,7 @@ pub fn create_batch(db: State<DbState>, req: CreateBatchRequest) -> AppResult<Ba
     serde_json::from_str::<serde_json::Value>(&settings)
         .map_err(|e| AppError::Validation(format!("Invalid settings JSON: {}", e)))?;
 
-    let guard = db
-        .lock()
-        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let mut conn = guard.connection()?;
-    let tx = conn.transaction()?;
+    let tx = conn.unchecked_transaction()?;
 
     // Validate references so a batch never points at a missing printer/template.
     for (id, table) in [(req.printer_id, "printers"), (req.template_id, "templates")] {
@@ -105,12 +122,14 @@ pub fn create_batch(db: State<DbState>, req: CreateBatchRequest) -> AppResult<Ba
     match req.mode.as_str() {
         "per_record" => {
             // One queued job per record (PLANNING.md 7.8: best for thermal).
-            for (idx, _record) in records.iter().enumerate() {
+            // Each record's own payload rides on its row in `data_json` —
+            // without it the worker would have nothing to render (P3).
+            for (idx, record) in records.iter().enumerate() {
                 tx.execute(
                     "INSERT INTO print_jobs
                        (batch_id, record_index, template_id, template_version_id,
-                        printer_id, source, status, copies, settings_json, is_test)
-                     VALUES (?1, ?2, ?3, ?4, ?5, 'batch', 'queued', 1, ?6, 0)",
+                        printer_id, source, status, copies, settings_json, is_test, data_json)
+                     VALUES (?1, ?2, ?3, ?4, ?5, 'batch', 'queued', 1, ?6, 0, ?7)",
                     rusqlite::params![
                         batch_id,
                         idx as i64,
@@ -118,18 +137,19 @@ pub fn create_batch(db: State<DbState>, req: CreateBatchRequest) -> AppResult<Ba
                         version_id,
                         req.printer_id,
                         settings,
+                        record.to_string(),
                     ],
                 )?;
             }
         }
         _ => {
-            // Single job: the whole array becomes one record.
+            // Single job: the whole array is one row's payload, rendered
+            // once by the template as an array context.
             tx.execute(
                 "INSERT INTO print_jobs
                    (batch_id, record_index, template_id, template_version_id,
-                    printer_id, source, status, copies, settings_json,
-                    rendered_html, is_test)
-                 VALUES (?1, 0, ?2, ?3, ?4, 'batch', 'queued', 1, ?5, ?6, 0)",
+                    printer_id, source, status, copies, settings_json, is_test, data_json)
+                 VALUES (?1, 0, ?2, ?3, ?4, 'batch', 'queued', 1, ?5, 0, ?6)",
                 rusqlite::params![
                     batch_id,
                     req.template_id,
@@ -144,7 +164,7 @@ pub fn create_batch(db: State<DbState>, req: CreateBatchRequest) -> AppResult<Ba
 
     tx.commit()?;
 
-    let batch = tx_guard_to_batch(&conn, batch_id)?;
+    let batch = tx_guard_to_batch(conn, batch_id)?;
     Ok(batch)
 }
 
@@ -174,7 +194,7 @@ pub fn list_batches(db: State<DbState>) -> AppResult<Vec<Batch>> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     let mut stmt = conn.prepare(
         "SELECT id, template_id, printer_id, total, done, failed, mode, status, created_at
@@ -205,9 +225,9 @@ pub fn get_batch(db: State<DbState>, id: i64) -> AppResult<Batch> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
-    tx_guard_to_batch(&conn, id).map_err(|_| AppError::NotFound(format!("Batch {} not found", id)))
+    tx_guard_to_batch(conn, id).map_err(|_| AppError::NotFound(format!("Batch {} not found", id)))
 }
 
 #[tauri::command]
@@ -215,8 +235,8 @@ pub fn cancel_batch(db: State<DbState>, id: i64) -> AppResult<()> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let mut conn = guard.connection()?;
-    let tx = conn.transaction()?;
+    let conn = guard.connection();
+    let tx = conn.unchecked_transaction()?;
 
     let n: i64 = tx.query_row("SELECT COUNT(*) FROM batches WHERE id = ?1", [id], |r| {
         r.get(0)
@@ -225,15 +245,20 @@ pub fn cancel_batch(db: State<DbState>, id: i64) -> AppResult<()> {
         return Err(AppError::NotFound(format!("Batch {} not found", id)));
     }
 
-    // Cancel the batch and every job that has not started yet.
-    tx.execute(
-        "UPDATE print_jobs SET status = 'cancelled'
-         WHERE batch_id = ?1 AND status = 'queued'",
+    // Cancel every job that has not started yet. A batch that already has
+    // a job in flight (`printing`) is cancellable too: its queued rows
+    // leave the queue, the running job ends on its own, and the batch keeps
+    // `cancelled` — the worker's counter update guards `status !=
+    // 'cancelled'`, so finished jobs cannot resurrect it.
+    let affected = tx.execute(
+        "UPDATE batches SET status = 'cancelled'
+         WHERE id = ?1 AND status IN ('queued', 'printing')",
         [id],
     )?;
 
-    let affected = tx.execute(
-        "UPDATE batches SET status = 'cancelled' WHERE id = ?1 AND status = 'queued'",
+    tx.execute(
+        "UPDATE print_jobs SET status = 'cancelled'
+         WHERE batch_id = ?1 AND status = 'queued'",
         [id],
     )?;
 
@@ -241,19 +266,19 @@ pub fn cancel_batch(db: State<DbState>, id: i64) -> AppResult<()> {
 
     if affected == 0 {
         return Err(AppError::Validation(
-            "Batch is not cancellable (already started or finished)".into(),
+            "Batch is not cancellable (already finished)".into(),
         ));
     }
     Ok(())
 }
 
 #[tauri::command]
-pub fn retry_batch(db: State<DbState>, id: i64) -> AppResult<()> {
+pub fn retry_batch(db: State<DbState>, queue: State<PrintQueue>, id: i64) -> AppResult<()> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let mut conn = guard.connection()?;
-    let tx = conn.transaction()?;
+    let conn = guard.connection();
+    let tx = conn.unchecked_transaction()?;
 
     let n: i64 = tx.query_row("SELECT COUNT(*) FROM batches WHERE id = ?1", [id], |r| {
         r.get(0)
@@ -266,7 +291,7 @@ pub fn retry_batch(db: State<DbState>, id: i64) -> AppResult<()> {
     tx.execute(
         "UPDATE print_jobs
          SET status = 'queued', error = NULL, started_at = NULL,
-             finished_at = NULL, duration_ms = NULL
+             finished_at = NULL, duration_ms = NULL, timings_json = NULL
          WHERE batch_id = ?1 AND status IN ('failed', 'cancelled')",
         [id],
     )?;
@@ -282,5 +307,8 @@ pub fn retry_batch(db: State<DbState>, id: i64) -> AppResult<()> {
     )?;
 
     tx.commit()?;
+
+    // The re-queued rows are `queued`; wake the worker that prints them (P3).
+    queue.kick();
     Ok(())
 }

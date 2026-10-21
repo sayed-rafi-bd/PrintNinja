@@ -37,6 +37,11 @@ export const STATUS = {
   // Printers
   online: { tone: "success", icon: Wifi, label: "Online" },
   offline: { tone: "danger", icon: WifiOff, label: "Offline" },
+  // Sync cache (section 6.9)
+  synced: { tone: "success", icon: CheckCircle2, label: "Synced" },
+  syncing: { tone: "info", icon: Loader2, label: "Syncing", spin: true },
+  pending: { tone: "warning", icon: Clock, label: "Pending" },
+  conflict: { tone: "danger", icon: XCircle, label: "Conflict" },
 } as const satisfies Record<
   string,
   { tone: StatusTone; icon: LucideIcon; label: string; spin?: boolean }
@@ -65,7 +70,12 @@ interface StatusBadgeProps {
 
 export function StatusBadge({ status, label, className }: StatusBadgeProps) {
   const { t } = useTranslation();
-  const def = STATUS[status] as { tone: StatusTone; icon: LucideIcon; label: string; spin?: boolean };
+  const def = STATUS[status] as {
+    tone: StatusTone;
+    icon: LucideIcon;
+    label: string;
+    spin?: boolean;
+  };
   const Icon = def.icon;
   return (
     <span
@@ -78,7 +88,10 @@ export function StatusBadge({ status, label, className }: StatusBadgeProps) {
     >
       <Icon
         aria-hidden="true"
-        className={cn("h-3.5 w-3.5 shrink-0", "spin" in def && def.spin && "motion-safe:animate-spin")}
+        className={cn(
+          "h-3.5 w-3.5 shrink-0",
+          "spin" in def && def.spin && "motion-safe:animate-spin",
+        )}
       />
       {label ?? t(`status.${status}`, { defaultValue: def.label })}
     </span>

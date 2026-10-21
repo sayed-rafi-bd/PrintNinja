@@ -35,6 +35,7 @@ export const DEFAULT_TEMPLATE_HTML = `<!DOCTYPE html>
     </div>
 
     <div class="border-t border-slate-300 pt-2 text-center">
+      {{barcode "code128" order.tracking width=70 text=false}}
       <p class="font-mono text-base font-bold tracking-widest">{{order.tracking}}</p>
       <p class="text-[9px] text-slate-400 mt-1">Tracking number</p>
     </div>

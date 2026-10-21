@@ -2,7 +2,12 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { ColumnDef } from "@tanstack/react-table";
 import "@/lib/i18n";
-import { STATUS, StatusBadge, JobStatusBadge, isStatusKey } from "@/components/StatusBadge";
+import {
+  STATUS,
+  StatusBadge,
+  JobStatusBadge,
+  isStatusKey,
+} from "@/components/StatusBadge";
 import { PageHeader } from "@/components/PageHeader";
 import { DataTable } from "@/components/DataTable";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -48,7 +53,11 @@ describe("PageHeader", () => {
   });
 });
 
-interface Row { id: string; name: string; n: number }
+interface Row {
+  id: string;
+  name: string;
+  n: number;
+}
 const columns: ColumnDef<Row>[] = [
   { accessorKey: "name", header: "Name", enableSorting: true },
   { accessorKey: "n", header: "Count", enableSorting: true },
@@ -66,7 +75,14 @@ describe("DataTable", () => {
   });
 
   it("shows an empty state with guidance", () => {
-    render(<DataTable caption="Jobs" columns={columns} data={[]} empty={{ title: "No jobs yet", description: "Print something." }} />);
+    render(
+      <DataTable
+        caption="Jobs"
+        columns={columns}
+        data={[]}
+        empty={{ title: "No jobs yet", description: "Print something." }}
+      />,
+    );
     expect(screen.getByText("No jobs yet")).toBeInTheDocument();
     expect(screen.getByText("Print something.")).toBeInTheDocument();
   });
@@ -79,14 +95,28 @@ describe("DataTable", () => {
   it("sorts when a sortable header is clicked and reports aria-sort", () => {
     render(<DataTable caption="Jobs" columns={columns} data={rows} />);
     fireEvent.click(screen.getByRole("button", { name: /Name/ }));
-    const cells = screen.getAllByRole("row").slice(1).map((r) => r.textContent);
+    const cells = screen
+      .getAllByRole("row")
+      .slice(1)
+      .map((r) => r.textContent);
     expect(cells[0]).toContain("Alpha");
-    expect(screen.getByRole("columnheader", { name: /Name/ })).toHaveAttribute("aria-sort", "ascending");
+    expect(screen.getByRole("columnheader", { name: /Name/ })).toHaveAttribute(
+      "aria-sort",
+      "ascending",
+    );
   });
 
   it("activates rows by click, Enter, and moves focus with arrow keys", () => {
     const onActivate = vi.fn();
-    render(<DataTable caption="Jobs" columns={columns} data={rows} getRowId={(r) => r.id} onRowActivate={onActivate} />);
+    render(
+      <DataTable
+        caption="Jobs"
+        columns={columns}
+        data={rows}
+        getRowId={(r) => r.id}
+        onRowActivate={onActivate}
+      />,
+    );
     const [, first, second] = screen.getAllByRole("row");
     first.focus();
     fireEvent.keyDown(first, { key: "ArrowDown" });

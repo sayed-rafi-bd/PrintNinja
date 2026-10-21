@@ -1,10 +1,21 @@
 import { Badge } from "@/components/ui/badge";
 import { BARCODE_TYPES } from "@/lib/utils/barcode";
 
-export const HELPERS = ["currency", "date", "upper", "lower", "padLeft", "number"];
+export const HELPERS = [
+  "currency",
+  "date",
+  "upper",
+  "lower",
+  "padLeft",
+  "number",
+  "barcode",
+  "qrcode",
+];
 
 /** What clicking a helper inserts: `{{currency }}`, with the cursor placed before the closing braces. */
 export function helperSnippet(helper: string): { text: string; back: number } {
+  // A barcode needs its symbology first, so start the call with one.
+  if (helper === "barcode") return { text: `{{barcode "code128" }}`, back: 2 };
   return { text: `{{${helper} }}`, back: 2 };
 }
 
@@ -18,7 +29,9 @@ export function HelpersPanel({ onInsert }: Props) {
   return (
     <div className="space-y-2">
       <div className="text-xs text-muted-foreground">
-        {onInsert ? "Click a helper to insert it at the cursor:" : "Available helpers:"}
+        {onInsert
+          ? "Click a helper to insert it at the cursor:"
+          : "Available helpers:"}
       </div>
       <div className="flex flex-wrap gap-1">
         {HELPERS.map((helper) =>
@@ -34,7 +47,10 @@ export function HelpersPanel({ onInsert }: Props) {
               }}
               className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <Badge variant="outline" className="cursor-pointer font-mono text-xs hover:bg-muted">
+              <Badge
+                variant="outline"
+                className="cursor-pointer font-mono text-xs hover:bg-muted"
+              >
                 {`{{${helper}}}`}
               </Badge>
             </button>
@@ -52,7 +68,9 @@ export function HelpersPanel({ onInsert }: Props) {
             {bc.label}
           </Badge>
         ))}
-        <Badge variant="outline" className="text-xs">+{BARCODE_TYPES.length - 5} more</Badge>
+        <Badge variant="outline" className="text-xs">
+          +{BARCODE_TYPES.length - 5} more
+        </Badge>
       </div>
     </div>
   );

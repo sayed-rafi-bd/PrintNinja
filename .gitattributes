@@ -1,0 +1,6 @@
+# Shell scripts and Docker files must stay LF or the container fails with
+# "exec ./docker-entrypoint.sh: no such file or directory".
+*.sh       text eol=lf
+Dockerfile text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf

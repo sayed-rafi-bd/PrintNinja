@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { StageTimings } from "@/lib/agent/types";
 
 export interface PrinterProfile {
   id: number;
@@ -42,6 +43,7 @@ interface PrintState {
   status: "idle" | "queued" | "printing" | "success" | "failed";
   error: string;
   durationMs: number;
+  timings: StageTimings | null;
   batchMode: boolean;
   batchData: string;
   batchMode2: "single_job" | "per_record";
@@ -55,7 +57,9 @@ interface PrintState {
   setMarginRight: (v: number) => void;
   setMarginBottom: (v: number) => void;
   setMarginLeft: (v: number) => void;
-  setFitMode: (v: "actual" | "fit-width" | "fit-page" | "shrink" | "fill") => void;
+  setFitMode: (
+    v: "actual" | "fit-width" | "fit-page" | "shrink" | "fill",
+  ) => void;
   setCopies: (v: number) => void;
   setUseTestData: (v: boolean) => void;
   setSelectedDataset: (v: string) => void;
@@ -64,6 +68,7 @@ interface PrintState {
   setStatus: (v: "idle" | "queued" | "printing" | "success" | "failed") => void;
   setError: (v: string) => void;
   setDurationMs: (v: number) => void;
+  setTimings: (v: StageTimings | null) => void;
   setBatchMode: (v: boolean) => void;
   setBatchData: (v: string) => void;
   setBatchMode2: (v: "single_job" | "per_record") => void;
@@ -88,6 +93,7 @@ export const usePrintStore = create<PrintState>((set) => ({
   status: "idle",
   error: "",
   durationMs: 0,
+  timings: null,
   batchMode: false,
   batchData: "",
   batchMode2: "per_record",
@@ -102,7 +108,8 @@ export const usePrintStore = create<PrintState>((set) => ({
   setMarginBottom: (marginBottom) => set({ marginBottom }),
   setMarginLeft: (marginLeft) => set({ marginLeft }),
   setFitMode: (fitMode) => set({ fitMode }),
-  setCopies: (copies) => set({ copies: Math.max(1, Math.floor(Number(copies) || 1)) }),
+  setCopies: (copies) =>
+    set({ copies: Math.max(1, Math.floor(Number(copies) || 1)) }),
   setUseTestData: (useTestData) => set({ useTestData }),
   setSelectedDataset: (selectedDataset) => set({ selectedDataset }),
   setPageRange: (pageRange) => set({ pageRange }),
@@ -110,6 +117,7 @@ export const usePrintStore = create<PrintState>((set) => ({
   setStatus: (status) => set({ status }),
   setError: (error) => set({ error }),
   setDurationMs: (durationMs) => set({ durationMs }),
+  setTimings: (timings) => set({ timings }),
   setBatchMode: (batchMode) => set({ batchMode }),
   setBatchData: (batchData) => set({ batchData }),
   setBatchMode2: (batchMode2) => set({ batchMode2 }),

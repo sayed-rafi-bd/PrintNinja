@@ -14,7 +14,6 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
@@ -29,6 +28,10 @@ async-trait = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 base64 = "0.22"
 handlebars = "6"
+# `{{barcode}}` / `{{qrcode}}` template helpers. Encoders only: the SVG is
+# drawn in render/barcode.rs, so neither crate's image/SVG features are needed.
+barcoders = { version = "2", default-features = false }
+qrcode = { version = "0.14", default-features = false }
 axum = { version = "0.8", features = ["ws"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
@@ -37,6 +40,16 @@ sha2 = "0.10"
 urlencoding = "2"
 hex = "0.4"
 rand = "0.8"
+# Persistent headless Edge driven over the DevTools protocol (render/cdp.rs).
+# The `handshake` feature is what `client_async` needs; axum's `ws` already
+# enables it, so this adds no crates. No TLS: the debugging port is plain
+# ws:// on 127.0.0.1.
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+# Screenshot decode for the raster print path (P4). Only referenced from
+# cfg(windows) code — Edge's PNG output is decoded there; Linux/CI compile
+# it but the call site lives behind the Windows cfg.
+png = "0.17"
 
 [features]
 # Optional hardware backends gated in the Windows transports — declared so

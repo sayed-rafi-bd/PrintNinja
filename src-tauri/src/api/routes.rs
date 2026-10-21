@@ -98,18 +98,44 @@ async fn auth_middleware_inner(
 
     // All DB access happens in a sync helper so the MutexGuard is never
     // held across an await point.
-    let decision = check_auth(&auth, &token, headers.get("idempotency-key"));
+
+    // GET reads; every other method changes what gets printed — a print,
+    // a batch, a re-queue or a cancel — so it needs the `print` scope.
+    let required_scope = if request.method() == axum::http::Method::GET {
+        "read"
+    } else {
+        "print"
+    };
+    // The peer address is inserted by the serve call's
+    // `into_make_service_with_connect_info`. Absent means the listener
+    // lost it — the allowlist treats that as a refusal, never a pass.
+    let peer = request
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|c| c.0);
+
+    let decision = check_auth(
+        &auth,
+        &token,
+        required_scope,
+        peer,
+        headers.get("idempotency-key"),
+    );
 
     match decision {
         AuthDecision::Allow => next.run(request).await,
-        AuthDecision::Duplicate => (
+        AuthDecision::Duplicate(job_id) => (
             StatusCode::OK,
             Json(json!({
                 "status": "duplicate",
-                "message": "idempotency key already used; job not created"
+                "message": "idempotency key already used; job not created",
+                "job_id": job_id.to_string()
             })),
         )
             .into_response(),
+        AuthDecision::Forbidden(reason) => {
+            (StatusCode::FORBIDDEN, Json(json!({ "error": reason }))).into_response()
+        }
         AuthDecision::Unauthorized => (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "error": "invalid API key" })),
@@ -126,44 +152,88 @@ async fn auth_middleware_inner(
 /// Outcome of the auth check.
 enum AuthDecision {
     Allow,
-    Duplicate,
+    /// Key already taken; carries the job that owns it.
+    Duplicate(i64),
+    /// The key verified but is refused here: wrong scope for this route,
+    /// or its IP allowlist does not include the peer.
+    Forbidden(String),
     Unauthorized,
     Unavailable,
 }
 
-/// Synchronous auth + idempotency check. Keeping this non-async guarantees
+/// Synchronous auth + enforcement. Keeping this non-async guarantees
 /// the DB mutex is released before the handler future is awaited.
+///
+/// The order is the security: the key verifies first, then its IP
+/// allowlist, then the scope for this route, and only then the idempotency
+/// replay fast path — an unauthenticated or under-scoped request must
+/// never be answered with the duplicate's 200, which would leak that a
+/// key exists and is in use.
 fn check_auth(
     auth: &AuthCtx,
     token: &str,
+    required_scope: &str,
+    peer: Option<std::net::SocketAddr>,
     idempotency: Option<&axum::http::HeaderValue>,
 ) -> AuthDecision {
     let Ok(guard) = auth.db.lock() else {
         return AuthDecision::Unavailable;
     };
-    let Ok(conn) = guard.connection() else {
-        return AuthDecision::Unavailable;
+    let conn = guard.connection();
+
+    let Some(key) = crate::commands::api::verify_stored_key(conn, token) else {
+        return AuthDecision::Unauthorized;
     };
 
-    // Idempotency replay must not print twice (PLANNING.md 7.1).
-    if let Some(key) = idempotency.and_then(|v| v.to_str().ok()) {
-        let existing: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM print_jobs WHERE idempotency_key = ?1",
-                [key],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
-        if existing > 0 {
-            return AuthDecision::Duplicate;
+    // `allowed_ips` is an allowlist when configured (comma list or JSON
+    // array of exact peer-IP strings, e.g. `203.0.113.9`). Empty — which
+    // is every key the app creates — means no restriction.
+    if !key.allowed_ips.is_empty() {
+        match peer {
+            Some(addr)
+                if key
+                    .allowed_ips
+                    .iter()
+                    .any(|ip| ip == &addr.ip().to_string()) => {}
+            Some(addr) => {
+                return AuthDecision::Forbidden(format!("key is not allowed from {}", addr.ip()))
+            }
+            None => {
+                return AuthDecision::Forbidden(
+                    "peer address unknown; this key's IP allowlist applies".into(),
+                )
+            }
         }
     }
 
-    if crate::commands::api::verify_stored_key(&conn, token) {
-        AuthDecision::Allow
-    } else {
-        AuthDecision::Unauthorized
+    // The default key holds `print,read`; a hand-set key may hold either.
+    if !key.check_scope(required_scope) {
+        return AuthDecision::Forbidden(format!("key lacks scope '{required_scope}'"));
     }
+
+    // Idempotency replay must not print twice (PLANNING.md 7.1). A fast
+    // path only — the atomic reservation is the unique index on
+    // `idempotency_key` hit at begin_job (P12).
+    if let Some(key) = idempotency.and_then(|v| v.to_str().ok()) {
+        let existing: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM print_jobs WHERE idempotency_key = ?1",
+                [key],
+                |r| r.get(0),
+            )
+            .ok();
+        if let Some(id) = existing {
+            return AuthDecision::Duplicate(id);
+        }
+    }
+
+    // The key authenticated an allowed request: record the use (P12).
+    let _ = conn.execute(
+        "UPDATE api_clients SET last_used_at = datetime('now') WHERE id = ?1",
+        [key.id],
+    );
+
+    AuthDecision::Allow
 }
 
 /// State threaded into the auth middleware.
@@ -187,7 +257,7 @@ async fn health() -> Json<Value> {
 async fn list_printers(State(state): State<ApiState>) -> Result<Json<Value>, ApiRejection> {
     let db = state.db;
     let guard = db.lock().map_err(ApiRejection::from)?;
-    let conn = guard.connection().map_err(ApiRejection::from)?;
+    let conn = guard.connection();
 
     let mut stmt = conn
         .prepare("SELECT id, name, type, address, language FROM printers ORDER BY name")
@@ -214,13 +284,13 @@ async fn list_printers(State(state): State<ApiState>) -> Result<Json<Value>, Api
 async fn list_templates(State(state): State<ApiState>) -> Result<Json<Value>, ApiRejection> {
     let db = state.db;
     let guard = db.lock().map_err(ApiRejection::from)?;
-    let conn = guard.connection().map_err(ApiRejection::from)?;
+    let conn = guard.connection();
 
     let mut stmt = conn
         .prepare(
             "SELECT t.id, t.name, t.page_w_mm, t.page_h_mm, t.orientation,
                     (SELECT COUNT(*) FROM template_versions v WHERE v.template_id = t.id)
-             FROM templates t ORDER BY t.name",
+             FROM templates t WHERE t.sync_state <> 'deleted_pending' ORDER BY t.name",
         )
         .map_err(ApiRejection::from)?;
 
@@ -251,8 +321,10 @@ struct PrintJobRequest {
     data_url: Option<String>,
     settings: Option<Value>,
     test: Option<bool>,
-    #[allow(dead_code)]
+    /// Refused with 400 in `print_job` — never silently accepted (P12).
     callback_url: Option<String>,
+    /// Body-level key, currently unread: the API takes the key from the
+    /// `Idempotency-Key` header. Kept for wire compatibility.
     #[allow(dead_code)]
     idempotency_key: Option<String>,
 }
@@ -268,6 +340,17 @@ async fn print_job(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
+    // `callback_url` was accepted and ignored (P12): there is no callback
+    // runner, so a caller that relied on one would never learn the outcome.
+    // Refused before any DB work — a request the server will not honour
+    // creates no job.
+    if let Some(callback) = &req.callback_url {
+        return Err(ApiRejection::BadRequest(format!(
+            "`callback_url` is not supported (got `{callback}`); \
+             poll `GET /v1/jobs/{{id}}` for the outcome"
+        )));
+    }
+
     let settings = req.settings.unwrap_or_else(|| json!({}));
     let copies = settings
         .get("copies")
@@ -281,12 +364,12 @@ async fn print_job(
     // command, and the pipeline takes the lock again for its history write.
     let (template_id, version_id) = {
         let guard = db.lock().map_err(ApiRejection::from)?;
-        let conn = guard.connection().map_err(ApiRejection::from)?;
+        let conn = guard.connection();
 
         let template_id: Option<i64> = match &req.template {
             Some(name) if !name.is_empty() => Some(
                 conn.query_row(
-                    "SELECT id FROM templates WHERE name = ?1 COLLATE NOCASE",
+                    "SELECT id FROM templates WHERE name = ?1 COLLATE NOCASE AND sync_state <> 'deleted_pending'",
                     [name],
                     |r| r.get(0),
                 )
@@ -357,8 +440,8 @@ async fn print_job(
         data_url: req.data_url.clone(),
         test: req.test,
         source: Some("api".into()),
-        // Persisted by `record_job`; the replay guard in `check_auth`
-        // looks for an existing row with this key.
+        // Recorded by the begin_job INSERT under a unique index; `check_auth`
+        // only fast-paths an existing row with this key.
         idempotency_key,
     };
 
@@ -379,6 +462,18 @@ async fn print_job(
             let err = res.error.unwrap_or_else(|| "print failed".into());
             Err(ApiRejection::from(crate::error::AppError::Internal(err)))
         }
+        // Lost the insert race for this key: the unique index recorded the
+        // winner's row before either request printed, so report that job
+        // instead of printing again (P12). Same body as the middleware's
+        // fast-path replay above.
+        Err(crate::error::AppError::DuplicateJob(id)) => Ok((
+            StatusCode::OK,
+            Json(json!({
+                "status": "duplicate",
+                "message": "idempotency key already used; job not created",
+                "job_id": id.to_string()
+            })),
+        )),
         Err(e) => Err(ApiRejection::from(e)),
     }
 }
@@ -401,14 +496,34 @@ async fn batch_print(
         .as_array()
         .ok_or_else(|| ApiRejection::BadRequest("data must be a JSON array".into()))?;
 
+    // Validate the request shape before touching the database (P3): an
+    // empty batch queues nothing to print, and a 5,000-record cap is what
+    // the IPC batch command enforces too.
+    if records.is_empty() {
+        return Err(ApiRejection::BadRequest(
+            "data must contain at least one record".into(),
+        ));
+    }
+    if records.len() > crate::commands::batch::DEFAULT_MAX_RECORDS {
+        return Err(ApiRejection::BadRequest(format!(
+            "batch too large: {} records (max {})",
+            records.len(),
+            crate::commands::batch::DEFAULT_MAX_RECORDS
+        )));
+    }
+    let mode = req.mode.unwrap_or_else(|| "per_record".into());
+    if !["single_job", "per_record"].contains(&mode.as_str()) {
+        return Err(ApiRejection::BadRequest(format!("invalid mode '{}'", mode)));
+    }
+
     let guard = db.lock().map_err(ApiRejection::from)?;
-    let mut conn = guard.connection().map_err(ApiRejection::from)?;
-    let tx = conn.transaction().map_err(ApiRejection::from)?;
+    let conn = guard.connection();
+    let tx = conn.unchecked_transaction().map_err(ApiRejection::from)?;
 
     let template_id: i64 = match &req.template {
         Some(n) if !n.is_empty() => tx
             .query_row(
-                "SELECT id FROM templates WHERE name = ?1 COLLATE NOCASE",
+                "SELECT id FROM templates WHERE name = ?1 COLLATE NOCASE AND sync_state <> 'deleted_pending'",
                 [n],
                 |r| r.get(0),
             )
@@ -423,11 +538,6 @@ async fn batch_print(
             |r| r.get(0),
         )
         .map_err(|_| ApiRejection::NotFound(format!("Printer '{}' not found", req.printer)))?;
-
-    let mode = req.mode.unwrap_or_else(|| "per_record".into());
-    if !["single_job", "per_record"].contains(&mode.as_str()) {
-        return Err(ApiRejection::BadRequest(format!("invalid mode '{}'", mode)));
-    }
 
     tx.execute(
         "INSERT INTO batches (template_id, printer_id, total, mode, status)
@@ -447,22 +557,33 @@ async fn batch_print(
         .flatten();
 
     if mode == "per_record" {
-        for (i, _) in records.iter().enumerate() {
+        // Each record's own payload rides on its row in `data_json` —
+        // without it the worker would have nothing to render (P3).
+        for (i, record) in records.iter().enumerate() {
             tx.execute(
                 "INSERT INTO print_jobs
                    (batch_id, record_index, template_id, template_version_id,
-                    printer_id, source, status, copies, is_test)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'api', 'queued', 1, 0)",
-                rusqlite::params![batch_id, i as i64, template_id, version_id, printer_id],
+                    printer_id, source, status, copies, is_test, data_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'api', 'queued', 1, 0, ?6)",
+                rusqlite::params![
+                    batch_id,
+                    i as i64,
+                    template_id,
+                    version_id,
+                    printer_id,
+                    record.to_string()
+                ],
             )
             .map_err(ApiRejection::from)?;
         }
     } else {
+        // Single job: the whole array is one row's payload, rendered once
+        // by the template as an array context.
         tx.execute(
             "INSERT INTO print_jobs
                (batch_id, record_index, template_id, template_version_id,
-                printer_id, source, status, copies, rendered_html, is_test)
-             VALUES (?1, 0, ?2, ?3, ?4, 'api', 'queued', 1, ?5, 0)",
+                printer_id, source, status, copies, is_test, data_json)
+             VALUES (?1, 0, ?2, ?3, ?4, 'api', 'queued', 1, 0, ?5)",
             rusqlite::params![
                 batch_id,
                 template_id,
@@ -475,6 +596,10 @@ async fn batch_print(
     }
 
     tx.commit().map_err(ApiRejection::from)?;
+    drop(guard);
+
+    // The rows are `queued`; wake the worker that prints them (P3).
+    state.queue.kick();
 
     Ok((
         StatusCode::ACCEPTED,
@@ -493,7 +618,7 @@ async fn get_job(
 ) -> Result<Json<Value>, ApiRejection> {
     let db = state.db.clone();
     let guard = db.lock().map_err(ApiRejection::from)?;
-    let conn = guard.connection().map_err(ApiRejection::from)?;
+    let conn = guard.connection();
 
     let mut stmt = conn
         .prepare(
@@ -522,7 +647,7 @@ async fn get_job(
 async fn list_jobs(State(state): State<ApiState>) -> Result<Json<Value>, ApiRejection> {
     let db = state.db;
     let guard = db.lock().map_err(ApiRejection::from)?;
-    let conn = guard.connection().map_err(ApiRejection::from)?;
+    let conn = guard.connection();
 
     let mut stmt = conn
         .prepare(
@@ -554,20 +679,37 @@ async fn retry_job(
 ) -> Result<Json<Value>, ApiRejection> {
     let db = state.db.clone();
     let guard = db.lock().map_err(ApiRejection::from)?;
-    let conn = guard.connection().map_err(ApiRejection::from)?;
+    let conn = guard.connection();
 
+    // Only a terminal row may be re-queued: re-queuing a `printing` row
+    // would let the worker claim it while the direct pipeline still runs
+    // it, and re-queuing a `queued` row would print it twice (P3).
     let affected = conn
         .execute(
             "UPDATE print_jobs SET status='queued', error=NULL, started_at=NULL,
-                    finished_at=NULL, duration_ms=NULL
-             WHERE id = ?1",
+                    finished_at=NULL, duration_ms=NULL, timings_json=NULL
+             WHERE id = ?1 AND status IN ('failed', 'cancelled')",
             [id],
         )
         .map_err(ApiRejection::from)?;
 
     if affected == 0 {
-        return Err(ApiRejection::NotFound(format!("Job {} not found", id)));
+        let exists: i64 = conn
+            .query_row("SELECT COUNT(*) FROM print_jobs WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .unwrap_or(0);
+        if exists == 0 {
+            return Err(ApiRejection::NotFound(format!("Job {} not found", id)));
+        }
+        return Err(ApiRejection::BadRequest(
+            "Only a failed or cancelled job can be retried; a finished job reprints instead".into(),
+        ));
     }
+    drop(guard);
+
+    // The row is `queued` again; wake the worker that prints it (P3).
+    state.queue.kick();
 
     Ok(Json(
         json!({ "job_id": id.to_string(), "status": "queued" }),
@@ -580,7 +722,7 @@ async fn cancel_job(
 ) -> Result<StatusCode, ApiRejection> {
     let db = state.db.clone();
     let guard = db.lock().map_err(ApiRejection::from)?;
-    let conn = guard.connection().map_err(ApiRejection::from)?;
+    let conn = guard.connection();
 
     let affected = conn
         .execute(

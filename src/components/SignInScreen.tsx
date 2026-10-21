@@ -2,7 +2,12 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AppLogo } from "@/components/AppLogo";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { usePrefs } from "@/lib/prefs/PrefsProvider";
@@ -21,7 +26,11 @@ interface SignInScreenProps {
 const HANDLE_RE = /^[\p{L}\p{N}_-]{1,32}$/u;
 
 /** Full-screen sign-in and register form, shown before the app when there is no valid session. */
-export function SignInScreen({ initialUrl, notice, onSignedIn }: SignInScreenProps) {
+export function SignInScreen({
+  initialUrl,
+  notice,
+  onSignedIn,
+}: SignInScreenProps) {
   const { t } = useTranslation();
   const { appName, logo } = usePrefs();
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -50,7 +59,9 @@ export function SignInScreen({ initialUrl, notice, onSignedIn }: SignInScreenPro
     setBusy(true);
     try {
       await share.setServiceUrl(address);
-      const res = registering ? await share.register(name, password) : await share.login(name, password);
+      const res = registering
+        ? await share.register(name, password)
+        : await share.login(name, password);
       setPassword("");
       onSignedIn(res.user.handle);
     } catch (err) {
@@ -69,19 +80,27 @@ export function SignInScreen({ initialUrl, notice, onSignedIn }: SignInScreenPro
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background p-4">
+    <main
+      data-testid="signin-form"
+      className="flex min-h-screen items-center justify-center bg-background p-4"
+    >
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-3">
           <AppLogo src={logo} className="h-10 w-10" />
           <h1 className="text-xl font-semibold leading-none tracking-tight">
-            {registering ? t("auth.register_title") : t("auth.sign_in_title", { appName })}
+            {registering
+              ? t("auth.register_title")
+              : t("auth.sign_in_title", { appName })}
           </h1>
           <CardDescription>{t("auth.sign_in_description")}</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={submit} className="space-y-4" noValidate>
             {notice && (
-              <p role="status" className="rounded-md border border-border bg-muted p-3 text-sm">
+              <p
+                role="status"
+                className="rounded-md border border-border bg-muted p-3 text-sm"
+              >
                 {notice}
               </p>
             )}
@@ -90,6 +109,7 @@ export function SignInScreen({ initialUrl, notice, onSignedIn }: SignInScreenPro
               <Label htmlFor="auth-url">{t("auth.server_address")}</Label>
               <Input
                 id="auth-url"
+                data-testid="auth-url"
                 type="url"
                 inputMode="url"
                 autoComplete="url"
@@ -109,6 +129,7 @@ export function SignInScreen({ initialUrl, notice, onSignedIn }: SignInScreenPro
               <Label htmlFor="auth-handle">{t("auth.handle")}</Label>
               <Input
                 id="auth-handle"
+                data-testid="auth-handle"
                 autoComplete="username"
                 autoCapitalize="none"
                 spellCheck={false}
@@ -123,15 +144,21 @@ export function SignInScreen({ initialUrl, notice, onSignedIn }: SignInScreenPro
               <Label htmlFor="auth-password">{t("auth.password")}</Label>
               <Input
                 id="auth-password"
+                data-testid="auth-password"
                 type="password"
                 autoComplete={registering ? "new-password" : "current-password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                aria-describedby={registering ? "auth-password-hint" : undefined}
+                aria-describedby={
+                  registering ? "auth-password-hint" : undefined
+                }
                 disabled={busy}
               />
               {registering && (
-                <p id="auth-password-hint" className="text-xs text-muted-foreground">
+                <p
+                  id="auth-password-hint"
+                  className="text-xs text-muted-foreground"
+                >
                   {t("auth.password_hint")}
                 </p>
               )}
@@ -145,11 +172,23 @@ export function SignInScreen({ initialUrl, notice, onSignedIn }: SignInScreenPro
 
             <Button type="submit" className="w-full" disabled={busy}>
               {registering
-                ? busy ? t("auth.registering") : t("auth.register")
-                : busy ? t("auth.signing_in") : t("auth.sign_in")}
+                ? busy
+                  ? t("auth.registering")
+                  : t("auth.register")
+                : busy
+                  ? t("auth.signing_in")
+                  : t("auth.sign_in")}
             </Button>
-            <Button type="button" variant="link" className="w-full" onClick={toggleMode} disabled={busy}>
-              {registering ? t("auth.switch_to_sign_in") : t("auth.switch_to_register")}
+            <Button
+              type="button"
+              variant="link"
+              className="w-full"
+              onClick={toggleMode}
+              disabled={busy}
+            >
+              {registering
+                ? t("auth.switch_to_sign_in")
+                : t("auth.switch_to_register")}
             </Button>
           </form>
         </CardContent>

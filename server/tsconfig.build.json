@@ -1,0 +1,12 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": false,
+		"outDir": "dist",
+		"sourceMap": false,
+		// The generated Prisma client is already JavaScript; pass it
+		// through to dist instead of compiling it.
+		"allowJs": true
+	},
+	"include": ["src"]
+}

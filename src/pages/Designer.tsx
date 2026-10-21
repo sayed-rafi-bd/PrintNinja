@@ -1,22 +1,47 @@
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/PageHeader";
-import { ControlsAccordion } from "@/components/designer/ControlsAccordion";
+import {
+  ControlsAccordion,
+  type VersionRow,
+} from "@/components/designer/ControlsAccordion";
 import { CanvasWorkspace } from "@/components/designer/CanvasWorkspace";
-import { CodeEditors, EditorPane, type EditorPaneHandle } from "@/components/designer/EditorPane";
-import { ControlsRail, type ControlsSection } from "@/components/designer/ControlsRail";
-import { LayoutToggle, isDesignerLayout, type DesignerLayout } from "@/components/designer/LayoutToggle";
+import {
+  CodeEditors,
+  EditorPane,
+  type EditorPaneHandle,
+} from "@/components/designer/EditorPane";
+import {
+  ControlsRail,
+  type ControlsSection,
+} from "@/components/designer/ControlsRail";
+import {
+  LayoutToggle,
+  isDesignerLayout,
+  type DesignerLayout,
+} from "@/components/designer/LayoutToggle";
 import { DesignerActions } from "@/components/designer/DesignerActions";
 import { DesignerToolbar } from "@/components/designer/DesignerToolbar";
 import { HelpersPanel } from "@/components/designer/HelpersPanel";
 import { ReadmePanel } from "@/components/designer/ReadmePanel";
-import { SampleDataPanel, type Dataset } from "@/components/designer/SampleDataPanel";
+import {
+  SampleDataPanel,
+  type Dataset,
+} from "@/components/designer/SampleDataPanel";
 import { TemplateSyncBar } from "@/components/designer/TemplateSyncBar";
 import { ClassWarnings } from "@/components/designer/ClassWarnings";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { DESKTOP_QUERY, WIDE_QUERY, useMediaQuery } from "@/lib/hooks/useMediaQuery";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
+import {
+  DESKTOP_QUERY,
+  WIDE_QUERY,
+  useMediaQuery,
+} from "@/lib/hooks/useMediaQuery";
 import { usePersistentState } from "@/lib/hooks/usePersistentState";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@/lib/invoke";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { agent } from "@/lib/agent/commands";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,25 +62,40 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import { PanelLeftClose, QrCode } from "lucide-react";
-import { useTemplateStore, type Template, type TemplateVersion } from "@/lib/store/templateStore";
+import {
+  useTemplateStore,
+  type Template,
+  type TemplateVersion,
+} from "@/lib/store/templateStore";
 import { toast } from "sonner";
 import CodeMirror from "@uiw/react-codemirror";
 import { html } from "@codemirror/lang-html";
-import { BARCODE_TYPES, validateBarcode, buildBarcodeHtml } from "@/lib/utils/barcode";
-import { DEFAULT_TEMPLATE_HTML, DEFAULT_TEMPLATE_CSS, DEFAULT_MOCK_DATA, STARTER_TEMPLATES } from "@/lib/templates/defaultTemplate";
+import {
+  BARCODE_TYPES,
+  buildBarcodeSnippet,
+  isHelperSymbology,
+} from "@/lib/utils/barcode";
+import {
+  DEFAULT_TEMPLATE_HTML,
+  DEFAULT_TEMPLATE_CSS,
+  DEFAULT_MOCK_DATA,
+  STARTER_TEMPLATES,
+} from "@/lib/templates/defaultTemplate";
 import { compiledFields } from "@/lib/templates/compileTemplateCss";
 import { useCompiledCss } from "@/lib/templates/useCompiledCss";
 import { formatCss, formatHtml } from "@/lib/utils/format";
 import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
 import * as share from "@/lib/share/client";
+import { notifyLocalEdit, syncNow } from "@/lib/sync/useSyncStatus";
 import {
   getLocalTemplate,
   isReadOnly,
-  refreshFromServer,
   saveToServer,
   type SaveOptions,
 } from "@/lib/share/sync";
+import type { TemplateRow } from "@/lib/agent/types";
 
 const PAGE_PRESETS = [
   { label: "A4", width: 210, height: 297 },
@@ -63,39 +103,52 @@ const PAGE_PRESETS = [
   { label: "Letter", width: 216, height: 279 },
   { label: "80mm Roll", width: 80, height: 200 },
   { label: "58mm Roll", width: 58, height: 200 },
-  { label: "4x6 Label", width: 102, height:152 },
+  { label: "4x6 Label", width: 102, height: 152 },
 ];
 
 /** Which sync action is running, so only its button says so. */
-type SyncAction = "save" | "refresh" | "publish" | "unpublish";
+type SyncAction = "save" | "publish" | "unpublish" | "sync";
 
 export function DesignerPage() {
   const { t } = useTranslation();
   const store = useTemplateStore();
-  const [versions, setVersions] = useState<TemplateVersion[]>([]);
+  const [versions, setVersions] = useState<VersionRow[]>([]);
   const [showVersionDialog, setShowVersionDialog] = useState(false);
   const [versionLabel, setVersionLabel] = useState("");
   const [versionNote, setVersionNote] = useState("");
   const [showBarcodeDialog, setShowBarcodeDialog] = useState(false);
   const [barcodeType, setBarcodeType] = useState("code128");
   const [barcodeValue, setBarcodeValue] = useState("");
+  // On: the value is a data field (order.id) read at print time. Off: fixed text.
+  const [barcodeFromData, setBarcodeFromData] = useState(true);
   const [barcodeError, setBarcodeError] = useState<string | null>(null);
   const [showNewTemplateDialog, setShowNewTemplateDialog] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState("");
   const [htmlCode, setHtmlCode] = useState(DEFAULT_TEMPLATE_HTML);
   const [cssCode, setCssCode] = useState(DEFAULT_TEMPLATE_CSS);
   const [templateName, setTemplateName] = useState(STARTER_TEMPLATES[0].name);
-  const [pageWidth, setPageWidth] = useState(STARTER_TEMPLATES[0]?.page_w_mm ?? 80);
-  const [pageHeight, setPageHeight] = useState(STARTER_TEMPLATES[0]?.page_h_mm ?? 200);
-  const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait");
+  const [pageWidth, setPageWidth] = useState(
+    STARTER_TEMPLATES[0]?.page_w_mm ?? 80,
+  );
+  const [pageHeight, setPageHeight] = useState(
+    STARTER_TEMPLATES[0]?.page_h_mm ?? 200,
+  );
+  const [orientation, setOrientation] = useState<"portrait" | "landscape">(
+    "portrait",
+  );
   // Which tab is open on a phone. On desktop the canvas and editor are always both on screen.
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   // Desktop workspace preferences, remembered across launches.
-  const [layout, setLayout] = usePersistentState<DesignerLayout>("printninja.designer.layout", "side", isDesignerLayout);
+  const [layout, setLayout] = usePersistentState<DesignerLayout>(
+    "printninja.designer.layout",
+    "side",
+    isDesignerLayout,
+  );
   const [openSections, setOpenSections] = usePersistentState<string[]>(
     "printninja.designer.openSections",
     ["page"],
-    (v): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string"),
+    (v): v is string[] =>
+      Array.isArray(v) && v.every((x) => typeof x === "string"),
   );
   // Below ~1440 px the controls column shrinks to an icon rail. Crossing that
   // width in either direction resets it; the person can still toggle it by hand.
@@ -112,7 +165,11 @@ export function DesignerPage() {
     }
   }, [layout]);
   const openControlsSection = (section: ControlsSection) => {
-    setOpenSections(openSections.includes(section) ? openSections : [...openSections, section]);
+    setOpenSections(
+      openSections.includes(section)
+        ? openSections
+        : [...openSections, section],
+    );
     setControlsExpanded(true);
   };
   const [activeTab, setActiveTab] = useState("canvas");
@@ -120,7 +177,9 @@ export function DesignerPage() {
   const [readmeSaving, setReadmeSaving] = useState(false);
   const [remoteId, setRemoteId] = useState<string | null>(null);
   const [publishedAt, setPublishedAt] = useState<string | null>(null);
-  const [templateUpdatedAt, setTemplateUpdatedAt] = useState<string | null>(null);
+  const [templateUpdatedAt, setTemplateUpdatedAt] = useState<string | null>(
+    null,
+  );
   const [origin, setOrigin] = useState<"own" | "saved">("own");
   const [pending, setPending] = useState<SyncAction | null>(null);
   const [debouncedHtml, setDebouncedHtml] = useState(htmlCode);
@@ -134,48 +193,120 @@ export function DesignerPage() {
   }, [htmlCode, cssCode]);
   const compiledCss = useCompiledCss(debouncedHtml);
 
-
   // Templates available in the designer — persisted in SQLite via
   // `list_templates` / `create_template`. Starter templates are the
   // fallback when the DB is empty (first launch) or in web mode.
-  const [templates, setTemplates] = useState<Array<{ id: number; name: string; html: string; css: string; page_w_mm?: number; page_h_mm?: number; orientation?: string }>>([]);
-  const [currentTemplateId, setCurrentTemplateId] = useState<number | null>(null);
+  // Local working copies: content for the editor plus the server link
+  // when the row came from a full template (nulls when it did not).
+  const [templates, setTemplates] = useState<
+    Array<{
+      id: number;
+      name: string;
+      html: string;
+      css: string;
+      page_w_mm?: number;
+      page_h_mm?: number;
+      orientation?: string;
+      readme?: string;
+      summary?: string;
+      remote_id?: string | null;
+      server_id?: string | null;
+      published_at?: string | null;
+      origin?: string;
+    }>
+  >([]);
+  const [currentTemplateId, setCurrentTemplateId] = useState<number | null>(
+    null,
+  );
   const [_templatesLoading, setTemplatesLoading] = useState(true);
   void _templatesLoading;
 
-  // Sample datasets (variables)
-  const [datasets, setDatasets] = useState<Dataset[]>([
-    {
-      name: "Sample Order",
-      json: JSON.stringify(DEFAULT_MOCK_DATA, null, 2),
-      isDefault: true,
-    },
-  ]);
+  // Sample datasets (variables). Persisted through the agent and
+  // synced like templates; the built-in Sample Order is the fallback
+  // when the cache holds none yet.
+  const [datasets, setDatasets] = useState<
+    Array<Dataset & { id?: number | null }>
+  >([]);
 
-  const loadTemplate = (tpl: { id: number; name: string; html: string; css: string; page_w_mm?: number; page_h_mm?: number; orientation?: string; readme?: string }) => {
+  const loadDatasets = useCallback(async () => {
+    try {
+      const rows = (await agent("list_datasets", {})) ?? [];
+      setDatasets(
+        rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          json: r.data_json,
+          isDefault: false,
+        })),
+      );
+    } catch {
+      /* web mode or backend unavailable: the fallback below applies */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDatasets();
+  }, [loadDatasets]);
+
+  // A completed pull lands rows after mount; reload so the new content
+  // shows with no manual step.
+  useEffect(() => {
+    const onPulled = () => void loadDatasets();
+    window.addEventListener("sync:pulled", onPulled);
+    return () => window.removeEventListener("sync:pulled", onPulled);
+  }, [loadDatasets]);
+
+  const visibleDatasets: Dataset[] =
+    datasets.length > 0
+      ? datasets
+      : [
+          {
+            name: "Sample Order",
+            json: JSON.stringify(DEFAULT_MOCK_DATA, null, 2),
+            isDefault: true,
+          },
+        ];
+
+  const loadTemplate = (tpl: {
+    id: number;
+    name: string;
+    html: string;
+    css: string;
+    page_w_mm?: number;
+    page_h_mm?: number;
+    orientation?: string;
+    readme?: string;
+    summary?: string;
+    remote_id?: string | null;
+    server_id?: string | null;
+    published_at?: string | null;
+    origin?: string;
+    updated_at?: string;
+  }) => {
     setCurrentTemplateId(tpl.id);
     setTemplateName(tpl.name);
     setHtmlCode(formatHtml(tpl.html));
     setCssCode(formatCss(tpl.css));
     if (tpl.page_w_mm) setPageWidth(tpl.page_w_mm);
     if (tpl.page_h_mm) setPageHeight(tpl.page_h_mm);
-    if (tpl.orientation) setOrientation(tpl.orientation as "portrait" | "landscape");
+    if (tpl.orientation)
+      setOrientation(tpl.orientation as "portrait" | "landscape");
     setCurrentTemplateDbId(tpl.id);
     setDiff(null);
     setShowDiff(false);
     // Load readme and publish info if provided, otherwise fetch from DB
     if (tpl.readme !== undefined) {
       setReadme(tpl.readme);
-      setRemoteId((tpl as any).remote_id ?? null);
-      setPublishedAt((tpl as any).published_at ?? null);
-      setTemplateUpdatedAt((tpl as any).updated_at ?? null);
-      setOrigin(((tpl as any).origin ?? "own") === "saved" ? "saved" : "own");
+      setRemoteId(tpl.server_id ?? tpl.remote_id ?? null);
+      setPublishedAt(tpl.published_at ?? null);
+      setTemplateUpdatedAt(tpl.updated_at ?? null);
+      setOrigin((tpl.origin ?? "own") === "saved" ? "saved" : "own");
     } else {
       (async () => {
         try {
-          const full = await invoke<any>("get_template", { id: tpl.id });
+          const full = await agent("get_template", { id: tpl.id });
           setReadme(full.readme ?? "");
-          setRemoteId(full.remote_id ?? null);
+          setRemoteId(full.server_id ?? full.remote_id ?? null);
           setPublishedAt(full.published_at ?? null);
           setTemplateUpdatedAt(full.updated_at ?? null);
           setOrigin(full.origin === "saved" ? "saved" : "own");
@@ -191,10 +322,22 @@ export function DesignerPage() {
     // Load the persisted versions for the newly selected template.
     (async () => {
       try {
-        const list = await invoke<TemplateVersion[]>("list_versions", {
-          templateId: tpl.id,
+        const list = await agent("list_versions", {
+          template_id: tpl.id,
         });
-        setVersions(list ?? []);
+        setVersions(
+          (list ?? []).map((v) => ({
+            key: `local-${v.id}`,
+            versionNo: v.version_no,
+            label: v.label,
+            note: v.note,
+            createdAt: v.created_at,
+            createdBy: v.created_by,
+            html: v.html,
+            css: v.css,
+            localId: v.id,
+          })),
+        );
       } catch {
         setVersions([]);
       }
@@ -202,22 +345,26 @@ export function DesignerPage() {
     toast.success(`Loaded "${tpl.name}"`);
   };
 
-  const runSync = async (action: SyncAction, options: SaveOptions, done: string) => {
+  /**
+   * Write the editor into the local cache (a new version plus the
+   * metadata) and tell the engine to push. Saving is local-first: the
+   * server copy arrives through the next sync, not through a direct PUT.
+   */
+  const saveLocal = async (): Promise<TemplateRow | null> => {
     if (!currentTemplateDbId) {
       toast.error("No template selected");
-      return;
+      return null;
     }
-    setPending(action);
+    setPending("save");
     try {
       const row = await getLocalTemplate(currentTemplateDbId);
       if (isReadOnly(row)) {
         toast.error("A saved copy from Community can’t be changed");
-        return;
+        return null;
       }
       // The editor holds the copy this PC would print. Put its content and its
-      // metadata into the local row first, so Save sends what the editor shows and
-      // Refresh, Print and this PC all read the same copy.
-      await invoke("create_version", {
+      // metadata into the local row first, so Print and this PC read the same copy.
+      await agent("create_version", {
         req: {
           template_id: currentTemplateDbId,
           html: htmlCode,
@@ -228,7 +375,7 @@ export function DesignerPage() {
           created_by: "manual",
         },
       });
-      await invoke("update_template_meta", {
+      const updated = await agent("update_template_meta", {
         req: {
           id: currentTemplateDbId,
           name: templateName,
@@ -237,10 +384,39 @@ export function DesignerPage() {
           summary: row.summary ?? "",
         },
       });
-      const result = await saveToServer(
-        { ...row, name: templateName, page_w_mm: pageWidth, page_h_mm: pageHeight },
-        options,
+      setRemoteId(
+        (updated as { server_id?: string | null }).server_id ??
+          row.server_id ??
+          null,
       );
+      notifyLocalEdit();
+      return {
+        ...row,
+        name: templateName,
+        page_w_mm: pageWidth,
+        page_h_mm: pageHeight,
+      };
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const handleSave = async () => {
+    const saved = await saveLocal();
+    if (saved) toast.success("Saved on this PC");
+  };
+
+  const runPublish = async (options: SaveOptions, done: string) => {
+    if (!currentTemplateDbId) {
+      toast.error("No template selected");
+      return;
+    }
+    setPending("publish");
+    try {
+      const saved = await saveLocal();
+      if (!saved) return;
+      setPending("publish");
+      const result = await saveToServer(saved, options);
       setRemoteId(result.remoteId);
       setPublishedAt(result.published ? result.updatedAt : null);
       setTemplateUpdatedAt(result.updatedAt);
@@ -252,29 +428,13 @@ export function DesignerPage() {
     }
   };
 
-  const handleSave = () => runSync("save", {}, "Saved to the server");
+  const handlePublish = () =>
+    runPublish({ publish: true }, "Published to Community");
 
-  const handlePublish = () => runSync("publish", { publish: true }, "Published to Community");
-
-  const handleRefresh = async () => {
-    if (!currentTemplateDbId) return;
-    setPending("refresh");
+  const handleSyncNow = async () => {
+    setPending("sync");
     try {
-      const row = await getLocalTemplate(currentTemplateDbId);
-      const result = await refreshFromServer(row);
-      // Show what came back, so the editor matches this PC's new copy.
-      setHtmlCode(formatHtml(result.template.body ?? ""));
-      setCssCode(formatCss(result.template.css ?? ""));
-      setTemplateName(result.name);
-      setPageWidth(result.page_w_mm);
-      setPageHeight(result.page_h_mm);
-      setReadme(result.template.readme ?? "");
-      setRemoteId(result.template.id);
-      setPublishedAt(result.template.published_at || null);
-      setTemplateUpdatedAt(result.template.updated_at);
-      toast.success(`Refreshed “${result.name}” from the server`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      await syncNow();
     } finally {
       setPending(null);
     }
@@ -285,7 +445,7 @@ export function DesignerPage() {
     setPending("unpublish");
     try {
       await share.unpublishTemplate(remoteId);
-      await invoke("clear_publish_info", { req: { id: currentTemplateDbId } });
+      await agent("clear_publish_info", { req: { id: currentTemplateDbId } });
       setRemoteId(null);
       setPublishedAt(null);
       toast.success("Unpublished");
@@ -299,7 +459,10 @@ export function DesignerPage() {
   const handleImportFile = async (file: File) => {
     try {
       const text = await file.text();
-      const isHtml = file.name.toLowerCase().endsWith(".html") || text.trim().toLowerCase().startsWith("<!doctype") || text.trim().toLowerCase().startsWith("<html");
+      const isHtml =
+        file.name.toLowerCase().endsWith(".html") ||
+        text.trim().toLowerCase().startsWith("<!doctype") ||
+        text.trim().toLowerCase().startsWith("<html");
       if (isHtml) {
         setTemplateName(file.name.replace(/\.html$/i, ""));
         setHtmlCode(formatHtml(text));
@@ -318,7 +481,9 @@ export function DesignerPage() {
 
   const handleExport = () => {
     const data = { name: templateName, html: htmlCode, css: cssCode };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -339,7 +504,7 @@ export function DesignerPage() {
       return;
     }
     try {
-      const created = await invoke<{ id: number; name: string; page_w_mm: number; page_h_mm: number; orientation: string }>("create_template", {
+      const created = await agent("create_template", {
         req: {
           name,
           page_w_mm: STARTER_TEMPLATES[0].page_w_mm,
@@ -363,10 +528,13 @@ export function DesignerPage() {
       loadTemplate(tpl);
       setVersions([]);
       setCurrentTemplateDbId(tpl.id);
+      notifyLocalEdit();
       toast.success(`Template "${name}" created`);
     } catch {
       // Web mode / DB unavailable — keep in-memory fallback so UI stays usable.
-      const id = templates.length ? Math.max(...templates.map((t) => t.id)) + 1 : 1;
+      const id = templates.length
+        ? Math.max(...templates.map((t) => t.id)) + 1
+        : 1;
       const tpl = {
         id,
         name,
@@ -386,7 +554,8 @@ export function DesignerPage() {
       setShowNewTemplateDialog(false);
     }
   };
-  const [selectedDatasetName, setSelectedDatasetName] = useState("Sample Order");
+  const [selectedDatasetName, setSelectedDatasetName] =
+    useState("Sample Order");
   const [showDatasetDialog, setShowDatasetDialog] = useState(false);
   const [datasetName, setDatasetName] = useState("");
   const [datasetJson, setDatasetJson] = useState("{\n  \n}");
@@ -423,7 +592,9 @@ export function DesignerPage() {
           const hydrated = await Promise.all(
             rows.map(async (r) => {
               try {
-                const versions = await invoke<TemplateVersion[]>("list_versions", { templateId: r.id });
+                const versions = await agent("list_versions", {
+                  template_id: r.id,
+                });
                 const latest = versions?.[0];
                 return {
                   id: r.id,
@@ -454,13 +625,15 @@ export function DesignerPage() {
           setCssCode(formatCss(hydrated[0].css));
           setPageWidth(hydrated[0].page_w_mm ?? 80);
           setPageHeight(hydrated[0].page_h_mm ?? 200);
-          setOrientation((hydrated[0].orientation as "portrait" | "landscape") ?? "portrait");
+          setOrientation(
+            (hydrated[0].orientation as "portrait" | "landscape") ?? "portrait",
+          );
           setCurrentTemplateDbId(hydrated[0].id);
           // Load README and publish info for the first template
           try {
-            const full = await invoke<any>("get_template", { id: hydrated[0].id });
+            const full = await agent("get_template", { id: hydrated[0].id });
             setReadme(full.readme ?? "");
-            setRemoteId(full.remote_id ?? null);
+            setRemoteId(full.server_id ?? full.remote_id ?? null);
             setPublishedAt(full.published_at ?? null);
             setTemplateUpdatedAt(full.updated_at ?? null);
             setOrigin(full.origin === "saved" ? "saved" : "own");
@@ -499,15 +672,19 @@ export function DesignerPage() {
         if (!cancelled) setTemplatesLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    // Load persisted versions for the active template.
+    // Load persisted versions for the active template. Keyed on the
+    // remote id too: it arrives after the row loads, and flips the
+    // panel from local rows to the server list.
     if (currentTemplateDbId != null) refreshVersions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTemplateDbId]);
+  }, [currentTemplateDbId, remoteId]);
 
   useEffect(() => {
     const template: Template = {
@@ -520,6 +697,7 @@ export function DesignerPage() {
       readme: "",
       summary: "",
       remote_id: null,
+      server_id: null,
       published_at: null,
       origin: "own",
       origin_owner: null,
@@ -530,9 +708,14 @@ export function DesignerPage() {
     store.setCurrentTemplate(template);
   }, []);
 
+  /**
+   * A labelled version goes through the server when the template is
+   * pushed (the PUT records the label alongside the content); the local
+   * row is written first so the panel updates at once, offline or not.
+   */
   const handleSaveVersion = async () => {
     try {
-      const version = await invoke<TemplateVersion>("create_version", {
+      const version = await agent("create_version", {
         req: {
           template_id: currentTemplateDbId,
           html: htmlCode,
@@ -543,10 +726,31 @@ export function DesignerPage() {
           created_by: "manual",
         },
       });
-      setVersions((prev) => [version, ...prev]);
       setShowVersionDialog(false);
       setVersionLabel("");
       setVersionNote("");
+      if (remoteId) {
+        try {
+          const row = await getLocalTemplate(currentTemplateDbId);
+          const saved = await saveToServer(
+            {
+              ...row,
+              name: templateName,
+              page_w_mm: pageWidth,
+              page_h_mm: pageHeight,
+            },
+            { version: { label: version.label, note: version.note } },
+          );
+          setRemoteId(saved.remoteId);
+          setPublishedAt(saved.published ? saved.updatedAt : null);
+          setTemplateUpdatedAt(saved.updatedAt);
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : String(e));
+        }
+      } else {
+        notifyLocalEdit();
+      }
+      await refreshVersions();
       toast.success(`Version ${version.version_no} saved`);
     } catch (e) {
       // Web mode / no backend: keep a local snapshot so the UI stays usable.
@@ -561,7 +765,20 @@ export function DesignerPage() {
         created_at: new Date().toISOString(),
         created_by: "manual",
       };
-      setVersions((prev) => [local, ...prev]);
+      setVersions((prev) => [
+        {
+          key: `local-${local.id}`,
+          versionNo: local.version_no,
+          label: local.label,
+          note: local.note,
+          createdAt: local.created_at,
+          createdBy: local.created_by,
+          html: local.html,
+          css: local.css,
+          localId: local.id,
+        },
+        ...prev,
+      ]);
       setShowVersionDialog(false);
       setVersionLabel("");
       setVersionNote("");
@@ -570,35 +787,69 @@ export function DesignerPage() {
   };
 
   const handleInsertBarcode = () => {
-    const error = validateBarcode(barcodeType, barcodeValue);
-    if (error) {
-      setBarcodeError(error);
+    const snippet = buildBarcodeSnippet(
+      barcodeType,
+      barcodeValue,
+      barcodeFromData && isHelperSymbology(barcodeType),
+    );
+    if (!snippet.ok) {
+      setBarcodeError(snippet.error);
       return;
     }
-    // Inline SVG (not a data URI): the printed HTML must not depend on an
-    // external image, and SVG stays crisp at any printer DPI.
-    const html = buildBarcodeHtml({
-      type: barcodeType,
-      value: barcodeValue,
-      scaleToWidth: 40,
-    });
-    if (html) {
-      setHtmlCode((prev) => prev + "\n" + html);
-      setShowBarcodeDialog(false);
-      setBarcodeValue("");
-      setBarcodeError(null);
-      toast.success(`${barcodeType} barcode inserted`);
-    } else {
-      setBarcodeError("Could not generate this barcode");
-    }
+    // Insert where the cursor is. A helper call such as {{barcode "code128"
+    // order.id}} is drawn by the same renderer for the preview and for print,
+    // so each print and each CSV row gets its own code.
+    insertHelper(
+      snippet.kind === "static" ? "\n" + snippet.text : snippet.text,
+    );
+    setShowBarcodeDialog(false);
+    setBarcodeValue("");
+    setBarcodeError(null);
+    toast.success(`${barcodeType} barcode inserted`);
   };
 
+  /**
+   * The version history, newest first. A pushed template reads the
+   * server list (the source of truth both PCs share); anything else
+   * reads the local rows. Server rows fetch bodies on demand.
+   */
   const refreshVersions = async () => {
+    if (!currentTemplateDbId) {
+      setVersions([]);
+      return;
+    }
     try {
-      const list = await invoke<TemplateVersion[]>("list_versions", {
-        templateId: currentTemplateDbId,
+      if (remoteId) {
+        const list = await share.listRemoteVersions(remoteId);
+        setVersions(
+          list.map((v) => ({
+            key: `srv-${v.version_no}`,
+            versionNo: v.version_no,
+            label: v.label,
+            note: v.note,
+            createdAt: v.created_at,
+            createdBy: v.created_by,
+            remoteNo: v.version_no,
+          })),
+        );
+        return;
+      }
+      const list = await agent("list_versions", {
+        template_id: currentTemplateDbId,
       });
-      setVersions(list ?? []);
+      setVersions(
+        (list ?? []).map((v) => ({
+          key: `local-${v.id}`,
+          versionNo: v.version_no,
+          label: v.label,
+          note: v.note,
+          createdAt: v.created_at,
+          createdBy: v.created_by,
+          html: v.html,
+          css: v.css,
+          localId: v.id,
+        })),
+      );
       const latest = list?.[0];
       if (latest) {
         setHtmlCode(formatHtml(latest.html));
@@ -609,58 +860,127 @@ export function DesignerPage() {
     }
   };
 
-  const handleRestoreVersion = async (version: TemplateVersion) => {
+  const handleRestoreVersion = async (version: VersionRow) => {
+    if (version.remoteNo != null && remoteId) {
+      // Server restore copies the version into a new revision; the
+      // current revision guards against overwriting a newer edit.
+      try {
+        const current = await share.fetchRemoteTemplate(remoteId);
+        const restored = await share.restoreRemoteVersion(
+          remoteId,
+          version.remoteNo,
+          current.revision,
+        );
+        await refreshVersions();
+        setHtmlCode(formatHtml(restored.body ?? ""));
+        setCssCode(formatCss(restored.css ?? ""));
+        setTemplateUpdatedAt(restored.updated_at);
+        toast.success(
+          `Restored v${version.versionNo} as v${restored.revision}`,
+        );
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
+    if (version.localId == null) return;
     try {
       // Restore creates a NEW version server-side; nothing is overwritten.
-      const created = await invoke<TemplateVersion>("restore_version", {
-        id: version.id,
+      const created = await agent("restore_version", {
+        id: version.localId,
       });
-      setVersions((prev) => [created, ...prev]);
+      await refreshVersions();
       setHtmlCode(formatHtml(created.html));
       setCssCode(formatCss(created.css));
-      toast.success(`Restored v${version.version_no} as v${created.version_no}`);
+      toast.success(`Restored v${version.versionNo} as v${created.version_no}`);
     } catch {
-      setHtmlCode(formatHtml(version.html));
-      setCssCode(formatCss(version.css));
-      toast.success(`Restored version ${version.version_no}`);
+      if (version.html !== undefined) setHtmlCode(formatHtml(version.html));
+      if (version.css !== undefined) setCssCode(formatCss(version.css));
+      toast.success(`Restored version ${version.versionNo}`);
     }
   };
 
-  const openDiff = async (from: TemplateVersion, to: TemplateVersion) => {
+  const handleDeleteVersion = async (version: VersionRow) => {
+    if (version.remoteNo != null && remoteId) {
+      try {
+        await share.deleteRemoteVersion(remoteId, version.remoteNo);
+        await refreshVersions();
+        toast.success(`Deleted v${version.versionNo}`);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
+    if (version.localId == null) return;
     try {
-      const d = await invoke<{
-        from_version_no: number;
-        to_version_no: number;
-        html_from: string;
-        html_to: string;
-        css_from: string;
-        css_to: string;
-        html_changed: boolean;
-        css_changed: boolean;
-      }>("diff_versions", { fromId: from.id, toId: to.id });
-      setDiff(d);
-    } catch {
+      await agent("delete_version", { id: version.localId });
+      await refreshVersions();
+      toast.success(`Deleted v${version.versionNo}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const openDiff = async (from: VersionRow, to: VersionRow) => {
+    // Server rows fetch bodies on demand; local rows already carry them.
+    const bodies = async (
+      v: VersionRow,
+    ): Promise<{ html: string; css: string }> => {
+      if (v.html !== undefined) return { html: v.html ?? "", css: v.css ?? "" };
+      if (v.remoteNo != null && remoteId) {
+        const full = await share.readRemoteVersion(remoteId, v.remoteNo);
+        return { html: full.body ?? "", css: full.css ?? "" };
+      }
+      return { html: "", css: "" };
+    };
+    try {
+      const [f, t] = await Promise.all([bodies(from), bodies(to)]);
+      if (from.localId != null && to.localId != null) {
+        const d = await agent("diff_versions", {
+          from_id: from.localId,
+          to_id: to.localId,
+        });
+        setDiff(d);
+        return;
+      }
       setDiff({
-        from_version_no: from.version_no,
-        to_version_no: to.version_no,
-        html_from: from.html,
-        html_to: to.html,
-        css_from: from.css,
-        css_to: to.css,
-        html_changed: from.html !== to.html,
-        css_changed: from.css !== to.css,
+        from_version_no: from.versionNo,
+        to_version_no: to.versionNo,
+        html_from: f.html,
+        html_to: t.html,
+        css_from: f.css,
+        css_to: t.css,
+        html_changed: f.html !== t.html,
+        css_changed: f.css !== t.css,
+      });
+    } catch {
+      const [f, t] = await Promise.all([
+        bodies(from).catch(() => ({ html: "", css: "" })),
+        bodies(to).catch(() => ({ html: "", css: "" })),
+      ]);
+      setDiff({
+        from_version_no: from.versionNo,
+        to_version_no: to.versionNo,
+        html_from: f.html,
+        html_to: t.html,
+        css_from: f.css,
+        css_to: t.css,
+        html_changed: f.html !== t.html,
+        css_changed: f.css !== t.css,
       });
     }
   };
 
   const sampleData = useMemo<Record<string, unknown>>(() => {
     try {
-      const ds = datasets.find((d) => d.name === selectedDatasetName) ?? datasets[0];
+      const ds =
+        visibleDatasets.find((d) => d.name === selectedDatasetName) ??
+        visibleDatasets[0];
       return JSON.parse(ds.json);
     } catch {
       return DEFAULT_MOCK_DATA as Record<string, unknown>;
     }
-  }, [datasets, selectedDatasetName]);
+  }, [visibleDatasets, selectedDatasetName]);
 
   const handleSaveReadme = async () => {
     if (!currentTemplateDbId) {
@@ -674,7 +994,10 @@ export function DesignerPage() {
     }
     setReadmeSaving(true);
     try {
-      await invoke("update_readme", { req: { id: currentTemplateDbId, readme } });
+      await agent("update_readme", {
+        req: { id: currentTemplateDbId, readme },
+      });
+      notifyLocalEdit();
       toast.success("README saved");
     } catch (e) {
       toast.error(String(e));
@@ -690,7 +1013,7 @@ export function DesignerPage() {
 
   const sampleDataPanel = (
     <SampleDataPanel
-      datasets={datasets}
+      datasets={visibleDatasets}
       selectedName={selectedDatasetName}
       onSelect={setSelectedDatasetName}
       onAdd={() => {
@@ -704,11 +1027,22 @@ export function DesignerPage() {
         setShowEditDataset(true);
       }}
       onDelete={(ds) => {
-        setDatasets((prev) => prev.filter((d) => d.name !== ds.name));
-        if (selectedDatasetName === ds.name) {
-          setSelectedDatasetName(datasets[0]?.name ?? "");
-        }
-        toast.success("Dataset deleted");
+        void (async () => {
+          try {
+            const row = datasets.find((d) => d.name === ds.name);
+            if (row?.id != null) {
+              await agent("delete_dataset", { id: row.id });
+              notifyLocalEdit();
+            }
+            await loadDatasets();
+            if (selectedDatasetName === ds.name) {
+              setSelectedDatasetName(visibleDatasets[0]?.name ?? "");
+            }
+            toast.success("Dataset deleted");
+          } catch (e) {
+            toast.error(`Delete failed: ${e}`);
+          }
+        })();
       }}
     />
   );
@@ -730,6 +1064,7 @@ export function DesignerPage() {
     onNewVersion: () => setShowVersionDialog(true),
     openDiff,
     handleRestoreVersion,
+    handleDeleteVersion,
   };
 
   const insertHelper = (text: string, back = 0) => {
@@ -758,7 +1093,10 @@ export function DesignerPage() {
         onSaveReadme={() => void handleSaveReadme()}
         notices={<ClassWarnings html={debouncedHtml} />}
       />
-      <DesignerActions onBarcode={() => setShowBarcodeDialog(true)} onSaveVersion={() => setShowVersionDialog(true)} />
+      <DesignerActions
+        onBarcode={() => setShowBarcodeDialog(true)}
+        onSaveVersion={() => setShowVersionDialog(true)}
+      />
     </div>
   );
 
@@ -779,7 +1117,12 @@ export function DesignerPage() {
     <div className="space-y-4 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-4 lg:space-y-0">
       <PageHeader title={t("designer.title")} description={t("pages.designer")}>
         {isDesktop && <LayoutToggle value={layout} onChange={setLayout} />}
-        <DesignerToolbar onNew={() => setShowNewTemplateDialog(true)} onImportFile={handleImportFile} onExport={handleExport} />
+        <DesignerToolbar
+          onNew={() => setShowNewTemplateDialog(true)}
+          onSave={() => void handleSave()}
+          onImportFile={handleImportFile}
+          onExport={handleExport}
+        />
       </PageHeader>
 
       <TemplateSyncBar
@@ -789,16 +1132,18 @@ export function DesignerPage() {
         templateUpdatedAt={templateUpdatedAt}
         readOnly={isReadOnly({ origin })}
         pending={pending}
-        onSave={() => void handleSave()}
-        onRefresh={() => void handleRefresh()}
         onPublish={() => void handlePublish()}
         onUnpublish={handleUnpublish}
+        onSyncNow={() => void handleSyncNow()}
       />
 
       {isDesktop ? (
         <div className="flex min-h-0 flex-1 gap-4">
           {controlsExpanded ? (
-            <aside aria-label="Designer controls" className="flex w-[280px] shrink-0 flex-col gap-2 overflow-y-auto">
+            <aside
+              aria-label="Designer controls"
+              className="flex w-[280px] shrink-0 flex-col gap-2 overflow-y-auto"
+            >
               <button
                 type="button"
                 aria-label="Collapse controls"
@@ -818,7 +1163,10 @@ export function DesignerPage() {
               />
             </aside>
           ) : (
-            <ControlsRail onOpenSection={openControlsSection} onExpand={() => setControlsExpanded(true)} />
+            <ControlsRail
+              onOpenSection={openControlsSection}
+              onExpand={() => setControlsExpanded(true)}
+            />
           )}
           {layout === "canvas" ? (
             <div className="min-h-0 min-w-0 flex-1">{canvas(true)}</div>
@@ -829,12 +1177,28 @@ export function DesignerPage() {
               autoSaveId={`printninja.designer.split.${layout}`}
               className="min-w-0 flex-1"
             >
-              <ResizablePanel id="editor" order={1} defaultSize={50} minSize={25}>
+              <ResizablePanel
+                id="editor"
+                order={1}
+                defaultSize={50}
+                minSize={25}
+              >
                 {editorPane(layout === "stacked" ? "pb-2" : "pr-2")}
               </ResizablePanel>
               <ResizableHandle withHandle />
-              <ResizablePanel id="canvas" order={2} defaultSize={50} minSize={25}>
-                <div className={layout === "stacked" ? "h-full pt-2" : "h-full pl-2"}>{canvas(true)}</div>
+              <ResizablePanel
+                id="canvas"
+                order={2}
+                defaultSize={50}
+                minSize={25}
+              >
+                <div
+                  className={
+                    layout === "stacked" ? "h-full pt-2" : "h-full pl-2"
+                  }
+                >
+                  {canvas(true)}
+                </div>
               </ResizablePanel>
             </ResizablePanelGroup>
           )}
@@ -842,20 +1206,41 @@ export function DesignerPage() {
       ) : (
         <div className="space-y-4">
           {/* Collapsed, so the canvas is not a long scroll away */}
-          <ControlsAccordion {...controls} showHelpers={false} defaultOpen={[]} />
+          <ControlsAccordion
+            {...controls}
+            showHelpers={false}
+            defaultOpen={[]}
+          />
 
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+          <Tabs
+            value={activeTab}
+            onValueChange={setActiveTab}
+            className="space-y-4"
+          >
             <div className="min-w-0 overflow-x-auto">
-              <TabsList aria-label="Designer views" className="h-8 w-max gap-0.5 p-0.5">
-                <TabsTrigger value="canvas" className="h-7 px-3 text-xs">{t("designer.canvas")}</TabsTrigger>
-                <TabsTrigger value="code" className="h-7 px-3 text-xs">{t("designer.code")}</TabsTrigger>
-                <TabsTrigger value="readme" className="h-7 px-3 text-xs">README</TabsTrigger>
-                <TabsTrigger value="sample-data" className="h-7 px-3 text-xs">{t("designer.sampleData")}</TabsTrigger>
+              <TabsList
+                aria-label="Designer views"
+                className="h-8 w-max gap-0.5 p-0.5"
+              >
+                <TabsTrigger value="canvas" className="h-7 px-3 text-xs">
+                  {t("designer.canvas")}
+                </TabsTrigger>
+                <TabsTrigger value="code" className="h-7 px-3 text-xs">
+                  {t("designer.code")}
+                </TabsTrigger>
+                <TabsTrigger value="readme" className="h-7 px-3 text-xs">
+                  README
+                </TabsTrigger>
+                <TabsTrigger value="sample-data" className="h-7 px-3 text-xs">
+                  {t("designer.sampleData")}
+                </TabsTrigger>
               </TabsList>
             </div>
 
             <TabsContent value={activeTab} className="mt-0 space-y-4">
-              {(activeTab === "canvas" || activeTab === "code") && <ClassWarnings html={debouncedHtml} />}
+              {(activeTab === "canvas" || activeTab === "code") && (
+                <ClassWarnings html={debouncedHtml} />
+              )}
               {activeTab === "canvas" && canvas(false)}
               {activeTab === "code" && (
                 <CodeEditors
@@ -978,15 +1363,29 @@ export function DesignerPage() {
           <div className="space-y-3">
             <div className="space-y-1">
               <Label>Label</Label>
-              <Input placeholder="e.g. Added logo" value={versionLabel} onChange={(e) => setVersionLabel(e.target.value)} />
+              <Input
+                data-testid="version-label"
+                placeholder="e.g. Added logo"
+                value={versionLabel}
+                onChange={(e) => setVersionLabel(e.target.value)}
+              />
             </div>
             <div className="space-y-1">
               <Label>Note</Label>
-              <Input placeholder="Optional note" value={versionNote} onChange={(e) => setVersionNote(e.target.value)} />
+              <Input
+                placeholder="Optional note"
+                value={versionNote}
+                onChange={(e) => setVersionNote(e.target.value)}
+              />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowVersionDialog(false)}>Cancel</Button>
+            <Button
+              variant="outline"
+              onClick={() => setShowVersionDialog(false)}
+            >
+              Cancel
+            </Button>
             <Button onClick={handleSaveVersion}>Save</Button>
           </DialogFooter>
         </DialogContent>
@@ -1007,22 +1406,76 @@ export function DesignerPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {BARCODE_TYPES.map((bc) => (
-                    <SelectItem key={bc.value} value={bc.value}>{bc.label}</SelectItem>
+                    <SelectItem key={bc.value} value={bc.value}>
+                      {bc.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="barcode-from-data" className="text-sm">
+                Read the value from a data field
+              </Label>
+              <Switch
+                id="barcode-from-data"
+                checked={barcodeFromData && isHelperSymbology(barcodeType)}
+                disabled={!isHelperSymbology(barcodeType)}
+                onCheckedChange={(on) => {
+                  setBarcodeFromData(on);
+                  setBarcodeError(null);
+                }}
+              />
+            </div>
             <div className="space-y-1">
-              <Label htmlFor="barcode-value">Value</Label>
-              <Input id="barcode-value" placeholder="Enter barcode value" value={barcodeValue} onChange={(e) => { setBarcodeValue(e.target.value); setBarcodeError(null); }} />
+              <Label htmlFor="barcode-value">
+                {barcodeFromData && isHelperSymbology(barcodeType)
+                  ? "Data field"
+                  : "Value"}
+              </Label>
+              <Input
+                id="barcode-value"
+                placeholder={
+                  barcodeFromData && isHelperSymbology(barcodeType)
+                    ? "order.id"
+                    : "Enter barcode value"
+                }
+                value={barcodeValue}
+                onChange={(e) => {
+                  setBarcodeValue(e.target.value);
+                  setBarcodeError(null);
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                {!isHelperSymbology(barcodeType)
+                  ? "This type is inserted with a fixed value."
+                  : barcodeFromData
+                    ? "Each print and each CSV row gets its own code."
+                    : "The same code on every print."}
+              </p>
               {barcodeError && (
-                <p id="barcode-error" role="alert" className="text-xs text-danger">{barcodeError}</p>
+                <p
+                  id="barcode-error"
+                  role="alert"
+                  className="text-xs text-danger"
+                >
+                  {barcodeError}
+                </p>
               )}
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowBarcodeDialog(false)}>Cancel</Button>
-            <Button id="barcode-insert" onClick={handleInsertBarcode} disabled={!barcodeValue}>
+            <Button
+              variant="outline"
+              onClick={() => setShowBarcodeDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              id="barcode-insert"
+              onClick={handleInsertBarcode}
+              disabled={!barcodeValue}
+            >
               <QrCode className="h-4 w-4" />
               Insert
             </Button>
@@ -1039,7 +1492,11 @@ export function DesignerPage() {
           <div className="space-y-3">
             <div className="space-y-1">
               <Label>Name</Label>
-              <Input value={datasetName} onChange={(e) => setDatasetName(e.target.value)} placeholder="e.g. Empty Order" />
+              <Input
+                value={datasetName}
+                onChange={(e) => setDatasetName(e.target.value)}
+                placeholder="e.g. Empty Order"
+              />
             </div>
             <div className="space-y-1">
               <Label>JSON data</Label>
@@ -1053,26 +1510,56 @@ export function DesignerPage() {
                   basicSetup={{ lintKeymap: true }}
                 />
               </div>
-              {(() => { try { JSON.parse(datasetJson); return null; } catch (e) { return <p className="text-xs text-danger">{String(e).split("\n")[0]}</p>; }})()}
+              {(() => {
+                try {
+                  JSON.parse(datasetJson);
+                  return null;
+                } catch (e) {
+                  return (
+                    <p className="text-xs text-danger">
+                      {String(e).split("\n")[0]}
+                    </p>
+                  );
+                }
+              })()}
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDatasetDialog(false)}>Cancel</Button>
-            <Button onClick={() => {
-              if (!datasetName.trim()) {
-                toast.error("Dataset name required");
-                return;
-              }
-              try {
-                JSON.parse(datasetJson);
-              } catch {
-                toast.error("Invalid JSON");
-                return;
-              }
-              setDatasets((prev) => [...prev, { name: datasetName, json: datasetJson, isDefault: false }]);
-              setShowDatasetDialog(false);
-              toast.success(`Dataset "${datasetName}" added`);
-            }}>Add</Button>
+            <Button
+              variant="outline"
+              onClick={() => setShowDatasetDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (!datasetName.trim()) {
+                  toast.error("Dataset name required");
+                  return;
+                }
+                try {
+                  JSON.parse(datasetJson);
+                } catch {
+                  toast.error("Invalid JSON");
+                  return;
+                }
+                void (async () => {
+                  try {
+                    await agent("save_dataset", {
+                      req: { name: datasetName, data_json: datasetJson },
+                    });
+                    await loadDatasets();
+                    notifyLocalEdit();
+                    setShowDatasetDialog(false);
+                    toast.success(`Dataset "${datasetName}" added`);
+                  } catch (e) {
+                    toast.error(`Add failed: ${e}`);
+                  }
+                })();
+              }}
+            >
+              Add
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1093,27 +1580,62 @@ export function DesignerPage() {
                 theme="dark"
               />
             </div>
-            {(() => { try { JSON.parse(editJson); return null; } catch (e) { return <p className="text-xs text-danger">{String(e).split("\n")[0]}</p>; }})()}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowEditDataset(false)}>Cancel</Button>
-            <Button onClick={() => {
+            {(() => {
               try {
                 JSON.parse(editJson);
-              } catch {
-                toast.error("Invalid JSON");
-                return;
+                return null;
+              } catch (e) {
+                return (
+                  <p className="text-xs text-danger">
+                    {String(e).split("\n")[0]}
+                  </p>
+                );
               }
-              setDatasets((prev) => prev.map((d) => d.name === editingDataset ? { ...d, json: editJson } : d));
-              setShowEditDataset(false);
-              toast.success("Dataset updated");
-            }}>Save</Button>
+            })()}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditDataset(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                try {
+                  JSON.parse(editJson);
+                } catch {
+                  toast.error("Invalid JSON");
+                  return;
+                }
+                void (async () => {
+                  try {
+                    const row = datasets.find((d) => d.name === editingDataset);
+                    await agent("save_dataset", {
+                      req: {
+                        id: row?.id ?? null,
+                        name: editingDataset ?? "",
+                        data_json: editJson,
+                      },
+                    });
+                    await loadDatasets();
+                    notifyLocalEdit();
+                    setShowEditDataset(false);
+                    toast.success("Dataset updated");
+                  } catch (e) {
+                    toast.error(`Save failed: ${e}`);
+                  }
+                })();
+              }}
+            >
+              Save
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* New Template Dialog */}
-      <Dialog open={showNewTemplateDialog} onOpenChange={setShowNewTemplateDialog}>
+      <Dialog
+        open={showNewTemplateDialog}
+        onOpenChange={setShowNewTemplateDialog}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>New Template</DialogTitle>
@@ -1121,11 +1643,20 @@ export function DesignerPage() {
           <div className="space-y-3">
             <div className="space-y-1">
               <Label>Template Name</Label>
-              <Input placeholder="My Template" value={newTemplateName} onChange={(e) => setNewTemplateName(e.target.value)} />
+              <Input
+                placeholder="My Template"
+                value={newTemplateName}
+                onChange={(e) => setNewTemplateName(e.target.value)}
+              />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowNewTemplateDialog(false)}>Cancel</Button>
+            <Button
+              variant="outline"
+              onClick={() => setShowNewTemplateDialog(false)}
+            >
+              Cancel
+            </Button>
             <Button onClick={createNewTemplate}>Create</Button>
           </DialogFooter>
         </DialogContent>

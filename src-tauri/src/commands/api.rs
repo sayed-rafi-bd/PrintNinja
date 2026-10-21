@@ -3,7 +3,7 @@ use crate::db::DbState;
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::oneshot;
 
@@ -25,7 +25,7 @@ fn port_from_settings(db: &DbState, key: &str, default: u16) -> u16 {
     db.lock()
         .ok()
         .and_then(|g| {
-            let conn = g.connection().ok()?;
+            let conn = g.connection();
             conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
                 r.get::<_, String>(0)
             })
@@ -40,7 +40,7 @@ fn bool_from_settings(db: &DbState, key: &str, default: bool) -> bool {
     db.lock()
         .ok()
         .and_then(|g| {
-            let conn = g.connection().ok()?;
+            let conn = g.connection();
             conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
                 r.get::<_, String>(0)
             })
@@ -60,7 +60,6 @@ pub fn get_api_status(_app: AppHandle, db: State<DbState>) -> AppResult<ApiStatu
         .ok()
         .and_then(|g| {
             g.connection()
-                .ok()?
                 .query_row(
                     "SELECT value FROM settings WHERE key = 'api_bind'",
                     [],
@@ -90,7 +89,7 @@ pub struct ApiServerHandle {
     pub port: u16,
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn start_api_server(
     app: AppHandle,
     db: State<'_, DbState>,
@@ -110,7 +109,7 @@ pub fn start_api_server(
         let guard = db
             .lock()
             .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-        let conn = guard.connection()?;
+        let conn = guard.connection();
         conn.execute(
             "INSERT INTO settings (key, value) VALUES ('api_port', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -145,7 +144,7 @@ pub fn start_api_server(
         let guard = db
             .lock()
             .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-        let conn = guard.connection()?;
+        let conn = guard.connection();
         conn.execute(
             "INSERT INTO settings (key, value) VALUES ('api_bind', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -178,7 +177,13 @@ pub fn start_api_server(
         RUNNING.store(true, Ordering::Relaxed);
         tracing::info!("API server listening on {}", log_addr);
 
-        let server = axum::serve(listener, router).with_graceful_shutdown(async {
+        // ConnectInfo feeds the auth middleware's IP allowlist: without it
+        // a non-empty `allowed_ips` has no peer to compare against (P12).
+        let server = axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(async {
             let _ = rx.await;
         });
 
@@ -220,7 +225,7 @@ pub fn regenerate_api_key(db: State<DbState>) -> AppResult<String> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     conn.execute(
         "INSERT INTO api_clients (name, key_hash, scopes) VALUES ('default', ?1, 'print,read')
@@ -231,26 +236,57 @@ pub fn regenerate_api_key(db: State<DbState>) -> AppResult<String> {
     Ok(plaintext)
 }
 
-/// Verify an inbound key against the stored hash (constant-time compare).
-pub fn verify_stored_key(conn: &rusqlite::Connection, presented: &str) -> bool {
+/// Verify an inbound key against the stored hash (constant-time compare)
+/// and return the matched row — the middleware needs its scopes and IP
+/// allowlist to enforce them, and its id to stamp `last_used_at`.
+pub fn verify_stored_key(conn: &rusqlite::Connection, presented: &str) -> Option<ApiKey> {
     let hash = crate::api::auth::hash_key(presented);
 
-    let mut stmt = match conn.prepare("SELECT key_hash FROM api_clients") {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
+    let mut stmt =
+        match conn.prepare("SELECT id, name, key_hash, scopes, allowed_ips FROM api_clients") {
+            Ok(s) => s,
+            Err(_) => return None,
+        };
 
-    let rows = match stmt.query_map([], |r| r.get::<_, String>(0)) {
+    let rows = match stmt.query_map([], |r| {
+        Ok(ApiKey {
+            id: r.get(0)?,
+            name: r.get(1)?,
+            key_hash: r.get(2)?,
+            scopes: parse_list(r.get::<_, Option<String>>(3)?.as_deref()),
+            allowed_ips: parse_list(r.get::<_, Option<String>>(4)?.as_deref()),
+        })
+    }) {
         Ok(r) => r,
-        Err(_) => return false,
+        Err(_) => return None,
     };
 
-    for stored in rows.flatten() {
-        if constant_time_eq(stored.as_bytes(), hash.as_bytes()) {
-            return true;
+    let matched = rows
+        .flatten()
+        .find(|stored| constant_time_eq(stored.key_hash.as_bytes(), hash.as_bytes()));
+    matched
+}
+
+/// `scopes` and `allowed_ips` are TEXT columns: a comma list (`print,read`)
+/// or a JSON array — both accepted, since only `print,read` has ever been
+/// written. NULL and empty become an empty list.
+fn parse_list(raw: Option<&str>) -> Vec<String> {
+    let Some(raw) = raw else {
+        return Vec::new();
+    };
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Vec::new();
+    }
+    if raw.starts_with('[') {
+        if let Ok(list) = serde_json::from_str::<Vec<String>>(raw) {
+            return list;
         }
     }
-    false
+    raw.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 /// Length-independent byte comparison to avoid leaking hash prefixes.
@@ -274,7 +310,7 @@ impl ApiServerHandle {
 /// Re-exported for integration tests so they can assert key verification
 /// without reaching into private modules.
 pub fn verify_api_key(conn: &rusqlite::Connection, presented: &str) -> bool {
-    verify_stored_key(conn, presented)
+    verify_stored_key(conn, presented).is_some()
 }
 
 /// Spawn helper kept public so tests can start an ephemeral server.
@@ -285,11 +321,6 @@ pub fn spawn_test_server(port: u16) -> std::io::Result<(tokio::net::TcpListener,
     let listener = tokio::net::TcpListener::from_std(listener)
         .map_err(|e| std::io::Error::other(e.to_string()))?;
     Ok((listener, addr))
-}
-
-/// Used by `routes` to authenticate requests.
-pub fn db_for_auth(_db: &DbState) -> Option<Arc<rusqlite::Connection>> {
-    None
 }
 
 #[cfg(test)]

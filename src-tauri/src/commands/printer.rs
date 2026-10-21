@@ -25,7 +25,7 @@ pub fn list_printers(db: State<DbState>) -> AppResult<Vec<Printer>> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     let mut stmt = conn.prepare(
         "SELECT id, name, type, address, language, paper_width_mm, dpi,
@@ -85,7 +85,7 @@ pub fn add_printer(db: State<DbState>, req: AddPrinterRequest) -> AppResult<Prin
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     let exists: i64 = conn.query_row(
         "SELECT COUNT(*) FROM printers WHERE name = ?1 COLLATE NOCASE",
@@ -142,7 +142,7 @@ pub fn delete_printer(db: State<DbState>, id: i64) -> AppResult<()> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     let affected = conn.execute("DELETE FROM printers WHERE id = ?1", [id])?;
     if affected == 0 {
@@ -156,7 +156,7 @@ pub fn get_printer(db: State<DbState>, id: i64) -> AppResult<Printer> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     conn.query_row(
         "SELECT id, name, type, address, language, paper_width_mm, dpi,
@@ -194,7 +194,7 @@ pub async fn test_printer(
         let guard = db
             .lock()
             .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-        let conn = guard.connection()?;
+        let conn = guard.connection();
         conn.query_row(
             "SELECT id, name, type, address, language, paper_width_mm, dpi,
                     default_settings_json, created_at, updated_at

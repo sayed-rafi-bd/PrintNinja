@@ -3,7 +3,11 @@ import { useTranslation } from "react-i18next";
 import { ServerUnreachableScreen } from "@/components/ServerUnreachableScreen";
 import { SignInScreen } from "@/components/SignInScreen";
 import { getServiceUrl, onSessionEnded } from "@/lib/share/client";
-import { checkSession, type SessionCheck } from "@/lib/share/session";
+import {
+  checkSession,
+  canOpenOffline,
+  type SessionCheck,
+} from "@/lib/share/session";
 
 type Gate =
   | { kind: "checking" }
@@ -31,11 +35,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       setGate({ kind: "ready" });
       return;
     }
-    setGate(
-      result.state === "unreachable"
-        ? { kind: "unreachable", url: result.url, retrying: false }
-        : { kind: "signin", url: result.url, expired: false },
-    );
+    if (result.state === "unreachable") {
+      // Offline start: a stored session plus cached templates opens the
+      // app; the status chip shows offline and the scheduler retries.
+      void canOpenOffline().then((offline) => {
+        setGate(
+          offline
+            ? { kind: "ready" }
+            : { kind: "unreachable", url: result.url, retrying: false },
+        );
+      });
+      return;
+    }
+    setGate({ kind: "signin", url: result.url, expired: false });
   }, []);
 
   useEffect(() => {
@@ -53,8 +65,19 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     () =>
       onSessionEnded((reason) => {
         // Prefill the address that was in use, so only the password is needed.
+        // A shown expired notice is never downgraded: stale in-flight
+        // requests 401 after the first one and re-broadcast session-ended
+        // while the gate is already at sign-in. Only a successful sign-in
+        // or an explicit sign-out clears it.
         void getServiceUrl().then((url) =>
-          setGate((g) => ({ kind: "signin", url, expired: reason === "expired" && g.kind === "ready" })),
+          setGate((g) => ({
+            kind: "signin",
+            url,
+            expired:
+              g.kind === "signin"
+                ? g.expired
+                : reason === "expired" && g.kind === "ready",
+          })),
         );
       }),
     [],
@@ -88,7 +111,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           url={gate.url}
           retrying={gate.retrying}
           onRetry={() => void retry()}
-          onChangeServer={() => setGate({ kind: "signin", url: gate.url, expired: false })}
+          onChangeServer={() =>
+            setGate({ kind: "signin", url: gate.url, expired: false })
+          }
         />
       )}
 
@@ -100,7 +125,10 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         />
       )}
 
-      {opened && <div hidden={!ready}>{children}</div>}
+      {/* `ready ||`: mount the app in the same render that signs in. Waiting for
+          the `opened` effect left one blank frame between the form going away
+          and the app appearing. */}
+      {(opened || ready) && <div hidden={!ready}>{children}</div>}
     </>
   );
 }

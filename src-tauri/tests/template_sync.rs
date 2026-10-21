@@ -10,10 +10,8 @@ use printninja_lib::AppError;
 use rusqlite::Connection;
 
 fn seeded_db() -> Connection {
-    let mut conn = Connection::open_in_memory().expect("open in-memory db");
-    conn.execute_batch(include_str!("../src/db/schema.sql"))
-        .expect("apply schema");
-    printninja_lib::db::ensure_v2_schema(&mut conn).expect("apply v2 schema");
+    let conn = Connection::open_in_memory().expect("open in-memory db");
+    printninja_lib::db::init(&conn).expect("apply schema");
     conn.execute(
         "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, readme, summary)
          VALUES ('Invoice', 80, 200, 'portrait', '# Invoice', 'A4 invoice')",

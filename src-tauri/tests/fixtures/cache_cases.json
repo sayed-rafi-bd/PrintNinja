@@ -1,0 +1,636 @@
+{
+  "$comment": "Shared sync-cache fixtures (REFACTORING.md section 11). The same cases run in Rust (src-tauri/tests/cache_sync.rs) and against the TypeScript fake agent, so the two implementations cannot drift apart. Cursors are opaque base64 strings: MA== is 0, Mg== is 2, NQ== is 5.",
+  "cases": [
+    {
+      "name": "applies upserts and deletes with the cursor, atomically",
+      "given": {
+        "templates": [
+          {
+            "name": "A",
+            "server_id": "srv-a",
+            "sync_state": "synced",
+            "server_revision": 1,
+            "html": "<p>a1</p>",
+            "published_at": null
+          },
+          {
+            "name": "Doomed",
+            "server_id": "srv-doomed",
+            "sync_state": "synced",
+            "server_revision": 1,
+            "html": "<p>bye</p>",
+            "published_at": null
+          }
+        ],
+        "sync_state": {
+          "cursor": "Mg=="
+        }
+      },
+      "changes": [
+        {
+          "seq": 3,
+          "entity": "template",
+          "op": "upsert",
+          "data": {
+            "id": "srv-a",
+            "name": "A renamed",
+            "summary": "",
+            "page_w_mm": 101.6,
+            "page_h_mm": 152.4,
+            "body": "<p>a2</p>",
+            "css": "",
+            "readme": "",
+            "revision": 2,
+            "published_at": null,
+            "updated_at": "2026-10-20T00:00:00Z"
+          }
+        },
+        {
+          "seq": 4,
+          "entity": "template",
+          "op": "upsert",
+          "data": {
+            "id": "srv-b",
+            "name": "B",
+            "summary": "",
+            "page_w_mm": 210,
+            "page_h_mm": 297,
+            "body": "<p>b1</p>",
+            "css": ".b{}",
+            "readme": "R",
+            "revision": 1,
+            "published_at": "2026-10-20T00:00:00Z",
+            "updated_at": "2026-10-20T00:00:00Z"
+          }
+        },
+        {
+          "seq": 5,
+          "entity": "template",
+          "op": "delete",
+          "id": "srv-doomed"
+        }
+      ],
+      "new_cursor": "NQ==",
+      "expect": {
+        "templates": [
+          {
+            "server_id": "srv-a",
+            "name": "A renamed",
+            "sync_state": "synced",
+            "server_revision": 2,
+            "html": "<p>a2</p>"
+          },
+          {
+            "server_id": "srv-b",
+            "name": "B",
+            "sync_state": "synced",
+            "server_revision": 1,
+            "html": "<p>b1</p>",
+            "published_at": "2026-10-20T00:00:00Z"
+          }
+        ],
+        "gone": [
+          "srv-doomed"
+        ],
+        "sync_cursor": "NQ==",
+        "report": {
+          "applied_upserts": 2,
+          "applied_deletes": 1,
+          "skipped_dirty": 0
+        }
+      }
+    },
+    {
+      "name": "a dirty row survives the pull and the cursor still advances",
+      "given": {
+        "templates": [
+          {
+            "name": "Mine",
+            "server_id": "srv-mine",
+            "sync_state": "dirty",
+            "server_revision": 1,
+            "html": "<p>local edit</p>"
+          }
+        ],
+        "sync_state": {
+          "cursor": "Mg=="
+        }
+      },
+      "changes": [
+        {
+          "seq": 3,
+          "entity": "template",
+          "op": "upsert",
+          "data": {
+            "id": "srv-mine",
+            "name": "Mine",
+            "summary": "",
+            "page_w_mm": 210,
+            "page_h_mm": 297,
+            "body": "<p>server edit</p>",
+            "css": "",
+            "readme": "",
+            "revision": 2,
+            "published_at": null,
+            "updated_at": "2026-10-20T00:00:00Z"
+          }
+        }
+      ],
+      "new_cursor": "Mw==",
+      "expect": {
+        "templates": [
+          {
+            "server_id": "srv-mine",
+            "sync_state": "dirty",
+            "server_revision": 1,
+            "html": "<p>local edit</p>"
+          }
+        ],
+        "gone": [],
+        "sync_cursor": "Mw==",
+        "report": {
+          "applied_upserts": 0,
+          "applied_deletes": 0,
+          "skipped_dirty": 1
+        }
+      }
+    },
+    {
+      "name": "a dirty row survives its remote delete",
+      "given": {
+        "templates": [
+          {
+            "name": "Mine",
+            "server_id": "srv-mine",
+            "sync_state": "dirty",
+            "server_revision": 1,
+            "html": "<p>local edit</p>"
+          }
+        ],
+        "sync_state": {
+          "cursor": "Mg=="
+        }
+      },
+      "changes": [
+        {
+          "seq": 3,
+          "entity": "template",
+          "op": "delete",
+          "id": "srv-mine"
+        }
+      ],
+      "new_cursor": "Mw==",
+      "expect": {
+        "templates": [
+          {
+            "server_id": "srv-mine",
+            "sync_state": "dirty",
+            "server_revision": 1
+          }
+        ],
+        "gone": [],
+        "sync_cursor": "Mw==",
+        "report": {
+          "applied_upserts": 0,
+          "applied_deletes": 0,
+          "skipped_dirty": 1
+        }
+      }
+    },
+    {
+      "name": "an unknown entity fails the whole page atomically",
+      "given": {
+        "templates": [],
+        "sync_state": {
+          "cursor": ""
+        }
+      },
+      "changes": [
+        {
+          "seq": 1,
+          "entity": "template",
+          "op": "upsert",
+          "data": {
+            "id": "srv-ok",
+            "name": "Ok",
+            "summary": "",
+            "page_w_mm": 210,
+            "page_h_mm": 297,
+            "body": "<p>ok</p>",
+            "css": "",
+            "readme": "",
+            "revision": 1,
+            "published_at": null,
+            "updated_at": "2026-10-20T00:00:00Z"
+          }
+        },
+        {
+          "seq": 2,
+          "entity": "sticker",
+          "op": "upsert",
+          "data": {
+            "updated_at": "2026-10-20T00:00:00Z"
+          }
+        }
+      ],
+      "new_cursor": "Mg==",
+      "expect": {
+        "templates": [],
+        "gone": [
+          "srv-ok"
+        ],
+        "sync_cursor": "",
+        "report": null,
+        "error": true
+      }
+    },
+    {
+      "name": "an unknown op fails the whole page atomically",
+      "given": {
+        "templates": [],
+        "sync_state": {
+          "cursor": ""
+        }
+      },
+      "changes": [
+        {
+          "seq": 1,
+          "entity": "template",
+          "op": "rename",
+          "id": "srv-x"
+        }
+      ],
+      "new_cursor": "MQ==",
+      "expect": {
+        "templates": [],
+        "gone": [],
+        "sync_cursor": "",
+        "report": null,
+        "error": true
+      }
+    },
+    {
+      "name": "library upserts land synced rows",
+      "given": {
+        "templates": [],
+        "datasets": [],
+        "profiles": [],
+        "settings": [],
+        "fonts": [],
+        "sync_state": {
+          "cursor": ""
+        }
+      },
+      "changes": [
+        {
+          "seq": 1,
+          "entity": "dataset",
+          "op": "upsert",
+          "data": {
+            "id": "srv-ds",
+            "name": "Orders",
+            "data_json": "{\"rows\":[]}",
+            "revision": 1
+          }
+        },
+        {
+          "seq": 2,
+          "entity": "profile",
+          "op": "upsert",
+          "data": {
+            "id": "srv-prof",
+            "template_id": "tpl-1",
+            "printer_name": "e2e",
+            "settings_json": "{}",
+            "revision": 1
+          }
+        },
+        {
+          "seq": 3,
+          "entity": "setting",
+          "op": "upsert",
+          "data": {
+            "key": "ui_density",
+            "value": "compact",
+            "revision": 2
+          }
+        },
+        {
+          "seq": 4,
+          "entity": "font",
+          "op": "upsert",
+          "data": {
+            "id": "srv-font",
+            "name": "Body",
+            "format": "ttf",
+            "size_bytes": 12,
+            "sha256": "abc",
+            "revision": 1
+          }
+        }
+      ],
+      "new_cursor": "NA==",
+      "expect": {
+        "templates": [],
+        "datasets": [
+          {
+            "server_id": "srv-ds",
+            "name": "Orders",
+            "sync_state": "synced",
+            "server_revision": 1
+          }
+        ],
+        "profiles": [
+          {
+            "server_id": "srv-prof",
+            "printer_name": "e2e",
+            "sync_state": "synced",
+            "server_revision": 1
+          }
+        ],
+        "settings": [
+          {
+            "key": "ui_density",
+            "value": "compact"
+          }
+        ],
+        "fonts": [
+          {
+            "server_id": "srv-font",
+            "sync_state": "synced",
+            "server_revision": 1,
+            "sha256": "abc"
+          }
+        ],
+        "gone": [],
+        "gone_datasets": [],
+        "gone_profiles": [],
+        "gone_settings": [],
+        "gone_fonts": [],
+        "sync_cursor": "NA==",
+        "report": {
+          "applied_upserts": 4,
+          "applied_deletes": 0,
+          "skipped_dirty": 0
+        }
+      }
+    },
+    {
+      "name": "dirty library rows survive the pull",
+      "given": {
+        "templates": [],
+        "datasets": [
+          {
+            "server_id": "srv-ds",
+            "name": "Local",
+            "data_json": "{}",
+            "sync_state": "dirty",
+            "server_revision": 1
+          }
+        ],
+        "profiles": [
+          {
+            "server_id": "srv-prof",
+            "template_server_id": "tpl-1",
+            "printer_name": "e2e",
+            "settings_json": "{\"a\":1}",
+            "sync_state": "dirty",
+            "server_revision": 1
+          }
+        ],
+        "settings": [
+          {
+            "key": "ui_density",
+            "value": "comfortable",
+            "dirty": "dirty"
+          }
+        ],
+        "fonts": [],
+        "sync_state": {
+          "cursor": "Mg=="
+        }
+      },
+      "changes": [
+        {
+          "seq": 3,
+          "entity": "dataset",
+          "op": "upsert",
+          "data": {
+            "id": "srv-ds",
+            "name": "Server",
+            "data_json": "{\"rows\":[1]}",
+            "revision": 2
+          }
+        },
+        {
+          "seq": 4,
+          "entity": "profile",
+          "op": "upsert",
+          "data": {
+            "id": "srv-prof",
+            "template_id": "tpl-1",
+            "printer_name": "e2e",
+            "settings_json": "{\"a\":2}",
+            "revision": 2
+          }
+        },
+        {
+          "seq": 5,
+          "entity": "setting",
+          "op": "upsert",
+          "data": {
+            "key": "ui_density",
+            "value": "compact",
+            "revision": 3
+          }
+        }
+      ],
+      "new_cursor": "NQ==",
+      "expect": {
+        "templates": [],
+        "datasets": [
+          {
+            "server_id": "srv-ds",
+            "name": "Local",
+            "sync_state": "dirty",
+            "server_revision": 1
+          }
+        ],
+        "profiles": [
+          {
+            "server_id": "srv-prof",
+            "sync_state": "dirty",
+            "server_revision": 1,
+            "settings_json": "{\"a\":1}"
+          }
+        ],
+        "settings": [
+          {
+            "key": "ui_density",
+            "value": "comfortable"
+          }
+        ],
+        "fonts": [],
+        "gone": [],
+        "gone_datasets": [],
+        "gone_profiles": [],
+        "gone_settings": [],
+        "gone_fonts": [],
+        "sync_cursor": "NQ==",
+        "report": {
+          "applied_upserts": 0,
+          "applied_deletes": 0,
+          "skipped_dirty": 3
+        }
+      }
+    },
+    {
+      "name": "library deletes remove synced rows",
+      "given": {
+        "templates": [],
+        "datasets": [
+          {
+            "server_id": "srv-ds",
+            "name": "D",
+            "data_json": "{}",
+            "sync_state": "synced",
+            "server_revision": 1
+          }
+        ],
+        "profiles": [
+          {
+            "server_id": "srv-prof",
+            "template_server_id": "tpl-1",
+            "printer_name": "e2e",
+            "settings_json": "{}",
+            "sync_state": "synced",
+            "server_revision": 1
+          }
+        ],
+        "settings": [
+          {
+            "key": "brand_name",
+            "value": "Acme"
+          }
+        ],
+        "fonts": [
+          {
+            "server_id": "srv-font",
+            "family": "Body",
+            "sha256": "abc",
+            "sync_state": "synced",
+            "server_revision": 1
+          }
+        ],
+        "sync_state": {
+          "cursor": "Ng=="
+        }
+      },
+      "changes": [
+        {
+          "seq": 5,
+          "entity": "dataset",
+          "op": "delete",
+          "id": "srv-ds"
+        },
+        {
+          "seq": 6,
+          "entity": "profile",
+          "op": "delete",
+          "id": "srv-prof"
+        },
+        {
+          "seq": 7,
+          "entity": "setting",
+          "op": "delete",
+          "id": "brand_name"
+        },
+        {
+          "seq": 8,
+          "entity": "font",
+          "op": "delete",
+          "id": "srv-font"
+        }
+      ],
+      "new_cursor": "OA==",
+      "expect": {
+        "templates": [],
+        "datasets": [],
+        "profiles": [],
+        "settings": [],
+        "fonts": [],
+        "gone": [],
+        "gone_datasets": [
+          "srv-ds"
+        ],
+        "gone_profiles": [
+          "srv-prof"
+        ],
+        "gone_settings": [
+          "brand_name"
+        ],
+        "gone_fonts": [
+          "srv-font"
+        ],
+        "sync_cursor": "OA==",
+        "report": {
+          "applied_upserts": 0,
+          "applied_deletes": 4,
+          "skipped_dirty": 0
+        }
+      }
+    },
+    {
+      "name": "a library page with an unknown entity fails atomically",
+      "given": {
+        "templates": [],
+        "datasets": [],
+        "profiles": [],
+        "settings": [],
+        "fonts": [],
+        "sync_state": {
+          "cursor": ""
+        }
+      },
+      "changes": [
+        {
+          "seq": 1,
+          "entity": "dataset",
+          "op": "upsert",
+          "data": {
+            "id": "srv-ds",
+            "name": "Doomed",
+            "data_json": "{}",
+            "revision": 1
+          }
+        },
+        {
+          "seq": 2,
+          "entity": "sticker",
+          "op": "upsert",
+          "data": {
+            "id": "srv-x"
+          }
+        }
+      ],
+      "new_cursor": "Mg==",
+      "expect": {
+        "templates": [],
+        "datasets": [],
+        "profiles": [],
+        "settings": [],
+        "fonts": [],
+        "gone": [],
+        "gone_datasets": [
+          "srv-ds"
+        ],
+        "gone_profiles": [],
+        "gone_settings": [],
+        "gone_fonts": [],
+        "sync_cursor": "",
+        "report": null,
+        "error": true
+      }
+    }
+  ]
+}

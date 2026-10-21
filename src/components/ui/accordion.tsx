@@ -9,7 +9,11 @@ const AccordionItem = React.forwardRef<
   React.ElementRef<typeof AccordionPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Item>
 >(({ className, ...props }, ref) => (
-  <AccordionPrimitive.Item ref={ref} className={cn("border-b last:border-b-0", className)} {...props} />
+  <AccordionPrimitive.Item
+    ref={ref}
+    className={cn("border-b last:border-b-0", className)}
+    {...props}
+  />
 ));
 AccordionItem.displayName = "AccordionItem";
 
@@ -21,21 +25,21 @@ const AccordionTrigger = React.forwardRef<
   // so an <h2> keeps the heading levels in order.
   <AccordionPrimitive.Header asChild>
     <h2 className="flex">
-    <AccordionPrimitive.Trigger
-      ref={ref}
-      className={cn(
-        // min-h-11 on touch screens keeps the 44 px tap target.
-        "group flex flex-1 items-center gap-2 py-3 text-left text-sm font-medium transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:min-h-11",
-        className,
-      )}
-      {...props}
-    >
-      <ChevronRight
-        className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-150 group-data-[state=open]:rotate-90"
-        aria-hidden="true"
-      />
-      {children}
-    </AccordionPrimitive.Trigger>
+      <AccordionPrimitive.Trigger
+        ref={ref}
+        className={cn(
+          // min-h-11 on touch screens keeps the 44 px tap target.
+          "group flex flex-1 items-center gap-2 py-3 text-left text-sm font-medium transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:min-h-11",
+          className,
+        )}
+        {...props}
+      >
+        <ChevronRight
+          className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-150 group-data-[state=open]:rotate-90"
+          aria-hidden="true"
+        />
+        {children}
+      </AccordionPrimitive.Trigger>
     </h2>
   </AccordionPrimitive.Header>
 ));
@@ -45,7 +49,11 @@ const AccordionContent = React.forwardRef<
   React.ElementRef<typeof AccordionPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof AccordionPrimitive.Content>
 >(({ className, children, ...props }, ref) => (
-  <AccordionPrimitive.Content ref={ref} className="overflow-hidden text-sm" {...props}>
+  <AccordionPrimitive.Content
+    ref={ref}
+    className="overflow-hidden text-sm"
+    {...props}
+  >
     <div className={cn("pb-4", className)}>{children}</div>
   </AccordionPrimitive.Content>
 ));

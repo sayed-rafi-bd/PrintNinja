@@ -1,5 +1,6 @@
 use crate::db::DbState;
 use crate::error::{AppError, AppResult};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -14,6 +15,7 @@ pub struct Template {
     pub readme: String,
     pub summary: String,
     pub remote_id: Option<String>,
+    pub server_id: Option<String>,
     pub published_at: Option<String>,
     pub origin: String,
     pub origin_owner: Option<String>,
@@ -29,13 +31,14 @@ pub fn list_templates(db: State<DbState>) -> AppResult<Vec<Template>> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
 
     let mut stmt = conn.prepare(
         "SELECT id, name, current_version_id, page_w_mm, page_h_mm,
-                orientation, readme, summary, remote_id, published_at,
+                orientation, readme, summary, remote_id, server_id, published_at,
                 origin, origin_owner, withdrawn, created_at, updated_at
-         FROM templates ORDER BY name COLLATE NOCASE",
+         FROM templates WHERE sync_state <> 'deleted_pending'
+         ORDER BY name COLLATE NOCASE",
     )?;
 
     let templates = stmt
@@ -50,12 +53,13 @@ pub fn list_templates(db: State<DbState>) -> AppResult<Vec<Template>> {
                 readme: row.get(6)?,
                 summary: row.get(7)?,
                 remote_id: row.get(8)?,
-                published_at: row.get(9)?,
-                origin: row.get(10)?,
-                origin_owner: row.get(11)?,
-                withdrawn: row.get::<_, i64>(12)? != 0,
-                created_at: row.get(13)?,
-                updated_at: row.get(14)?,
+                server_id: row.get(9)?,
+                published_at: row.get(10)?,
+                origin: row.get(11)?,
+                origin_owner: row.get(12)?,
+                withdrawn: row.get::<_, i64>(13)? != 0,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -78,16 +82,37 @@ pub struct CreateTemplateRequest {
     pub compiled_key: Option<String>,
     pub readme: Option<String>,
     pub summary: Option<String>,
+    /// Sync bookkeeping (Phase 3). Absent means a brand-new local row:
+    /// a fresh server id and `dirty` with no server copy. A download
+    /// passes the server's id, revision and `synced` state instead.
+    pub server_id: Option<String>,
+    pub sync_state: Option<String>,
+    pub kind: Option<String>,
+    pub owner_handle: Option<String>,
+    pub server_revision: Option<i64>,
+    pub base_revision: Option<i64>,
 }
 
 #[tauri::command]
 pub fn create_template(db: State<DbState>, req: CreateTemplateRequest) -> AppResult<Template> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    write_template(guard.connection(), &req)
+}
+
+/// The work behind [`create_template`], split out so the SQL runs in tests
+/// against a real connection, without a Tauri app around it.
+pub fn write_template(conn: &Connection, req: &CreateTemplateRequest) -> AppResult<Template> {
     let name = req.name.trim();
     if name.is_empty() {
         return Err(AppError::Validation("Template name required".into()));
     }
 
-    let orientation = req.orientation.unwrap_or_else(|| "portrait".to_string());
+    let orientation = req
+        .orientation
+        .clone()
+        .unwrap_or_else(|| "portrait".to_string());
     if !VALID_ORIENTATIONS.contains(&orientation.as_str()) {
         return Err(AppError::Validation(format!(
             "Invalid orientation '{}'. Expected one of {:?}",
@@ -111,7 +136,7 @@ pub fn create_template(db: State<DbState>, req: CreateTemplateRequest) -> AppRes
             issues.join("; ")
         )));
     }
-    let readme = match req.readme {
+    let readme = match req.readme.clone() {
         Some(r) if !r.trim().is_empty() => {
             crate::readme::validate_readme(&r)?;
             r
@@ -119,16 +144,12 @@ pub fn create_template(db: State<DbState>, req: CreateTemplateRequest) -> AppRes
         _ => crate::readme::readme_scaffold_with_placeholders(name, &html),
     };
     crate::readme::validate_readme(&readme)?;
-    let summary = req.summary.unwrap_or_default();
+    let summary = req.summary.clone().unwrap_or_default();
 
-    let guard = db
-        .lock()
-        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let mut conn = guard.connection()?;
-    let tx = conn.transaction()?;
+    let tx = conn.unchecked_transaction()?;
 
     let exists: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM templates WHERE name = ?1 COLLATE NOCASE",
+        "SELECT COUNT(*) FROM templates WHERE name = ?1 COLLATE NOCASE AND sync_state <> 'deleted_pending'",
         [name],
         |r| r.get(0),
     )?;
@@ -139,10 +160,45 @@ pub fn create_template(db: State<DbState>, req: CreateTemplateRequest) -> AppRes
         )));
     }
 
+    // Sync bookkeeping (Phase 3): brand-new local rows are dirty with a
+    // fresh server id; a download passes the server's id and revision
+    // and starts synced.
+    let sync_state = req
+        .sync_state
+        .clone()
+        .unwrap_or_else(|| "dirty".to_string());
+    if !["synced", "dirty", "deleted_pending", "conflict"].contains(&sync_state.as_str()) {
+        return Err(AppError::Validation(format!(
+            "Invalid sync_state '{sync_state}'"
+        )));
+    }
+    let kind = req.kind.clone().unwrap_or_else(|| "own".to_string());
+    if !["own", "saved"].contains(&kind.as_str()) {
+        return Err(AppError::Validation(format!("Invalid kind '{kind}'")));
+    }
+    let server_id = req
+        .server_id
+        .clone()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
     tx.execute(
-        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, readme, summary)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![name, page_w_mm, page_h_mm, orientation, readme, summary],
+        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, readme, summary,
+                server_id, server_revision, base_revision, sync_state, kind, owner_handle)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        rusqlite::params![
+            name,
+            page_w_mm,
+            page_h_mm,
+            orientation,
+            readme,
+            summary,
+            server_id,
+            req.server_revision,
+            req.base_revision,
+            sync_state,
+            kind,
+            req.owner_handle,
+        ],
     )?;
     let template_id = tx.last_insert_rowid();
 
@@ -168,16 +224,16 @@ pub fn create_template(db: State<DbState>, req: CreateTemplateRequest) -> AppRes
 
     tx.commit()?;
 
-    let template = tx_guard_to_template(&conn, template_id)?;
+    let template = tx_guard_to_template(conn, template_id)?;
     Ok(template)
 }
 
 fn tx_guard_to_template(conn: &rusqlite::Connection, id: i64) -> rusqlite::Result<Template> {
     conn.query_row(
         "SELECT id, name, current_version_id, page_w_mm, page_h_mm,
-                orientation, readme, summary, remote_id, published_at,
+                orientation, readme, summary, remote_id, server_id, published_at,
                 origin, origin_owner, withdrawn, created_at, updated_at
-         FROM templates WHERE id = ?1",
+         FROM templates WHERE id = ?1 AND sync_state <> 'deleted_pending'",
         [id],
         |row| {
             Ok(Template {
@@ -190,12 +246,13 @@ fn tx_guard_to_template(conn: &rusqlite::Connection, id: i64) -> rusqlite::Resul
                 readme: row.get(6)?,
                 summary: row.get(7)?,
                 remote_id: row.get(8)?,
-                published_at: row.get(9)?,
-                origin: row.get(10)?,
-                origin_owner: row.get(11)?,
-                withdrawn: row.get::<_, i64>(12)? != 0,
-                created_at: row.get(13)?,
-                updated_at: row.get(14)?,
+                server_id: row.get(9)?,
+                published_at: row.get(10)?,
+                origin: row.get(11)?,
+                origin_owner: row.get(12)?,
+                withdrawn: row.get::<_, i64>(13)? != 0,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
             })
         },
     )
@@ -206,8 +263,8 @@ pub fn get_template(db: State<DbState>, id: i64) -> AppResult<Template> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
-    tx_guard_to_template(&conn, id).map_err(|e| match e {
+    let conn = guard.connection();
+    tx_guard_to_template(conn, id).map_err(|e| match e {
         rusqlite::Error::QueryReturnedNoRows => {
             AppError::NotFound(format!("Template {} not found", id))
         }
@@ -235,8 +292,8 @@ pub fn update_template_meta(
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
-    write_template_meta(&conn, &req)
+    let conn = guard.connection();
+    write_template_meta(conn, &req)
 }
 
 /// The work behind [`update_template_meta`], split out so the SQL runs in tests
@@ -262,7 +319,8 @@ pub fn write_template_meta(
 
     let affected = conn.execute(
         "UPDATE templates SET name = ?1, page_w_mm = ?2, page_h_mm = ?3, orientation = ?4,
-             summary = ?5, updated_at = datetime('now')
+             summary = ?5, updated_at = datetime('now'),
+             sync_state = CASE WHEN sync_state = 'deleted_pending' THEN 'deleted_pending' ELSE 'dirty' END
          WHERE id = ?6",
         rusqlite::params![
             name,
@@ -291,15 +349,17 @@ pub fn update_readme(db: State<DbState>, req: UpdateReadmeRequest) -> AppResult<
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
     let affected = conn.execute(
-        "UPDATE templates SET readme = ?1, updated_at = datetime('now') WHERE id = ?2",
+        "UPDATE templates SET readme = ?1, updated_at = datetime('now'),
+                sync_state = CASE WHEN sync_state = 'deleted_pending' THEN 'deleted_pending' ELSE 'dirty' END
+         WHERE id = ?2",
         rusqlite::params![req.readme, req.id],
     )?;
     if affected == 0 {
         return Err(AppError::NotFound(format!("Template {} not found", req.id)));
     }
-    tx_guard_to_template(&conn, req.id).map_err(Into::into)
+    tx_guard_to_template(conn, req.id).map_err(Into::into)
 }
 
 #[tauri::command]
@@ -307,9 +367,17 @@ pub fn delete_template(db: State<DbState>, id: i64) -> AppResult<()> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    write_delete_template(guard.connection(), id)
+}
 
-    let affected = conn.execute("DELETE FROM templates WHERE id = ?1", [id])?;
+/// Soft delete: the row becomes a local tombstone the sync engine
+/// confirms against the server before it is really removed. Reads filter
+/// deleted_pending rows out, so the app stops seeing the template at once.
+pub fn write_delete_template(conn: &Connection, id: i64) -> AppResult<()> {
+    let affected = conn.execute(
+        "UPDATE templates SET sync_state = 'deleted_pending' WHERE id = ?1 AND sync_state <> 'deleted_pending'",
+        [id],
+    )?;
     if affected == 0 {
         return Err(AppError::NotFound(format!("Template {} not found", id)));
     }
@@ -329,8 +397,8 @@ pub fn set_publish_info(db: State<DbState>, req: SetPublishInfoRequest) -> AppRe
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
-    write_publish_info(&conn, &req)
+    let conn = guard.connection();
+    write_publish_info(conn, &req)
 }
 
 /// The work behind [`set_publish_info`], split out for tests.
@@ -369,7 +437,7 @@ pub fn clear_publish_info(db: State<DbState>, req: ClearPublishInfoRequest) -> A
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
     let affected = conn.execute(
         "UPDATE templates SET remote_id = NULL, published_at = NULL WHERE id = ?1",
         [req.id],
@@ -377,7 +445,7 @@ pub fn clear_publish_info(db: State<DbState>, req: ClearPublishInfoRequest) -> A
     if affected == 0 {
         return Err(AppError::NotFound(format!("Template {} not found", req.id)));
     }
-    tx_guard_to_template(&conn, req.id).map_err(Into::into)
+    tx_guard_to_template(conn, req.id).map_err(Into::into)
 }
 
 #[derive(Debug, Deserialize)]
@@ -397,7 +465,7 @@ pub fn update_template_origin(db: State<DbState>, req: UpdateOriginRequest) -> A
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    let conn = guard.connection()?;
+    let conn = guard.connection();
     let affected = conn.execute(
         "UPDATE templates SET origin = ?1, origin_owner = ?2 WHERE id = ?3",
         rusqlite::params![req.origin, req.origin_owner, req.id],
@@ -405,5 +473,5 @@ pub fn update_template_origin(db: State<DbState>, req: UpdateOriginRequest) -> A
     if affected == 0 {
         return Err(AppError::NotFound(format!("Template {} not found", req.id)));
     }
-    tx_guard_to_template(&conn, req.id).map_err(Into::into)
+    tx_guard_to_template(conn, req.id).map_err(Into::into)
 }

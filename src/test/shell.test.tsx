@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import axe from "axe-core";
 import "@/lib/i18n";
@@ -8,8 +14,15 @@ import { NAV_GROUPS, NAV_ITEMS, isActivePath } from "@/lib/shell/nav";
 import { isTypingTarget } from "@/lib/shell/useGlobalShortcuts";
 
 beforeAll(() => {
-  (globalThis as any).ResizeObserver = (globalThis as any).ResizeObserver || class { observe() {} unobserve() {} disconnect() {} };
-  Element.prototype.scrollIntoView = Element.prototype.scrollIntoView || (() => {});
+  (globalThis as any).ResizeObserver =
+    (globalThis as any).ResizeObserver ||
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+  Element.prototype.scrollIntoView =
+    Element.prototype.scrollIntoView || (() => {});
 });
 
 function Where() {
@@ -21,7 +34,16 @@ function renderShell(path = "/history") {
     <MemoryRouter initialEntries={[path]}>
       <Layout>
         <Routes>
-          <Route path="*" element={<><h1>Page</h1><input aria-label="field" /><Where /></>} />
+          <Route
+            path="*"
+            element={
+              <>
+                <h1>Page</h1>
+                <input aria-label="field" />
+                <Where />
+              </>
+            }
+          />
         </Routes>
       </Layout>
     </MemoryRouter>,
@@ -31,9 +53,15 @@ function renderShell(path = "/history") {
 describe("navigation model", () => {
   it("groups pages by job: Work, Build, Admin", () => {
     expect(NAV_GROUPS.map((g) => g.id)).toEqual(["work", "build", "admin"]);
-    expect(NAV_GROUPS[0].items.map((i) => i.path)).toEqual(["/print", "/history"]);
+    expect(NAV_GROUPS[0].items.map((i) => i.path)).toEqual([
+      "/print",
+      "/history",
+    ]);
     expect(NAV_GROUPS[1].items.map((i) => i.path)).toEqual(["/", "/templates"]);
-    expect(NAV_GROUPS[2].items.map((i) => i.path)).toEqual(["/printers", "/settings"]);
+    expect(NAV_GROUPS[2].items.map((i) => i.path)).toEqual([
+      "/printers",
+      "/settings",
+    ]);
   });
 
   it("gives every page a unique go-to key", () => {
@@ -63,17 +91,29 @@ describe("app shell", () => {
   it("renders the same landmarks on every route, with labelled navs", () => {
     renderShell();
     expect(screen.getByRole("main")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Skip to content" })).toHaveAttribute("href", "#main");
-    expect(screen.getByRole("navigation", { name: "Primary" })).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "Primary, bottom bar" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Skip to content" }),
+    ).toHaveAttribute("href", "#main");
+    expect(
+      screen.getByRole("navigation", { name: "Primary" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("navigation", { name: "Primary, bottom bar" }),
+    ).toBeInTheDocument();
   });
 
   it("marks the current page and shows group headings", () => {
     renderShell("/history");
     const nav = screen.getByRole("navigation", { name: "Primary" });
-    for (const g of ["Work", "Build", "Admin"]) expect(within(nav).getByText(g)).toBeInTheDocument();
-    expect(within(nav).getByRole("link", { name: "History" })).toHaveAttribute("aria-current", "page");
-    expect(within(nav).getByRole("link", { name: "Print" })).not.toHaveAttribute("aria-current");
+    for (const g of ["Work", "Build", "Admin"])
+      expect(within(nav).getByText(g)).toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "History" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(
+      within(nav).getByRole("link", { name: "Print" }),
+    ).not.toHaveAttribute("aria-current");
   });
 
   it("no longer shows the sidebar tip", () => {
@@ -84,10 +124,14 @@ describe("app shell", () => {
   it("opens search with Ctrl+K and jumps to a page", async () => {
     renderShell("/history");
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-    const input = await screen.findByPlaceholderText("Search pages, templates, actions");
+    const input = await screen.findByPlaceholderText(
+      "Search pages, templates, actions",
+    );
     fireEvent.change(input, { target: { value: "printers" } });
     fireEvent.click(await screen.findByRole("option", { name: /Printers/ }));
-    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/printers"));
+    await waitFor(() =>
+      expect(screen.getByTestId("where")).toHaveTextContent("/printers"),
+    );
   });
 
   it("goes to a page with G then a letter", () => {
@@ -111,7 +155,9 @@ describe("app shell", () => {
     fireEvent.keyDown(window, { key: "?" });
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Keyboard shortcuts")).toBeInTheDocument();
-    expect(within(dialog).getAllByText(/^Go to /)).toHaveLength(NAV_ITEMS.length);
+    expect(within(dialog).getAllByText(/^Go to /)).toHaveLength(
+      NAV_ITEMS.length,
+    );
   });
 
   it("every page is reachable by keyboard: all nav items are real links", () => {
@@ -124,7 +170,12 @@ describe("app shell", () => {
 
   it("has no axe violations", async () => {
     const { container } = renderShell();
-    const results = await axe.run(container, { rules: { "color-contrast": { enabled: false }, region: { enabled: false } } });
+    const results = await axe.run(container, {
+      rules: {
+        "color-contrast": { enabled: false },
+        region: { enabled: false },
+      },
+    });
     expect(results.violations.map((v) => v.id)).toEqual([]);
   });
 });
