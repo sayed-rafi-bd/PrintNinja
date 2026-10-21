@@ -10,13 +10,10 @@
 > wire names, sync hasMore per-stream + batched head versions,
 > paged saved manifest under savedRoutes, daily use-count cap per
 > user and template (429 past 1000), unpublish normalized to 200,
-> desktop tray + autostart + single-instance + Background settings
-> (slice A; toolchain-verified). Linux CI ships deb + AppImage
-> (bundle proven locally: PrintNinja_0.5.0_amd64.deb, 84 MiB).
-> Still open: Android foreground service. E2E is started: the
-> virtual printer runs in the stack, print-path (harness wire) and
-> print-submit (UI request shape) specs are in, with per-worker DB
-> isolation and the fake-agent contract still to do.
+> desktop tray + autostart + single-instance + Background settings,
+> Linux CI (deb + AppImage, bundle proven locally), Linux
+> system-Chromium render, E2E done (§4: 23 → 40 specs plus harness,
+> contract and server-side gaps). Only open: Android foreground service.
 
 Audited from the working tree (develop). Each item names the file that proves it.
 Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt with user impact, **P2** = hardening/polish.
@@ -143,39 +140,56 @@ Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt 
 - REST authZ (`api/routes.rs:74-150,172-237`): `allowed_ips` exact-string (no CIDR, IPv6 zone-id mismatch), idempotency fast-path returns before `last_used_at` audit, `list_jobs` caps 200 with no pagination, `batch_print` builds ≤5000 rows inside one `unchecked_transaction` (UI stall).
 - `redact_with_secrets` (`commands/print.rs:907-955`) naive substring replace (4-char minimum still hits common words); `data/fetcher.rs:135-214` documents a DNS-rebinding gap; `deeplink.rs:26-69` accepts any post-`printninja://` path, unbounded `callback` (exfiltration), `copies` overflow silently defaults; `error.rs:1-17` serializes internal `Database/Internal` strings to IPC/REST.
 
-## 4. E2E testing to add
+## 4. E2E testing to add — DONE (2026-10-21, `feat/improvements-backlog`)
 
-### What exists (12 specs)
-`e2e/tests/`: `smoke|auth|twoPc|conflict|versions|community|library|offline|sessionExpiry|printIsolation|adoption|reset.e2e.ts`. `printIsolation` explicitly never clicks print-submit; `fakeAgent/commands.ts:276-301` stubs `print_html/spike_test_print/list_jobs/get_job/reprint_job/retry_job/delete_job` and batch/API/deeplink commands as `warn+null`.
+23 specs → 40 across 22 files, all listed by Playwright and
+typechecked; full runs need CI (Testcontainers PG + browsers), same
+as the pre-existing suite. What each item became:
 
-### Missing flows (new specs, in priority order)
-1. **`print-submit.e2e.ts` (P0)** — real `print_html` via virtual printer: success row, failed row, timings visible, secret redaction in `rendered_html`, reprint/retry from History. Un-stub the 7 history commands; start `support/virtual-printer` from `stack.ts` (currently orphaned, ports in README `9100/515/631/8080` disagree with code `20100/11515/11631/11080` — fix one side).
-2. **`batch.e2e.ts` (P0)** — create → queued → worker drain → progress → cancel → retry; asserts `claim_next` ordering, `update_batch_progress` counters, cancel resurrection guard. Needs `create_batch/list_batches/get_batch/cancel_batch/retry_batch` unstubbed.
-3. **`local-api.e2e.ts` (P0)** — `start/stop/status/regenerate_key`, auth scopes (`read` vs `print`), IP allowlist, idempotency duplicate-job, `callback_url` 400, port-in-use error. Covers `api/routes.rs` + `commands/api.rs`, none of which run today.
-4. **`printers.e2e.ts` (P1)** — add/test/delete, duplicate-name `COLLATE NOCASE`, invalid type/language/address, `get_printer` 404, `test_printer` success/failure messaging. Fake `add_printer` (`commands.ts:131-147`) currently ignores Rust validation (`printer.rs:67-138`) — mirror it or fail the spec.
-5. **`deeplink.e2e.ts` (P1)** — `printninja://print/open/template`, confirm sheet, bad action, `copies=garbage`, `callback` handling. `parse_deeplink` is stubbed today.
-6. **`designer-validation.e2e.ts` (P1)** — remote-ref rejection (`version.rs:103-108`), duplicate/empty name, Tailwind warnings, import/export round-trip. Testids `templateImport/classWarnings/designerSave` (`testids.ts:35,39-41`) exist but no spec uses them.
-7. **`offline-library.e2e.ts` (P1)** — offline queue + replay for datasets/profiles/fonts/settings (today only a template version is replayed in `offline.e2e.ts`).
-8. **`settings-admin.e2e.ts` (P2)** — onboarding 3-step (`UI_GUIDE.md:64-75`), brand/logo 256KB/type validation, density, diagnostics, trusted sources; API-tab `api_port` via UI (today set via raw `invoke`, `library.e2e.ts:338`).
-9. **`negative-community.e2e.ts` (P2)** — save-conflict, withdrawn-template print attempt, empty search/sort states, Saved read-only enforced via direct `invoke` write attempt. Extends `community.e2e.ts` happy paths.
-10. **`a11y-i18n.e2e.ts` (P2)** — Playwright `axe`, keyboard-only print flow, 390px/1440px viewports, `prefers-reduced-motion`, missing-key detection. `UI_GUIDE.md:410-436` requires these in Vitest only — nothing runs them in a browser.
-
-### Harness fixes (do before adding specs)
-- `support/stack.ts:39-111` one shared Postgres + one server for `fullyParallel` workers → cross-spec pollution (only `Date.now()` randomness). Isolate per-worker (schema per worker or serialized DB), use `randomUUID` run ids. Prod-parity flags are relaxed (`RATE_LIMIT_*=1000`, `DOCS_ENABLED=false`, minimal Argon2) — add a nightly prod-like run. `service.unref()` + `writeStackState` can orphan processes on `waitForHealth` failure.
-- `playwright.config.ts:21-26` single Chromium, `reuseExistingServer:true` (stale 1420 bundle false-pass), `retries: CI?1:0`. Add Firefox/WebKit + mobile viewport projects, fail on reused stale server in CI, shard slow specs (`conflict/versions/community` 150–300s).
-- `support/fixtures.ts:22-34` seed via `localStorage` with naive quote-escape — HTML with `'`/`</script>` breaks `addInitScript`. JSON-encode the seed. `signedInPc` handle collides under parallel (`Date.now()`); use `randomUUID`. One context = one PC; add multi-page same-PC helper for conflict races.
-- `support/api.ts:1-181` covers only auth/mine/community/versions/sync. Add helpers for template PUT/publish/unpublish/saved-copy/datasets/profiles/fonts/settings so specs stop dropping to raw `fetch` (`adoption.e2e.ts:16-44`).
-- `support/testids.ts:1-67` incomplete — specs hardcode `"conflict-banner"`, `"version-row-*"`, `"font-row-*"` (`conflict.e2e.ts:169`, `versions.e2e.ts:143`, `library.e2e.ts:228`). Enforce the registry (lint for literal `data-testid`), add History/Print/Printer/Designer-error/toast/dialog ids.
-- `support/fakeAgent/*` reimplements Rust cache/sync/dirty logic in JS — any Rust fix without a JS mirror = green E2E + broken prod. Treat the fake as a contract: version it against Rust behavior, or run print/API/deeplink specs against the real agent only. Fix `seedPrinters` bundle-eval timing (`commands.ts:21`), `resetDatabase` counts (`cache.ts:768-781`), `.stack.json` + bundle artifacts in `support/`, and `stack-teardown.ts:30-31` hard `docker stop/rm` (breaks Podman/Testcontainers-Ryuk).
-- `support/virtual-printer/` is fully built but never started by `stack.ts`, has no `package.json` script, and its README ports disagree with code. Wire it, document it, gate print specs on it.
-
-### Server-side tests to add (Vitest, `server/test/`)
-- Body-limit: 300KiB dataset → 413, 6MiB font → 413, 600KiB template → 413; `OPTIONS` CORS preflight per origin; `helmet` headers; `x-request-id` on 500 (today only 404/400 in `plugins.test.ts`).
-- Concurrency: parallel `PUT` same id+revision → one 409; parallel register same handle (exists for auth, `integration/auth.test.ts:230` — extend to templates/datasets/fonts); `incrementUseCount` lost-update check.
-- Sync: `reset:true` when cursor < tombstone floor, `types=` unknown → 400, `since=` garbage → 400, byte-budget trim + `has_more`/`next_cursor` monotonicity, empty-page invariant, query-count regression for the N+1 in `sync.ts`.
-- Docs gating: `/openapi.json` → 404 when disabled (only `/docs` asserted, `plugins.test.ts:230`).
-- Retention: `purgeOldTombstones` boundary (91d purged, 89d kept at 90d retention) — today only sessions are tested.
-- Pipeline: `typecheck + arch (dependency-cruiser) + openapi:check (git diff --exit-code) + test:unit + test:int` with coverage threshold (fail <80% on `domain/`).
+- print-submit / print-path: UI request shape (`printSubmit.e2e.ts`),
+  harness wire round-trip (`printPath.e2e.ts`, proven live here
+  against the real binary), device faults + queue/transport in
+  `src-tauri/tests/virtual_printer.rs`. Deliberately no "success row
+  in History" browser spec: browsers cannot do raw TCP, and the fake
+  agent has no worker by design.
+- batch: UI create/cancel/retry + validation (`batch.e2e.ts`) over a
+  fake store mirroring Rust's validation and cancel/retry rules;
+  worker drain + counters stay in Rust worker tests.
+- local-api: covered at the Rust integration level instead of
+  Playwright (`api_routes.rs`: scopes, allowlist incl. fail-closed,
+  idempotency incl. parallel same-key, callback 400, print/batch
+  pipelines; `api_server_lifecycle.rs`: busy-port message, key
+  rotation invalidates, status from settings). The desktop
+  start/stop wiring needs a Tauri runtime and stays manual.
+- printers / deeplink / designer-validation / offline-library /
+  settings-admin / negative-community / a11y-i18n: all present
+  (`printers|deeplink|designerValidation|offlineLibrary|
+  settingsAdmin|negativeCommunity|a11yI18n.e2e.ts`). Adaptations:
+  no axe dep — role-based + layout assertions on the existing
+  Chromium project; Firefox runs nightly (`E2E_BROWSERS`, no
+  WebKit project); History/Print/Printer keep accessible
+  roles/labels by design instead of new test ids; the fake's
+  validation, remote-ref, batch, deeplink and seed logic mirrors
+  the Rust behavior it stands in for, with contract tests
+  (`agentContract`, `e2eTestids`, `chromium_override…`,
+  `parse_deep_link_contract_table` on both sides).
+- Harness: per-worker databases + servers (no shared-PG pollution),
+  base64 seeds (quotes/`</script>`-safe), compact UUID run ids,
+  `secondPage` helper, full write-surface api helpers, registry-only
+  test ids (+ guard test), stack starts + teardown kills the virtual
+  printer, `reuseExistingServer` off in CI, workers pinned to the
+  stack rule, nightly prod-parity + Firefox workflow.
+- Server-side: body limits, `/v2/ready`, 413 envelopes, sync
+  edge cases (unknown types/garbage cursor 400s, empty page,
+  byte-budget trim + resume), `/docs` + `/openapi.json` gating,
+  retention boundary (pre-existing), update races for
+  templates/datasets/fonts, `test:coverage` ≥80% on `domain/` wired
+  into CI.
+- Intentionally not done here: N+1 query-count regression (needs a
+  live PG; the groupBy fix is covered by correctness tests),
+  WebKit project (Firefox covers the second engine), axe dep
+  (see above), saved-copy write protection in Rust (UI-only
+  today; changing backend semantics is not E2E work).
 
 ## 5. Background execution, tray, autostart, Linux + Android (new scope)
 
@@ -258,6 +272,6 @@ close-to-tray as user settings; autostart is **opt-in, off by default**.
 ## 6. Suggested order
 
 1. P0 correctness: print payload (pageRange/grayscale), preview data, designer dirty-guard, server body limits, health/ready, byte validation, tombstone FK, login timing oracle.
-2. P0 E2E: `print-submit`, `batch`, `local-api` behind the virtual printer; per-worker DB isolation first or the new specs will flake.
+2. ~~P0 E2E~~ — done, see §4.
 3. P1 UX/debt: CSV parser, batch progress, Saved N+1, search debounce, printer edit flow, retention (implement or remove), sanitizer replacement, store cleanup, IPC redaction.
 4. P2 hardening: sessions lifecycle, metrics/tracing, font blob storage, CHECK constraints, a11y/i18n E2E, docs-off-by-default.
