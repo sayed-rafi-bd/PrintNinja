@@ -171,7 +171,85 @@ Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt 
 - Retention: `purgeOldTombstones` boundary (91d purged, 89d kept at 90d retention) — today only sessions are tested.
 - Pipeline: `typecheck + arch (dependency-cruiser) + openapi:check (git diff --exit-code) + test:unit + test:int` with coverage threshold (fail <80% on `domain/`).
 
-## 5. Suggested order
+## 5. Background execution, tray, autostart, Linux + Android (new scope)
+
+User decisions (2026-10-21): Linux ships **deb + AppImage**; mobile is
+**Android only** (foreground service + persistent notification, which
+the OS mandates); desktop offers **both** minimize-to-tray **and**
+close-to-tray as user settings; autostart is **opt-in, off by default**.
+
+### A. Desktop tray + window behavior (Windows + Linux)
+- `tauri::tray::TrayIcon` (built into Tauri 2, no plugin): icon,
+  tooltip, menu (**Show**, **Send test page**, **Quit**), left-click
+  toggles the window. No tray plugin exists today — there is no
+  `tauri-plugin` in `src-tauri/Cargo.toml` at all.
+- Settings keys in the `settings` table (all default off except
+  close-to-tray, proposed): `launch_at_startup=false`,
+  `start_minimized=false` (only meaningful with autostart),
+  `minimize_to_tray=false`, `close_to_tray=true`. New Settings →
+  Background section; toggles apply live (tray rebuild, autostart
+  enable/disable) with no restart.
+- `tauri-plugin-autostart` (Windows Run registry + Linux
+  `~/.config/autostart/*.desktop`) launched with a `--minimized` flag
+  the Rust entrypoint honors by skipping the first window show.
+- `tauri-plugin-single-instance`: a second launch (or deeplink) focuses
+  the running window instead of starting a second queue — required
+  once close-to-tray keeps the process alive.
+- `src-tauri/capabilities/default.json` gains tray + autostart
+  permissions; Linux tray needs libappindicator/StatusNotifier at
+  runtime (note: stock GNOME needs an extension — document it).
+- Rust tests: setting read/apply wiring, `--minimized` parsing,
+  single-instance focus path. Tray show/hide/quit stays a manual
+  HARDWARE_CHECKLIST item (no display in CI).
+
+### B. Android background (no tray on mobile)
+- Kotlin foreground service in `plugins/`: persistent notification
+  ("PrintNinja print service is running", taps open the app),
+  `START_STICKY`, Stop action. The local API server and queue live
+  under it so prints survive the app being swiped away.
+- Battery-optimization exemption is a user decision: prompt for
+  `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` from the new Background
+  settings, never silently. Document Doze limits (deferred network,
+  alarms) in the plan doc.
+
+### C. Linux support — packaging is the small half
+- CI job (`ubuntu-24.04`) installing `libwebkit2gtk-4.1-dev`,
+  `libappindicator3-dev`, `librsvg2-dev`, `patchelf`; `tauri build`
+  producing **deb + AppImage** (`tauri.conf.json:bundle.targets` is
+  `"all"` today but CI only uploads the MSI — extend the release job).
+- Install + autostart docs; `.deb` post-install smoke (`dpkg -i` in a
+  container at minimum builds unbroken).
+
+### D. Linux support — the print pipeline is the big half (P0-blocker)
+- `render/mod.rs:58-66,191-199`: `html_to_pdf`/`html_to_raster` are
+  `Err` off-Windows by design (honest, never a placeholder).
+  `transport/mod.rs:251`: `system`/`usb`/`bt` return `None`
+  off-Windows. **IPP + raw TCP already work everywhere** — the plan is:
+  - Linux v1 = IPP + raw TCP + test page, rendered via system
+    headless Chromium when present
+    (`chromium --headless=new --print-to-pdf --no-pdf-header-footer`
+    with `@page` from `apply_layout`); when no Chromium binary is
+    found, fail loudly naming the missing renderer, same honesty as
+    today's non-Windows error.
+  - USB/system-spooler stay Windows-only with clear UI messaging;
+    CUPS-native PDF/render is the follow-up, not v1.
+- `docs/HARDWARE_CHECKLIST.md` gains a Linux section: CUPS discovery
+  (`lpstat`, `ippfind`), AppIndicator on KDE vs GNOME, `.deb`
+  install, autostart `.desktop` verification, Chromium-present vs
+  absent print paths.
+
+### E. E2E + CI for this scope
+- Automated gate: Linux build job + existing Vitest/cargo suites;
+  Playwright stays Chromium (tray has no headless display).
+- `pnpm e2e` additions (all headless-safe): Background settings
+  persist + apply (autostart toggle writes the mocked entry,
+  tray-mode toggles flip window-close behavior in the fake agent),
+  Android foreground-service notification contract in the fake agent.
+- Manual gates stay in HARDWARE_CHECKLIST: tray menu on
+  Windows/KDE/GNOME, reboot-with-autostart per OS, Android swipe-away
+  print, battery-exemption prompt copy.
+
+## 6. Suggested order
 
 1. P0 correctness: print payload (pageRange/grayscale), preview data, designer dirty-guard, server body limits, health/ready, byte validation, tombstone FK, login timing oracle.
 2. P0 E2E: `print-submit`, `batch`, `local-api` behind the virtual printer; per-worker DB isolation first or the new specs will flake.
