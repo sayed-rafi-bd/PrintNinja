@@ -43,6 +43,7 @@ const deps: AppDeps = {
   fonts: createFontRepository(db),
   saved: createSavedRepository(db),
   sync: createSyncRepository(db),
+  ping: () => db.$queryRaw`SELECT 1`.then(() => undefined),
 };
 
 const app = await buildApp({ config, deps });

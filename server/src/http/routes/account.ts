@@ -8,6 +8,7 @@ import {
   putFont,
   putFontFile,
 } from "../../domain/fonts.js";
+import { FONT_MAX_BYTES } from "../../domain/fonts.js";
 import { UnauthorizedError } from "../../domain/errors.js";
 import type { AuthDeps } from "../../domain/ports.js";
 import type {
@@ -191,6 +192,11 @@ export async function accountRoutes(
     "/v2/fonts/:id/file",
     {
       preHandler: [requireAuth(deps)],
+      // Raw bytes ride outside JSON: the only envelope is the octet
+      // headers, so the budget is the domain cap plus a small margin.
+      // Without this the 16 KiB service default rejects every real font
+      // as a framework 413 before the domain can answer 413 itself.
+      bodyLimit: FONT_MAX_BYTES + 64 * 1024,
       schema: {
         description: "Upload font bytes; checked against the format and size.",
         params: fontIdParams,

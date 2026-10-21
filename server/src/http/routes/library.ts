@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { deleteDataset, putDataset } from "../../domain/datasets.js";
+import { DATASET_JSON_MAX_BYTES } from "../../domain/datasets.js";
 import { deleteProfile, putProfile } from "../../domain/profiles.js";
 import { UnauthorizedError } from "../../domain/errors.js";
 import type { AuthDeps } from "../../domain/ports.js";
@@ -78,6 +79,10 @@ export async function libraryRoutes(
     "/v2/datasets/:id",
     {
       preHandler: [requireAuth(deps)],
+      // The domain cap is DATASET_JSON_MAX_BYTES on data_json alone;
+      // the route budget adds headroom for the JSON envelope (name,
+      // revision, UUID) so legal payloads never die as framework 413s.
+      bodyLimit: DATASET_JSON_MAX_BYTES + 128 * 1024,
       schema: {
         description: "Create or update a sample dataset by client UUID.",
         params: uuidParams,

@@ -13,6 +13,7 @@ export const ERROR_CODES = [
   "revision_conflict",
   "revision_required",
   "quota_exceeded",
+  "service_unavailable",
   "rate_limited",
   "internal_error",
 ] as const;
@@ -100,6 +101,14 @@ export class RevisionRequiredError extends DomainError {
 export class QuotaExceededError extends DomainError {
   constructor(message: string) {
     super("quota_exceeded", 409, message);
+  }
+}
+
+/** A dependency the request needs is down (database for /v2/ready).
+ * Message names the dependency; no details. */
+export class ServiceUnavailableError extends DomainError {
+  constructor(message: string) {
+    super("service_unavailable", 503, message);
   }
 }
 

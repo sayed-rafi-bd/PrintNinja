@@ -104,4 +104,10 @@ export interface AppDeps extends AuthDeps {
   profiles: ProfileRepository;
   settings: SettingRepository;
   fonts: FontRepository;
+  /**
+   * Database round-trip for /v2/ready. Optional so unit tests can run
+   * without a database; readiness then answers 503 (see healthRoutes)
+   * instead of claiming a probe that never ran.
+   */
+  ping?: () => Promise<void>;
 }

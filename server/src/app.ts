@@ -123,8 +123,9 @@ export async function buildApp(args: {
     );
   }
 
-  // The health route owns its full /v2/health path; no prefix here.
-  await app.register(healthRoutes);
+  // The health routes own their full /v2/health and /v2/ready paths;
+  // no prefix here.
+  await app.register(healthRoutes, { ping: deps.ping });
 
   await app.register(authRoutes, {
     deps,

@@ -39,8 +39,9 @@ export interface TemplateRouteOptions {
  * Visibility travels only through publish/unpublish: creates are always
  * private, and PUT never changes published_at. Updates need if_revision
  * (428 without, 409 on stale); a stale revision with identical content
- * replays the stored row (200, no write). The PUT body cap is 1 MiB per
- * the plan; everything else keeps the 16 KiB service default.
+ * replays the stored row (200, no write). The PUT body cap covers the
+ * 512 + 256 + 64 KiB domain caps plus JSON overhead with headroom;
+ * everything else keeps the 16 KiB service default.
  */
 export async function templateRoutes(
   app: FastifyInstance,
@@ -53,7 +54,7 @@ export async function templateRoutes(
     "/v2/templates/:id",
     {
       preHandler: [requireAuth(deps)],
-      bodyLimit: 1024 * 1024,
+      bodyLimit: 1280 * 1024,
       schema: {
         description: "Create or update a template by client UUID.",
         params: templateIdParams,
