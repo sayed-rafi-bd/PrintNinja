@@ -41,6 +41,13 @@ import { DEFAULT_MOCK_DATA } from "@/lib/templates/defaultTemplate";
 import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
 import type { StarterTemplate } from "@/lib/templates/seedTemplates";
 import { compileTemplateCss } from "@/lib/templates/compileTemplateCss";
+import {
+  applyColumnMapping,
+  CSV_MAX_BYTES,
+  CsvTooLargeError,
+  parseCsv,
+  type ColumnMapping,
+} from "@/lib/csv";
 const MM_TO_PX = 3.7795;
 
 export function PrintPage() {
@@ -56,6 +63,8 @@ export function PrintPage() {
     Record<string, string>
   > | null>(null);
   const [batchCsvHeaders, setBatchCsvHeaders] = useState<string[]>([]);
+  const [batchCsvRows, setBatchCsvRows] = useState<string[][]>([]);
+  const [columnMap, setColumnMap] = useState<ColumnMapping>({});
   const [batches, setBatches] = useState<
     Array<{
       id: number;
@@ -222,47 +231,25 @@ export function PrintPage() {
     return () => clearInterval(id);
   }, [showBatchDialog]);
 
-  const parseCsv = (text: string): { headers: string[]; rows: string[][] } => {
-    const lines: string[][] = [];
-    let cur = "";
-    let row: string[] = [];
-    let inQuote = false;
-    for (let i = 0; i < text.length; i++) {
-      const c = text[i];
-      if (c === '"') {
-        if (inQuote && text[i + 1] === '"') {
-          cur += '"';
-          i++;
-        } else {
-          inQuote = !inQuote;
-        }
-      } else if (c === "," && !inQuote) {
-        row.push(cur.trim());
-        cur = "";
-      } else if ((c === "\n" || c === "\r") && !inQuote) {
-        if (cur !== "" || row.length > 0) {
-          row.push(cur.trim());
-          cur = "";
-          lines.push(row);
-          row = [];
-        }
-        if (c === "\r" && text[i + 1] === "\n") i++;
-      } else {
-        cur += c;
-      }
-    }
-    if (cur !== "" || row.length > 0) {
-      row.push(cur.trim());
-      lines.push(row);
-    }
-    if (lines.length === 0) return { headers: [], rows: [] };
-    const headers = lines[0].map((h) => h.trim());
-    return { headers, rows: lines.slice(1) };
+  const rebuildBatchJson = (
+    headers: string[],
+    rows: string[][],
+    mapping: ColumnMapping,
+  ) => {
+    const jsonRows = applyColumnMapping(headers, rows, mapping);
+    setBatchCsvPreview(jsonRows.slice(0, 5));
+    setBatchInput(JSON.stringify(jsonRows, null, 2));
+    return jsonRows;
   };
 
   const handleCsvUpload = async (file: File) => {
     setBatchCsvFile(file);
     try {
+      if (file.size > CSV_MAX_BYTES) {
+        throw new CsvTooLargeError(
+          `CSV file is ${(file.size / 1024).toFixed(0)} KiB (max ${(CSV_MAX_BYTES / 1024).toFixed(0)} KiB)`,
+        );
+      }
       const text = await file.text();
       const { headers, rows } = parseCsv(text);
       if (headers.length === 0) {
@@ -270,23 +257,24 @@ export function PrintPage() {
         return;
       }
       setBatchCsvHeaders(headers);
-      const jsonRows = rows
-        .filter((r) => r.some((c) => c !== ""))
-        .map((r) => {
-          const obj: Record<string, string> = {};
-          headers.forEach((h, i) => {
-            obj[h] = r[i] ?? "";
-          });
-          return obj;
-        });
-      setBatchCsvPreview(jsonRows.slice(0, 5));
-      setBatchInput(JSON.stringify(jsonRows, null, 2));
+      setBatchCsvRows(rows);
+      const mapping: ColumnMapping = {};
+      setColumnMap(mapping);
+      const jsonRows = rebuildBatchJson(headers, rows, mapping);
       toast.success(
         `CSV loaded: ${jsonRows.length} row(s), ${headers.length} column(s)`,
       );
     } catch (e) {
-      toast.error(`CSV parse failed: ${e}`);
+      toast.error(e instanceof Error ? e.message : `CSV parse failed: ${e}`);
     }
+  };
+
+  const handleColumnRename = (header: string, key: string) => {
+    setColumnMap((prev) => {
+      const next = { ...prev, [header]: key };
+      rebuildBatchJson(batchCsvHeaders, batchCsvRows, next);
+      return next;
+    });
   };
 
   const handleBatchPrint = async () => {
@@ -342,6 +330,9 @@ export function PrintPage() {
       setBatchInput("");
       setBatchCsvFile(null);
       setBatchCsvPreview(null);
+      setBatchCsvHeaders([]);
+      setBatchCsvRows([]);
+      setColumnMap({});
       refreshBatches();
     } catch (e) {
       toast.error(`Batch failed: ${e}`);
@@ -1045,21 +1036,43 @@ export function PrintPage() {
               )}
               {batchCsvHeaders.length > 0 && (
                 <div className="rounded border p-2 text-xs">
-                  <p className="font-medium mb-1">
-                    Columns → variables: {batchCsvHeaders.join(", ")}
+                  <p className="font-medium mb-1">Columns → variables</p>
+                  <p className="text-muted-foreground mb-2">
+                    Rename a column to change its template key (e.g. {"{{"}
+                    name{"}}"}). Clear the name to drop the column; the JSON
+                    below rebuilds itself.
                   </p>
-                  <p className="text-muted-foreground">
-                    Headers become template keys (e.g. {"{{"}name{"}}"}). Edit
-                    JSON below to rename if needed.
-                  </p>
+                  <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                    {/* Duplicate header names share one mapping entry. */}
+                    {batchCsvHeaders.map((h, i) => (
+                      <label
+                        key={`${h}-${i}`}
+                        className="flex items-center gap-1.5"
+                      >
+                        <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">
+                          {h === "" ? "(blank header)" : h}
+                        </span>
+                        <span aria-hidden="true">→</span>
+                        <Input
+                          aria-label={`Template key for column ${h === "" ? "(blank header)" : h}`}
+                          className="h-7 text-xs"
+                          value={columnMap[h] ?? h}
+                          placeholder="(drop)"
+                          onChange={(e) =>
+                            handleColumnRename(h, e.target.value)
+                          }
+                        />
+                      </label>
+                    ))}
+                  </div>
                   {batchCsvPreview && (
                     <div className="mt-2 overflow-auto max-h-32">
                       <table className="w-full text-xs">
                         <thead>
                           <tr>
-                            {batchCsvHeaders.map((h) => (
-                              <th key={h} className="text-left border-b p-1">
-                                {h}
+                            {Object.keys(batchCsvPreview[0] ?? {}).map((k) => (
+                              <th key={k} className="text-left border-b p-1">
+                                {k}
                               </th>
                             ))}
                           </tr>
@@ -1067,12 +1080,12 @@ export function PrintPage() {
                         <tbody>
                           {batchCsvPreview.map((row, i) => (
                             <tr key={i}>
-                              {batchCsvHeaders.map((h) => (
+                              {Object.entries(row).map(([k, v]) => (
                                 <td
-                                  key={h}
+                                  key={k}
                                   className="p-1 border-b truncate max-w-[120px]"
                                 >
-                                  {row[h]}
+                                  {v}
                                 </td>
                               ))}
                             </tr>
