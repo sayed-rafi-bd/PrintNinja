@@ -586,6 +586,11 @@ describe("HelpersPanel", () => {
     expect(onInsert).toHaveBeenCalledWith("{{currency }}", 2);
     expect(helperSnippet("upper")).toEqual({ text: "{{upper }}", back: 2 });
   });
+
+  it("starts a barcode call with a symbology", () => {
+    expect(helperSnippet("barcode")).toEqual({ text: '{{barcode "code128" }}', back: 2 });
+    expect(helperSnippet("qrcode")).toEqual({ text: "{{qrcode }}", back: 2 });
+  });
 });
 
 describe("EditorPane insertAtCursor", () => {

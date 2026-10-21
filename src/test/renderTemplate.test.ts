@@ -198,6 +198,72 @@ describe("helpers", () => {
   });
 });
 
+describe("barcode and qrcode helpers", () => {
+  const body = (html: string, data: Record<string, unknown> = {}) =>
+    renderTemplate(html, "", data);
+
+  it("barcode reads its value from the data", () => {
+    const out = body('{{barcode "code128" order.id}}', { order: { id: "ORD-1042" } });
+    expect(out).toContain('<div class="barcode"');
+    expect(out).toContain("<svg");
+    expect(out).toContain('width="40mm"');
+    // Not escaped by Handlebars.
+    expect(out).not.toContain("&lt;svg");
+  });
+
+  it("barcode renders a different image for a different row", () => {
+    const a = body('{{barcode "code128" id}}', { id: "AAA111" });
+    const b = body('{{barcode "code128" id}}', { id: "BBB222" });
+    expect(a).not.toBe(b);
+  });
+
+  it("barcode accepts a number and honours width", () => {
+    const out = body('{{barcode "code128" n width=60}}', { n: 1042 });
+    expect(out).toContain('width="60mm"');
+  });
+
+  it("barcode clamps the width like the Rust helper", () => {
+    expect(body('{{barcode "code128" v width=9999}}', { v: "X" })).toContain('width="200mm"');
+    expect(body('{{barcode "code128" v width=1}}', { v: "X" })).toContain('width="5mm"');
+  });
+
+  it("barcode prints nothing for a missing, invalid or preview-only value", () => {
+    const empty = (html: string, data: Record<string, unknown> = {}) =>
+      body(html, data).match(/<body>([\s\S]*?)<\/body>/)?.[1]?.trim();
+    expect(empty('{{barcode "code128" nope}}')).toBe("");
+    expect(empty('{{barcode "code128"}}')).toBe("");
+    // EAN-13 needs 13 digits with a correct check digit.
+    expect(empty('{{barcode "ean13" v}}', { v: "123" })).toBe("");
+    expect(empty('{{barcode "ean13" v}}', { v: "5901234123458" })).toBe("");
+    expect(empty('{{barcode "ean13" v}}', { v: "5901234123457" })).toContain("<svg");
+    // Data Matrix is not implemented by the Rust renderer, so no preview either.
+    expect(empty('{{barcode "datamatrix" v}}', { v: "123" })).toBe("");
+  });
+
+  it("barcode works inside {{#each}} for batch printing", () => {
+    const out = body('{{#each rows}}[{{barcode "code128" this.sku}}]{{/each}}', {
+      rows: [{ sku: "A1" }, { sku: "B2" }],
+    });
+    expect(out.match(/<svg/g)?.length).toBe(2);
+  });
+
+  it("qrcode reads its value from the data and honours size", () => {
+    const out = body("{{qrcode url size=30}}", { url: "https://example.com/o/1" });
+    expect(out).toContain("<svg");
+    expect(out).toContain('width="30mm"');
+  });
+
+  it("qrcode prints nothing for an empty value", () => {
+    const out = body("{{qrcode url}}", { url: "" });
+    expect(out).not.toContain("<svg");
+  });
+
+  it("the sanitizer keeps the barcode but would still strip a script in the value", () => {
+    const out = body('{{barcode "code128" v}}', { v: "<script>alert(1)</script>" });
+    expect(out).not.toContain("<script");
+  });
+});
+
 describe("starter templates", () => {
   it("all render against the mock data without throwing", () => {
     for (const tpl of STARTER_TEMPLATES) {
@@ -226,6 +292,20 @@ describe("starter templates", () => {
     expect(out).toContain(DEFAULT_MOCK_DATA.store.name);
     expect(out).toContain(DEFAULT_MOCK_DATA.order.id);
     expect(out).not.toContain("{{");
+  });
+
+  it("the label carries a Code 128 barcode of the tracking number", () => {
+    const label = STARTER_TEMPLATES[0];
+    expect(label.html).toContain('{{barcode "code128" order.tracking');
+    const out = renderTemplate(label.html, label.css, DEFAULT_MOCK_DATA as any);
+    expect(out).toContain('<div class="barcode"');
+    expect(out).toContain("<svg");
+    // A different tracking number gives a different barcode.
+    const other = renderTemplate(label.html, label.css, {
+      ...DEFAULT_MOCK_DATA,
+      order: { ...DEFAULT_MOCK_DATA.order, tracking: "PN-0000-0000-XX" },
+    } as any);
+    expect(other).not.toBe(out);
   });
 });
 

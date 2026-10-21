@@ -37,12 +37,13 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import { PanelLeftClose, QrCode } from "lucide-react";
 import { useTemplateStore, type Template, type TemplateVersion } from "@/lib/store/templateStore";
 import { toast } from "sonner";
 import CodeMirror from "@uiw/react-codemirror";
 import { html } from "@codemirror/lang-html";
-import { BARCODE_TYPES, validateBarcode, buildBarcodeHtml } from "@/lib/utils/barcode";
+import { BARCODE_TYPES, buildBarcodeSnippet, isHelperSymbology } from "@/lib/utils/barcode";
 import { DEFAULT_TEMPLATE_HTML, DEFAULT_TEMPLATE_CSS, DEFAULT_MOCK_DATA, STARTER_TEMPLATES } from "@/lib/templates/defaultTemplate";
 import { compiledFields } from "@/lib/templates/compileTemplateCss";
 import { useCompiledCss } from "@/lib/templates/useCompiledCss";
@@ -80,6 +81,8 @@ export function DesignerPage() {
   const [showBarcodeDialog, setShowBarcodeDialog] = useState(false);
   const [barcodeType, setBarcodeType] = useState("code128");
   const [barcodeValue, setBarcodeValue] = useState("");
+  // On: the value is a data field (order.id) read at print time. Off: fixed text.
+  const [barcodeFromData, setBarcodeFromData] = useState(true);
   const [barcodeError, setBarcodeError] = useState<string | null>(null);
   const [showNewTemplateDialog, setShowNewTemplateDialog] = useState(false);
   const [newTemplateName, setNewTemplateName] = useState("");
@@ -692,27 +695,23 @@ export function DesignerPage() {
   };
 
   const handleInsertBarcode = () => {
-    const error = validateBarcode(barcodeType, barcodeValue);
-    if (error) {
-      setBarcodeError(error);
+    const snippet = buildBarcodeSnippet(
+      barcodeType,
+      barcodeValue,
+      barcodeFromData && isHelperSymbology(barcodeType),
+    );
+    if (!snippet.ok) {
+      setBarcodeError(snippet.error);
       return;
     }
-    // Inline SVG (not a data URI): the printed HTML must not depend on an
-    // external image, and SVG stays crisp at any printer DPI.
-    const html = buildBarcodeHtml({
-      type: barcodeType,
-      value: barcodeValue,
-      scaleToWidth: 40,
-    });
-    if (html) {
-      setHtmlCode((prev) => prev + "\n" + html);
-      setShowBarcodeDialog(false);
-      setBarcodeValue("");
-      setBarcodeError(null);
-      toast.success(`${barcodeType} barcode inserted`);
-    } else {
-      setBarcodeError("Could not generate this barcode");
-    }
+    // Insert where the cursor is. A helper call such as {{barcode "code128"
+    // order.id}} is drawn by the same renderer for the preview and for print,
+    // so each print and each CSV row gets its own code.
+    insertHelper(snippet.kind === "static" ? "\n" + snippet.text : snippet.text);
+    setShowBarcodeDialog(false);
+    setBarcodeValue("");
+    setBarcodeError(null);
+    toast.success(`${barcodeType} barcode inserted`);
   };
 
   /**
@@ -1235,9 +1234,34 @@ export function DesignerPage() {
                 </SelectContent>
               </Select>
             </div>
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="barcode-from-data" className="text-sm">
+                Read the value from a data field
+              </Label>
+              <Switch
+                id="barcode-from-data"
+                checked={barcodeFromData && isHelperSymbology(barcodeType)}
+                disabled={!isHelperSymbology(barcodeType)}
+                onCheckedChange={(on) => { setBarcodeFromData(on); setBarcodeError(null); }}
+              />
+            </div>
             <div className="space-y-1">
-              <Label htmlFor="barcode-value">Value</Label>
-              <Input id="barcode-value" placeholder="Enter barcode value" value={barcodeValue} onChange={(e) => { setBarcodeValue(e.target.value); setBarcodeError(null); }} />
+              <Label htmlFor="barcode-value">
+                {barcodeFromData && isHelperSymbology(barcodeType) ? "Data field" : "Value"}
+              </Label>
+              <Input
+                id="barcode-value"
+                placeholder={barcodeFromData && isHelperSymbology(barcodeType) ? "order.id" : "Enter barcode value"}
+                value={barcodeValue}
+                onChange={(e) => { setBarcodeValue(e.target.value); setBarcodeError(null); }}
+              />
+              <p className="text-xs text-muted-foreground">
+                {!isHelperSymbology(barcodeType)
+                  ? "This type is inserted with a fixed value."
+                  : barcodeFromData
+                    ? "Each print and each CSV row gets its own code."
+                    : "The same code on every print."}
+              </p>
               {barcodeError && (
                 <p id="barcode-error" role="alert" className="text-xs text-danger">{barcodeError}</p>
               )}

@@ -8,6 +8,9 @@ import {
   BARCODE_TYPES,
   bcidFor,
   labelFor,
+  buildBarcodeSnippet,
+  isHelperSymbology,
+  PRINT_SYMBOLOGIES,
 } from "@/lib/utils/barcode";
 
 describe("generateBarcodeSvg", () => {
@@ -56,6 +59,38 @@ describe("generateBarcodeSvg", () => {
       text: false,
     });
     expect(withoutText).not.toBe(withText);
+  });
+});
+
+describe("barcode geometry", () => {
+  // Regression: `width: 2` made bwip-js squeeze the whole symbol into 2 mm, so
+  // a long Code 128 came out as a tall, narrow, solid black block.
+  const viewBox = (svg: string) =>
+    svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/)!.slice(1).map(Number);
+
+  it("draws a long Code 128 wider than it is tall", () => {
+    const svg = generateBarcodeSvg({ type: "code128", value: "PN-7X9K-4242-BD", text: false });
+    const [w, h] = viewBox(svg);
+    expect(w).toBeGreaterThan(h * 3);
+  });
+
+  it("keeps the bars apart instead of overlapping them", () => {
+    const svg = generateBarcodeSvg({ type: "code128", value: "PN-7X9K-4242-BD", text: false });
+    const strokeWidth = Number(svg.match(/stroke-width="([\d.]+)"/)![1]);
+    const xs = [...svg.matchAll(/M([\d.]+) [\d.]+L/g)].map((m) => Number(m[1]));
+    const gaps = xs.slice(1).map((x, i) => x - xs[i]).filter((g) => g > 0);
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(strokeWidth);
+  });
+
+  it("a longer value makes a wider symbol", () => {
+    const short = viewBox(generateBarcodeSvg({ type: "code128", value: "AB", text: false }))[0];
+    const long = viewBox(generateBarcodeSvg({ type: "code128", value: "ABCDEFGHIJKL", text: false }))[0];
+    expect(long).toBeGreaterThan(short);
+  });
+
+  it("draws a QR code as a square", () => {
+    const [w, h] = viewBox(generateBarcodeSvg({ type: "qr", value: "https://example.com/o/1", text: false }));
+    expect(w).toBe(h);
   });
 });
 
@@ -186,5 +221,85 @@ describe("bwip-js encoder name mapping", () => {
       expect(labelFor(value)).toBeTruthy();
       expect(labelFor(value)).not.toBe(value);
     }
+  });
+});
+
+describe("buildBarcodeSnippet", () => {
+  it("inserts a helper call that reads a data field", () => {
+    expect(buildBarcodeSnippet("code128", "order.id", true)).toEqual({
+      ok: true,
+      kind: "helper",
+      text: '{{barcode "code128" order.id}}',
+    });
+    expect(buildBarcodeSnippet("qr", " order.url ", true)).toEqual({
+      ok: true,
+      kind: "helper",
+      text: "{{qrcode order.url}}",
+    });
+  });
+
+  it("rejects something that is not a field path", () => {
+    for (const bad of ["order id", "{{order.id}}", "order.", "1abc", 'a"b']) {
+      const r = buildBarcodeSnippet("code128", bad, true);
+      expect(r.ok, bad).toBe(false);
+    }
+  });
+
+  it("refuses a data field for symbologies the print path cannot draw", () => {
+    const r = buildBarcodeSnippet("datamatrix", "order.id", true);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain("Data Matrix");
+  });
+
+  it("quotes a fixed value and still uses the helper", () => {
+    expect(buildBarcodeSnippet("code128", "ABC-123", false)).toEqual({
+      ok: true,
+      kind: "helper",
+      text: '{{barcode "code128" "ABC-123"}}',
+    });
+    expect(buildBarcodeSnippet("qr", "https://example.com", false)).toEqual({
+      ok: true,
+      kind: "helper",
+      text: '{{qrcode "https://example.com"}}',
+    });
+  });
+
+  it("validates a fixed value for its symbology", () => {
+    const r = buildBarcodeSnippet("ean13", "123", false);
+    expect(r).toEqual({ ok: false, error: "EAN-13 requires exactly 13 digits" });
+  });
+
+  it("uses single quotes when the value holds a double quote, and rejects both", () => {
+    expect(buildBarcodeSnippet("code128", 'a"b', false)).toMatchObject({
+      ok: true,
+      text: `{{barcode "code128" 'a"b'}}`,
+    });
+    expect(buildBarcodeSnippet("code128", `a"b'c`, false).ok).toBe(false);
+  });
+
+  it("keeps preview-only symbologies as a static SVG", () => {
+    const r = buildBarcodeSnippet("datamatrix", "PN-1042", false);
+    expect(r).toMatchObject({ ok: true, kind: "static" });
+    if (r.ok) expect(r.text).toContain("<svg");
+  });
+
+  it("requires a value", () => {
+    expect(buildBarcodeSnippet("code128", "  ", true)).toEqual({
+      ok: false,
+      error: "Value is required",
+    });
+  });
+});
+
+describe("print symbologies", () => {
+  it("are all known to the Designer picker", () => {
+    for (const t of PRINT_SYMBOLOGIES) {
+      expect(BARCODE_TYPES.some((b) => b.value === t), t).toBe(true);
+    }
+  });
+
+  it("treat QR as a helper type too", () => {
+    expect(isHelperSymbology("qr")).toBe(true);
+    expect(isHelperSymbology("datamatrix")).toBe(false);
   });
 });

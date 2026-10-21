@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use std::path::PathBuf;
 
+pub mod barcode;
 pub mod handlebars;
 pub mod raster;
 

@@ -1,6 +1,7 @@
 import Handlebars from "handlebars";
 import { buildTemplateCss, injectStyles } from "@/lib/templates/templateCss";
 import { sanitizeForRender } from "@/lib/render/sanitize";
+import { barcodeHelperHtml, qrcodeHelperHtml } from "@/lib/utils/barcode";
 
 /**
  * Register the shared helper set once.
@@ -55,6 +56,32 @@ function registerHelpers() {
     const filler = typeof pad === "string" && pad.length > 0 ? pad[0] : " ";
     const s = String(value ?? "");
     return filler.repeat(Math.max(0, w - s.length)) + s;
+  });
+
+  // `{{barcode "code128" order.id width=50 text=false}}` and
+  // `{{qrcode order.url size=30}}`. The Rust renderer implements the same
+  // helpers (src-tauri/src/render/handlebars.rs); keep them in step.
+  // The last argument Handlebars passes is always the options object, so a
+  // missing value arrives as the options object and is read as empty.
+  Handlebars.registerHelper("barcode", function (
+    this: unknown,
+    ...args: unknown[]
+  ) {
+    const options = args.pop() as Handlebars.HelperOptions;
+    const [type, value] = args;
+    return new Handlebars.SafeString(
+      barcodeHelperHtml(type, value, options?.hash ?? {}),
+    );
+  });
+
+  Handlebars.registerHelper("qrcode", function (
+    this: unknown,
+    ...args: unknown[]
+  ) {
+    const options = args.pop() as Handlebars.HelperOptions;
+    return new Handlebars.SafeString(
+      qrcodeHelperHtml(args[0], options?.hash ?? {}),
+    );
   });
 }
 

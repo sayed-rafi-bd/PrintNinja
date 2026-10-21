@@ -5,7 +5,11 @@ export interface BarcodeOptions {
   value: string;
   /** Bar height in mm (bwip-js `height`). */
   height?: number;
-  /** Module width in mm (bwip-js `width`). */
+  /**
+   * Not passed to bwip-js. Its `width` is the width of the WHOLE symbol in mm,
+   * so `width: 2` squeezed every barcode into 2 mm and the bars overlapped into
+   * a solid black block. The printed size comes from `scaleToWidth`.
+   */
   width?: number;
   /** Render the human-readable text under the bars. */
   text?: boolean;
@@ -25,6 +29,9 @@ export interface BarcodeOptions {
  * render it and the `<img>` showed a broken image. bwip-js has a real
  * `toSVG()`; use it.
  */
+/** Matrix symbols are sized by their module grid; a bar height would stretch them. */
+const MATRIX_BCIDS = new Set(["qrcode", "datamatrix", "azteccode"]);
+
 export function generateBarcodeSvg(options: BarcodeOptions): string {
   // Translate our friendly id into the real bwip-js encoder name.
   const bcid = bcidFor(options.type);
@@ -34,11 +41,15 @@ export function generateBarcodeSvg(options: BarcodeOptions): string {
     return toSVG({
       bcid,
       text: options.value,
-      height: options.height || 10,
-      width: options.width || 2,
+      // Bar height in mm. Not for matrix symbols: a QR code with `height: 10`
+      // came out 150x85, a stretched rectangle that scanners cannot read.
+      ...(MATRIX_BCIDS.has(bcid) ? {} : { height: options.height || 10 }),
       includetext: options.text !== false,
       textxalign: "center",
       scale: 3,
+      // Match the Rust renderer's QR error correction (medium) so the preview
+      // and the printed code hold the same data with the same damage tolerance.
+      ...(bcid === "qrcode" ? { eclevel: "M" } : {}),
     });
   } catch {
     return "";
@@ -74,6 +85,152 @@ export function buildBarcodeHtml(options: BarcodeOptions): string {
   return `<div class="barcode" style="text-align:center;margin:2mm 0">
 ${svg.replace(/^<svg/, `<svg width="${widthMm}mm"`)}
 </div>`;
+}
+
+/**
+ * The symbologies the `{{barcode}}` helper supports.
+ *
+ * Print renders templates in Rust (src-tauri/src/render/barcode.rs), which
+ * implements exactly this set, so the preview must not draw anything else or
+ * it would show a barcode that never prints (REFACTORING.md decision #13).
+ * Keep this list in sync with `SYMBOLOGIES` there.
+ */
+export const PRINT_SYMBOLOGIES = [
+  "code128",
+  "code39",
+  "code93",
+  "ean13",
+  "ean8",
+  "upca",
+  "itf",
+  "codabar",
+] as const;
+
+export function isPrintSymbology(type: string): boolean {
+  return (PRINT_SYMBOLOGIES as readonly string[]).includes(type);
+}
+
+const HELPER_MIN_MM = 5;
+const HELPER_MAX_MM = 200;
+export const DEFAULT_BARCODE_WIDTH_MM = 40;
+export const DEFAULT_QR_SIZE_MM = 25;
+
+/** A helper argument as text: strings and numbers are used, anything else is empty. */
+function helperText(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return "";
+}
+
+function helperMm(value: unknown, fallback: number): number {
+  const mm = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(mm)) return fallback;
+  return Math.min(HELPER_MAX_MM, Math.max(HELPER_MIN_MM, mm));
+}
+
+/**
+ * HTML for `{{barcode "code128" order.id width=50 text=false}}`.
+ *
+ * Returns "" for an unknown or preview-only symbology, an empty value, or a
+ * value the symbology cannot hold, so one bad row prints an empty spot rather
+ * than failing the whole render (the Rust helper does the same).
+ */
+export function barcodeHelperHtml(
+  type: unknown,
+  value: unknown,
+  options: { width?: unknown; text?: unknown } = {},
+): string {
+  const kind = helperText(type);
+  const text = helperText(value);
+  if (!isPrintSymbology(kind) || validateBarcode(kind, text) !== null) return "";
+
+  const showText =
+    options.text === undefined
+      ? true
+      : !(options.text === false || options.text === 0 || String(options.text).toLowerCase() === "false");
+
+  return buildBarcodeHtml({
+    type: kind,
+    value: text,
+    text: showText,
+    scaleToWidth: helperMm(options.width, DEFAULT_BARCODE_WIDTH_MM),
+  });
+}
+
+/** HTML for `{{qrcode order.url size=30}}`; "" for an empty value. */
+export function qrcodeHelperHtml(value: unknown, options: { size?: unknown } = {}): string {
+  const text = helperText(value);
+  if (!text) return "";
+  return buildBarcodeHtml({
+    type: "qr",
+    value: text,
+    text: false,
+    scaleToWidth: helperMm(options.size, DEFAULT_QR_SIZE_MM),
+  });
+}
+
+/** True when a template can print `type` through `{{barcode}}` / `{{qrcode}}`. */
+export function isHelperSymbology(type: string): boolean {
+  return type === "qr" || isPrintSymbology(type);
+}
+
+/** A data path a template can read: `order.id`, `this.sku`, `sku`. */
+const FIELD_PATH = /^[A-Za-z_][\w]*(?:\.[A-Za-z_]\w*)*$/;
+
+export type BarcodeSnippet =
+  | { ok: true; text: string; kind: "helper" | "static" }
+  | { ok: false; error: string };
+
+/**
+ * What the Designer's Insert Barcode dialog puts in the template.
+ *
+ * - `fromData`: `value` is a field path, giving `{{barcode "code128" order.id}}`,
+ *   so every print (and every CSV row) gets its own code.
+ * - otherwise `value` is fixed text. Symbologies that print through a helper
+ *   still insert a helper call with a quoted literal, so the preview and the
+ *   printed label come from the same renderer. The rest (Data Matrix, PDF417,
+ *   Aztec, UPC-E, ITF-14) are preview-only in Rust, so they stay a static SVG.
+ */
+export function buildBarcodeSnippet(
+  type: string,
+  value: string,
+  fromData: boolean,
+): BarcodeSnippet {
+  const v = value.trim();
+  if (!v) return { ok: false, error: "Value is required" };
+  const helper = isHelperSymbology(type);
+  const call = (arg: string) =>
+    type === "qr" ? `{{qrcode ${arg}}}` : `{{barcode "${type}" ${arg}}}`;
+
+  if (fromData) {
+    if (!helper) {
+      return {
+        ok: false,
+        error: `${labelFor(type)} can only use a fixed value for now`,
+      };
+    }
+    if (!FIELD_PATH.test(v)) {
+      return { ok: false, error: "Enter a data field such as order.id" };
+    }
+    return { ok: true, kind: "helper", text: call(v) };
+  }
+
+  const error = validateBarcode(type, v);
+  if (error) return { ok: false, error };
+
+  if (!helper) {
+    const html = buildBarcodeHtml({ type, value: v, scaleToWidth: 40 });
+    return html
+      ? { ok: true, kind: "static", text: html }
+      : { ok: false, error: "Could not generate this barcode" };
+  }
+
+  // A Handlebars string literal can hold either quote, but not both.
+  if (v.includes('"') && v.includes("'")) {
+    return { ok: false, error: "The value cannot contain both ' and \" characters" };
+  }
+  const literal = v.includes('"') ? `'${v}'` : `"${v}"`;
+  return { ok: true, kind: "helper", text: call(literal) };
 }
 
 export function validateBarcode(type: string, value: string): string | null {

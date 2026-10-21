@@ -1,10 +1,12 @@
 import { Badge } from "@/components/ui/badge";
 import { BARCODE_TYPES } from "@/lib/utils/barcode";
 
-export const HELPERS = ["currency", "date", "upper", "lower", "padLeft", "number"];
+export const HELPERS = ["currency", "date", "upper", "lower", "padLeft", "number", "barcode", "qrcode"];
 
 /** What clicking a helper inserts: `{{currency }}`, with the cursor placed before the closing braces. */
 export function helperSnippet(helper: string): { text: string; back: number } {
+  // A barcode needs its symbology first, so start the call with one.
+  if (helper === "barcode") return { text: `{{barcode "code128" }}`, back: 2 };
   return { text: `{{${helper} }}`, back: 2 };
 }
 
