@@ -139,6 +139,46 @@ pub fn run() {
             let db_state: DbState = Arc::new(Mutex::new(database));
             app.manage(db_state.clone());
 
+            // Retention actually runs: terminal history rows older than
+            // `retention_days`, then the oldest beyond `max_records`.
+            // Once here, then daily — the Settings values were dead
+            // ("stored but not implemented") before this.
+            {
+                let guard = db_state
+                    .lock()
+                    .map_err(|_| error::AppError::Internal("DB lock poisoned".into()))?;
+                let (days, max) = commands::history::read_retention_prefs(guard.connection());
+                match commands::history::purge_old_jobs(guard.connection(), days, max) {
+                    Ok((by_age, by_cap)) if by_age + by_cap > 0 => {
+                        tracing::info!(by_age, by_cap, "purged old print jobs at startup")
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(error = %e, "startup history purge failed"),
+                }
+            }
+            {
+                let db = db_state.clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut daily = tokio::time::interval(std::time::Duration::from_secs(86_400));
+                    // The first tick fires immediately; consume it so the
+                    // startup purge above is not repeated at once.
+                    daily.tick().await;
+                    loop {
+                        daily.tick().await;
+                        let outcome = db.lock().ok().and_then(|guard| {
+                            let (days, max) =
+                                commands::history::read_retention_prefs(guard.connection());
+                            commands::history::purge_old_jobs(guard.connection(), days, max).ok()
+                        });
+                        if let Some((by_age, by_cap)) = outcome {
+                            if by_age + by_cap > 0 {
+                                tracing::info!(by_age, by_cap, "purged old print jobs (daily)");
+                            }
+                        }
+                    }
+                });
+            }
+
             // One shared print queue for the whole app, so the Tauri command
             // handlers, the REST API routes, and batch jobs all serialise
             // per printer instead of interleaving bytes on a thermal head.
