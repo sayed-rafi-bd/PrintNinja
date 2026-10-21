@@ -63,13 +63,26 @@ test("html lang is English and key screens render no raw keys", async ({
     .poll(async () => page.evaluate(() => document.documentElement.lang))
     .toBe("en");
 
-  for (const path of ["/print", "/templates", "/history", "/settings"]) {
+  for (const path of [
+    "/",
+    "/print",
+    "/templates",
+    "/history",
+    "/settings",
+    "/designer",
+    "/uikit",
+  ]) {
     await page.goto(path);
     await expect(page.getByTestId(testids.shellApp)).toBeVisible({
       timeout: 15_000,
     });
     const rawKeys = await page.evaluate(() => {
-      const text = document.body.innerText ?? "";
+      // Mustache placeholders ({{order.id}}) and code samples use dots
+      // too — strip them before hunting for leaked i18n keys.
+      const text = (document.body.innerText ?? "").replace(
+        /\{\{[^}]*\}\}/g,
+        "",
+      );
       // i18next renders the key itself when a translation is missing:
       // dotted lowercase tokens standing alone as words.
       const hits = text.match(/\b[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+\b/g) ?? [];

@@ -40,6 +40,16 @@ export function createSessionRepository(db: DbClient): SessionRepository {
       return result.count;
     },
 
+    async deleteOthersForUser(
+      userId: string,
+      exceptTokenHash: string,
+    ): Promise<number> {
+      const result = await db.session.deleteMany({
+        where: { userId, tokenHash: { not: exceptTokenHash } },
+      });
+      return result.count;
+    },
+
     async deleteOldestForUser(
       userId: string,
       keepNewest: number,

@@ -23,7 +23,12 @@
 > dataset JSON mode, settings validation (trusted path, domains,
 > single module), printer Zod schema, version backfill command,
 > compile memo fix, designer batched hydration + working diff
-> dialog with viewer; P2 hardening untouched so far.
+> dialog with viewer; P2 hardening in progress (docs off by
+> default, session purge hardening + no-store + revoke-all,
+> font size cap + orphan sweep, schema CHECKs, API TraceLayer +
+> readiness, a11y scan + labels). Remaining P2: metrics endpoint,
+> font relative paths, CHECK rebuild migrations for pre-existing
+> DBs, password-change flow.
 
 Audited from the working tree (develop). Each item names the file that proves it.
 Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt with user impact, **P2** = hardening/polish.

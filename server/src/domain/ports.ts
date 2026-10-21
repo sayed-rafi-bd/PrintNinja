@@ -56,6 +56,12 @@ export interface SessionRepository {
   /** Deletes sessions expired at or before now. Returns the count. */
   deleteExpired(now: Date): Promise<number>;
   /**
+   * Kills every session of a user except one (password change,
+   * "log out everywhere"): the current device stays signed in.
+   * Returns the revoked count.
+   */
+  deleteOthersForUser(userId: string, exceptTokenHash: string): Promise<number>;
+  /**
    * Keeps only the newest keepNewest sessions of a user (by creation),
    * deleting the rest oldest-first. Returns the deleted count. Bounds
    * per-user session growth from devices that log in but never log out.

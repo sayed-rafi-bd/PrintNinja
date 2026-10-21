@@ -95,6 +95,16 @@ export function createFakeSessions(users: {
       }
       return surplus.length;
     },
+    async deleteOthersForUser(userId, exceptTokenHash) {
+      let count = 0;
+      for (const [hash, session] of byHash) {
+        if (session.userId === userId && hash !== exceptTokenHash) {
+          byHash.delete(hash);
+          count += 1;
+        }
+      }
+      return count;
+    },
   };
 }
 

@@ -139,6 +139,26 @@ pub fn run() {
             let db_state: DbState = Arc::new(Mutex::new(database));
             app.manage(db_state.clone());
 
+            // Orphaned font files (crashed deletes, failed overwrites) go
+            // now: nothing is in flight yet, so unreferenced bytes are safe
+            // to remove. Failures only warn — fonts re-download on demand.
+            {
+                let fonts_dir = app.path().app_data_dir().map(|d| d.join("fonts"));
+                if let Ok(dir) = fonts_dir {
+                    let guard = db_state.lock().map_err(|_| {
+                        error::AppError::Internal("DB lock poisoned".into())
+                    })?;
+                    match commands::font::sweep_orphan_font_files(
+                        guard.connection(),
+                        &dir,
+                    ) {
+                        Ok(0) => {}
+                        Ok(n) => tracing::info!(n, "removed orphan font files at startup"),
+                        Err(e) => tracing::warn!(error = %e, "font orphan sweep failed"),
+                    }
+                }
+            }
+
             // Retention actually runs: terminal history rows older than
             // `retention_days`, then the oldest beyond `max_records`.
             // Once here, then daily — the Settings values were dead

@@ -94,6 +94,30 @@ async fn health_is_open_without_a_key() {
 }
 
 #[tokio::test]
+async fn health_reports_the_database() {
+    let (db, _key) = setup();
+    let app = router(&db);
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/health")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body: serde_json::Value = {
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    };
+    assert_eq!(body["status"], "ok");
+    assert_eq!(body["db"], "up");
+}
+
+#[tokio::test]
 async fn printers_requires_authorization() {
     let (db, _key) = setup();
     let app = router(&db);

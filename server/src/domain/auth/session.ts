@@ -44,6 +44,22 @@ export async function logoutUser(deps: AuthDeps, token: string): Promise<void> {
 }
 
 /**
+ * Ends every session of a user except the calling one. After a password
+ * change (or a lost device) this is how the account is taken back: the
+ * current token keeps working, everything else 401s on next use.
+ */
+export async function revokeOtherSessions(
+  deps: AuthDeps,
+  userId: string,
+  currentToken: string,
+): Promise<number> {
+  return deps.sessions.deleteOthersForUser(
+    userId,
+    deps.tokens.hash(currentToken),
+  );
+}
+
+/**
  * Deletes sessions expired at or before now. Runs at startup and on the
  * hourly timer (no job queue); tombstones are Phase 2's stream, so
  * sessions are all this pass touches.

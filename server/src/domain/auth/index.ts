@@ -6,6 +6,7 @@ export {
   logoutUser,
   MAX_SESSIONS_PER_USER,
   purgeExpiredSessions,
+  revokeOtherSessions,
   validateSession,
 } from "./session.js";
 export type { SessionResult } from "./session.js";

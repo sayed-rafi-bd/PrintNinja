@@ -76,7 +76,7 @@ const configSchema = z.object({
   ARGON2_TIME_COST: positiveInt.max(8).default(2),
   ARGON2_PARALLELISM: positiveInt.max(8).default(1),
   // prefault, not default: Zod 4 defaults skip the enum/transform
-  DOCS_ENABLED: booleanFromString.prefault("true"),
+  DOCS_ENABLED: booleanFromString.prefault("false"),
 });
 
 export type Config = {

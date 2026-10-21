@@ -60,6 +60,11 @@ pub struct DirtyFont {
 
 const VALID_FORMATS: &[&str] = &["ttf", "otf", "woff", "woff2"];
 
+/// Largest font accepted. Desktop fonts are kilobytes; even a big CJK
+/// woff2 is ~5 MiB. Anything larger is a mistake or a disk-fill attempt —
+/// the IPC payload already holds the whole file in memory.
+pub const MAX_FONT_BYTES: usize = 8 * 1024 * 1024;
+
 /// Validates the upload payload before anything touches the disk:
 /// known extension, non-empty, and magic bytes matching the format.
 pub fn check_upload_bytes(file_name: &str, file_data: &[u8]) -> AppResult<(String, String)> {
@@ -85,6 +90,14 @@ pub fn check_upload_bytes(file_name: &str, file_data: &[u8]) -> AppResult<(Strin
         return Err(AppError::Validation("Font file is empty".into()));
     }
 
+    if file_data.len() > MAX_FONT_BYTES {
+        return Err(AppError::Validation(format!(
+            "Font file is {} MiB (max {} MiB)",
+            file_data.len() / (1024 * 1024),
+            MAX_FONT_BYTES / (1024 * 1024)
+        )));
+    }
+
     // Fail fast on the wrong content (a renamed non-font): the server
     // re-checks the same magic on upload.
     if let Some(magic) = magic_for(&ext) {
@@ -106,6 +119,40 @@ fn magic_for(format: &str) -> Option<&'static [u8]> {
         "woff2" => Some(b"wOF2"),
         _ => None,
     }
+}
+
+/// Deletes font files with no DB row. Uploads use UUID names and
+/// re-downloads overwrite in place, but crashed deletes and failed
+/// overwrites leak files — the disk fills while the DB looks small.
+pub fn sweep_orphan_font_files(
+    conn: &Connection,
+    fonts_dir: &Path,
+) -> AppResult<usize> {
+    let mut stmt = conn.prepare("SELECT file_path FROM fonts WHERE file_path <> ''")?;
+    let known: std::collections::HashSet<std::ffi::OsString> = stmt
+        .query_map([], |r| {
+            let p: String = r.get(0)?;
+            Ok(Path::new(&p)
+                .file_name()
+                .unwrap_or_default()
+                .to_os_string())
+        })?
+        .collect::<Result<_, _>>()?;
+    let entries = match std::fs::read_dir(fonts_dir) {
+        Ok(entries) => entries,
+        Err(_) => return Ok(0),
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        if !known.contains(&entry.file_name()) {
+            std::fs::remove_file(entry.path())?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
 }
 
 /// The device-local download state key for one font.
@@ -500,6 +547,13 @@ pub fn store_font_file_bytes(
     if expected_sha.is_empty() {
         return Err(AppError::Validation(format!(
             "Font {server_id} has no bytes on the server yet"
+        )));
+    }
+    if bytes.len() > MAX_FONT_BYTES {
+        return Err(AppError::Validation(format!(
+            "Font {server_id} is {} MiB (max {} MiB)",
+            bytes.len() / (1024 * 1024),
+            MAX_FONT_BYTES / (1024 * 1024)
         )));
     }
     let actual = sha256_hex(bytes);

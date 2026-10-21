@@ -24,7 +24,7 @@ describe("loadConfig", () => {
     expect(config.argon2MemoryKib).toBe(19456);
     expect(config.argon2TimeCost).toBe(2);
     expect(config.argon2Parallelism).toBe(1);
-    expect(config.docsEnabled).toBe(true);
+    expect(config.docsEnabled).toBe(false);
     expect(config.corsOrigins).toEqual(["http://localhost:1420"]);
   });
 

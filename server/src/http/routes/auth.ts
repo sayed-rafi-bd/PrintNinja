@@ -6,6 +6,7 @@ import {
   loginUser,
   logoutUser,
   registerUser,
+  revokeOtherSessions,
 } from "../../domain/auth/index.js";
 import type { AuthDeps } from "../../domain/ports.js";
 import { UnauthorizedError } from "../../domain/errors.js";
@@ -66,7 +67,9 @@ export async function authRoutes(
     },
     async (request, reply) => {
       const result = await registerUser(deps, request.body);
+      // Tokens must never sit in a cache.
       return reply
+        .header("Cache-Control", "no-store")
         .status(201)
         .send(toAuthResponse(result.user, result.token, result.expiresAt));
     },
@@ -87,9 +90,12 @@ export async function authRoutes(
         },
       },
     },
-    async (request) => {
+    async (request, reply) => {
       const result = await loginUser(deps, request.body);
-      return toAuthResponse(result.user, result.token, result.expiresAt);
+      // Tokens must never sit in a cache.
+      return reply
+        .header("Cache-Control", "no-store")
+        .send(toAuthResponse(result.user, result.token, result.expiresAt));
     },
   );
 
@@ -109,7 +115,36 @@ export async function authRoutes(
     async (request, reply) => {
       await logoutUser(deps, bearerToken(request));
       // 204 drops the body on the wire; null satisfies the schema type.
-      return reply.status(204).send(null);
+      return reply.header("Cache-Control", "no-store").status(204).send(null);
+    },
+  );
+
+  typed.delete(
+    "/v2/auth/sessions",
+    {
+      preHandler: [requireAuth(deps)],
+      schema: {
+        description:
+          "End every session except the calling one (lost device, password change).",
+        response: {
+          200: z.object({ revoked: z.number() }),
+          401: errorBody,
+          429: errorBody,
+        },
+      },
+    },
+    async (request, reply) => {
+      // requireAuth ran first, so authUser is set; the throw below is
+      // unreachable but keeps the handler honest.
+      if (!request.authUser) {
+        throw new UnauthorizedError();
+      }
+      const revoked = await revokeOtherSessions(
+        deps,
+        request.authUser.id,
+        bearerToken(request),
+      );
+      return reply.header("Cache-Control", "no-store").send({ revoked });
     },
   );
 
@@ -126,13 +161,16 @@ export async function authRoutes(
         },
       },
     },
-    async (request) => {
+    async (request, reply) => {
       // requireAuth attaches the user; the throw is unreachable but
       // keeps the handler honest without a non-null assertion.
       if (!request.authUser) {
         throw new UnauthorizedError();
       }
-      return toUserResponse(request.authUser);
+      // Account data must never sit in a cache.
+      return reply
+        .header("Cache-Control", "no-store")
+        .send(toUserResponse(request.authUser));
     },
   );
 }

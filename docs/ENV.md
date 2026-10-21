@@ -116,8 +116,8 @@ passwords still verify and are rehashed to `argon2id` on first login.)
 ## Docs and logging
 
 ### `DOCS_ENABLED`
-Serve `/docs` and `/openapi.json`. Default: `true`; consider `false`
-in production.
+Serve `/docs` and `/openapi.json`. Default: `false`; set `true`
+explicitly for a dev/staging host that needs the browser UI.
 
 ### `LOG_LEVEL`
 Pino log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`.

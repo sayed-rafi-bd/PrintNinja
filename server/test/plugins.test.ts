@@ -282,4 +282,87 @@ describe("docs gating", () => {
     const openapiBody = openapi.json() as { error: { code: string } };
     expect(openapiBody.error.code).toBe("not_found");
   });
+
+  it("never caches token-carrying auth responses", async () => {
+    app = await buildApp({
+      config: testConfig({ docsEnabled: false }),
+      deps: fakeDeps(),
+    });
+    const reg = await app.inject({
+      method: "POST",
+      url: "/v2/auth/register",
+      headers: { "content-type": "application/json" },
+      payload: { handle: "bo", password: "password123" },
+    });
+    expect(reg.statusCode).toBe(201);
+    expect(reg.headers["cache-control"]).toBe("no-store");
+    const token = (reg.json() as { token: string }).token;
+
+    const me = await app.inject({
+      method: "GET",
+      url: "/v2/auth/me",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(me.statusCode).toBe(200);
+    expect(me.headers["cache-control"]).toBe("no-store");
+
+    const logout = await app.inject({
+      method: "POST",
+      url: "/v2/auth/logout",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(logout.statusCode).toBe(204);
+    expect(logout.headers["cache-control"]).toBe("no-store");
+  });
+
+  it("DELETE /v2/auth/sessions revokes every session but the caller", async () => {
+    app = await buildApp({
+      config: testConfig({ docsEnabled: false }),
+      deps: fakeDeps(),
+    });
+    const headers = { "content-type": "application/json" };
+    const first = await app.inject({
+      method: "POST",
+      url: "/v2/auth/register",
+      headers,
+      payload: { handle: "bo", password: "password123" },
+    });
+    const t1 = (first.json() as { token: string }).token;
+    const second = await app.inject({
+      method: "POST",
+      url: "/v2/auth/login",
+      headers,
+      payload: { handle: "bo", password: "password123" },
+    });
+    const t2 = (second.json() as { token: string }).token;
+    expect(t2).not.toBe(t1);
+
+    const revoke = await app.inject({
+      method: "DELETE",
+      url: "/v2/auth/sessions",
+      headers: { authorization: `Bearer ${t1}` },
+    });
+    expect(revoke.statusCode).toBe(200);
+    expect(revoke.json()).toEqual({ revoked: 1 });
+
+    // The caller works; the other token is dead.
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/v2/auth/me",
+          headers: { authorization: `Bearer ${t1}` },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/v2/auth/me",
+          headers: { authorization: `Bearer ${t2}` },
+        })
+      ).statusCode,
+    ).toBe(401);
+  });
 });

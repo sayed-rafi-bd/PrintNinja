@@ -94,7 +94,8 @@ describe("DataTable", () => {
 
   it("sorts when a sortable header is clicked and reports aria-sort", () => {
     render(<DataTable caption="Jobs" columns={columns} data={rows} />);
-    fireEvent.click(screen.getByRole("button", { name: /Name/ }));
+    const sort = screen.getByRole("button", { name: "Sort by Name" });
+    fireEvent.click(sort);
     const cells = screen
       .getAllByRole("row")
       .slice(1)
@@ -104,6 +105,24 @@ describe("DataTable", () => {
       "aria-sort",
       "ascending",
     );
+  });
+
+  it("names the selection checkboxes for assistive tech", () => {
+    render(
+      <DataTable
+        caption="Jobs"
+        columns={columns}
+        data={rows}
+        getRowId={(r) => r.id}
+        selection={{ selectedIds: new Set(), onChange: () => {} }}
+      />,
+    );
+    expect(
+      screen.getByRole("checkbox", { name: "Select all rows" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: "Select row a" }),
+    ).toBeInTheDocument();
   });
 
   it("activates rows by click, Enter, and moves focus with arrow keys", () => {

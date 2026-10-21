@@ -13,6 +13,7 @@ import {
   MAX_SESSIONS_PER_USER,
   purgeExpiredSessions,
   registerUser,
+  revokeOtherSessions,
   validateSession,
 } from "../src/domain/auth/index.js";
 import {
@@ -217,6 +218,29 @@ describe("logoutUser and validateSession", () => {
 
   it("logout is idempotent: an unknown token still succeeds", async () => {
     await expect(logoutUser(deps(), "nope")).resolves.toBeUndefined();
+  });
+
+  it("revokeOtherSessions keeps the caller and kills the rest", async () => {
+    const d = deps();
+    const first = await registered(d);
+    const second = await loginUser(d, { handle: "Alice", password: PASSWORD });
+    expect(second.token).not.toBe(first.token);
+
+    const revoked = await revokeOtherSessions(d, first.user.id, first.token);
+    expect(revoked).toBe(1);
+
+    // The caller still validates; the other session is gone.
+    await expect(validateSession(d, first.token)).resolves.toMatchObject({
+      user: { handle: "Alice" },
+    });
+    await expect(validateSession(d, second.token)).rejects.toBeInstanceOf(
+      UnauthorizedError,
+    );
+
+    // Nothing left to revoke is not an error.
+    await expect(
+      revokeOtherSessions(d, first.user.id, first.token),
+    ).resolves.toBe(0);
   });
 
   it("rejects missing, malformed, unknown and expired tokens alike", async () => {

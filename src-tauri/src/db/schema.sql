@@ -2,12 +2,12 @@
 
 CREATE TABLE IF NOT EXISTS printers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
+    name TEXT NOT NULL CHECK(length(name) > 0),
     type TEXT NOT NULL CHECK(type IN ('ipp', 'raw_tcp', 'usb', 'bluetooth', 'system')),
-    address TEXT NOT NULL,
+    address TEXT NOT NULL CHECK(length(address) > 0),
     language TEXT NOT NULL DEFAULT 'pdf' CHECK(language IN ('pdf', 'escpos', 'tspl', 'zpl', 'cpcl', 'raster')),
-    paper_width_mm INTEGER,
-    dpi INTEGER DEFAULT 203,
+    paper_width_mm INTEGER CHECK(paper_width_mm IS NULL OR paper_width_mm > 0),
+    dpi INTEGER DEFAULT 203 CHECK(dpi IS NULL OR dpi > 0),
     default_settings_json TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -15,10 +15,10 @@ CREATE TABLE IF NOT EXISTS printers (
 
 CREATE TABLE IF NOT EXISTS templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
+    name TEXT NOT NULL CHECK(length(name) > 0),
     current_version_id INTEGER,
-    page_w_mm INTEGER NOT NULL DEFAULT 210,
-    page_h_mm INTEGER NOT NULL DEFAULT 297,
+    page_w_mm INTEGER NOT NULL DEFAULT 210 CHECK(page_w_mm > 0),
+    page_h_mm INTEGER NOT NULL DEFAULT 297 CHECK(page_h_mm > 0),
     orientation TEXT NOT NULL DEFAULT 'portrait' CHECK(orientation IN ('portrait', 'landscape')),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS templates (
 CREATE TABLE IF NOT EXISTS template_versions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     template_id INTEGER NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
-    version_no INTEGER NOT NULL,
+    version_no INTEGER NOT NULL CHECK(version_no >= 1),
     html TEXT NOT NULL,
     css TEXT NOT NULL DEFAULT '',
     label TEXT,
@@ -38,11 +38,11 @@ CREATE TABLE IF NOT EXISTS template_versions (
 
 CREATE TABLE IF NOT EXISTS fonts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    family TEXT NOT NULL,
+    family TEXT NOT NULL CHECK(length(family) > 0),
     style TEXT NOT NULL DEFAULT 'normal',
     weight TEXT NOT NULL DEFAULT '400',
     file_path TEXT NOT NULL,
-    format TEXT NOT NULL,
+    format TEXT NOT NULL CHECK(format IN ('ttf', 'otf', 'woff', 'woff2')),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -50,18 +50,21 @@ CREATE TABLE IF NOT EXISTS batches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     template_id INTEGER REFERENCES templates(id) ON DELETE SET NULL,
     printer_id INTEGER REFERENCES printers(id) ON DELETE SET NULL,
-    total INTEGER NOT NULL DEFAULT 0,
-    done INTEGER NOT NULL DEFAULT 0,
-    failed INTEGER NOT NULL DEFAULT 0,
+    total INTEGER NOT NULL DEFAULT 0 CHECK(total >= 0),
+    done INTEGER NOT NULL DEFAULT 0 CHECK(done >= 0),
+    failed INTEGER NOT NULL DEFAULT 0 CHECK(failed >= 0),
     mode TEXT NOT NULL DEFAULT 'single_job' CHECK(mode IN ('single_job', 'per_record')),
     status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'printing', 'success', 'failed', 'cancelled')),
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    -- done counts finished records (success, failed and cancelled);
+    -- failed is the failing subset of done.
+    CHECK(failed <= done AND done <= total)
 );
 
 CREATE TABLE IF NOT EXISTS print_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     batch_id INTEGER REFERENCES batches(id) ON DELETE SET NULL,
-    record_index INTEGER,
+    record_index INTEGER CHECK(record_index IS NULL OR record_index >= 0),
     template_id INTEGER REFERENCES templates(id) ON DELETE SET NULL,
     template_version_id INTEGER REFERENCES template_versions(id) ON DELETE SET NULL,
     printer_id INTEGER REFERENCES printers(id) ON DELETE SET NULL,
@@ -69,7 +72,7 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     source_url TEXT,
     status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'printing', 'success', 'failed', 'cancelled')),
     error TEXT,
-    copies INTEGER NOT NULL DEFAULT 1,
+    copies INTEGER NOT NULL DEFAULT 1 CHECK(copies >= 1),
     settings_json TEXT,
     rendered_html TEXT,
     -- The job's input payload, kept so a queued row can run again (retry,
@@ -78,11 +81,11 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     -- `rendered_html`, stays secret-redacted by the pipeline.
     data_json TEXT,
     idempotency_key TEXT,
-    is_test INTEGER NOT NULL DEFAULT 0,
+    is_test INTEGER NOT NULL DEFAULT 0 CHECK(is_test IN (0, 1)),
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     started_at TEXT,
     finished_at TEXT,
-    duration_ms INTEGER,
+    duration_ms INTEGER CHECK(duration_ms IS NULL OR duration_ms >= 0),
     -- Per-stage breakdown of duration_ms (fetch/template/layout/render/send/
     -- history, as JSON), written once the job has run. NULL for rows that
     -- never ran or predate it.
@@ -91,8 +94,8 @@ CREATE TABLE IF NOT EXISTS print_jobs (
 
 CREATE TABLE IF NOT EXISTS api_clients (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    key_hash TEXT NOT NULL,
+    name TEXT NOT NULL CHECK(length(name) > 0),
+    key_hash TEXT NOT NULL CHECK(length(key_hash) > 0),
     scopes TEXT NOT NULL DEFAULT 'print',
     allowed_ips TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -100,7 +103,7 @@ CREATE TABLE IF NOT EXISTS api_clients (
 );
 
 CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
+    key TEXT PRIMARY KEY CHECK(length(key) > 0),
     value TEXT NOT NULL
 );
 

@@ -590,6 +590,51 @@ fn font_upload_refuses_the_wrong_content() {
 }
 
 #[test]
+fn font_upload_refuses_oversize_files() {    let mut huge = vec![0x00, 0x01, 0x00, 0x00];
+    huge.resize(font::MAX_FONT_BYTES + 1, 0xAA);
+    let err = font::check_upload_bytes("huge.ttf", &huge).unwrap_err();
+    assert!(
+        format!("{err:?}").contains("max"),
+        "oversize must name the cap: {err:?}"
+    );
+    // Exactly at the cap is accepted.
+    huge.resize(font::MAX_FONT_BYTES, 0xAA);
+    assert!(font::check_upload_bytes("huge.ttf", &huge).is_ok());
+}
+
+#[test]
+fn font_sweep_removes_only_unreferenced_files() {
+    let conn = db();
+    let dir = font::fonts_dir_for_tests();
+    std::fs::create_dir_all(&dir).unwrap();
+    // Referenced by absolute path (old rows) and by bare name.
+    std::fs::write(dir.join("keep-abs.ttf"), b"keep").unwrap();
+    std::fs::write(dir.join("keep-rel.otf"), b"keep").unwrap();
+    std::fs::write(dir.join("orphan.woff"), b"drop").unwrap();
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    for (name, path) in [
+        ("Abs", dir.join("keep-abs.ttf").to_string_lossy().to_string()),
+        ("Rel", "keep-rel.otf".to_string()),
+    ] {
+        conn.execute(
+            "INSERT INTO fonts (family, style, weight, file_path, format, server_id, sync_state)
+             VALUES (?1, 'normal', '400', ?2, 'ttf', lower(hex(randomblob(16))), 'synced')",
+            rusqlite::params![name, path],
+        )
+        .unwrap();
+    }
+    let removed = font::sweep_orphan_font_files(&conn, &dir).expect("sweep works");
+    assert_eq!(removed, 1);
+    assert!(dir.join("keep-abs.ttf").exists());
+    assert!(dir.join("keep-rel.otf").exists());
+    assert!(!dir.join("orphan.woff").exists());
+    assert!(dir.join("sub").exists(), "directories are never removed");
+    // Missing dir is fine (fresh install, nothing to sweep).
+    let missing = dir.join("nope");
+    assert_eq!(font::sweep_orphan_font_files(&conn, &missing).unwrap(), 0);
+}
+
+#[test]
 fn font_store_verifies_the_hash() {
     let conn = db();
     let dir = font::fonts_dir_for_tests();

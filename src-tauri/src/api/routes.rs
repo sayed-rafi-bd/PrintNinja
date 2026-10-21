@@ -58,6 +58,9 @@ pub fn router_with_state(state: ApiState, lan_access: bool) -> Router {
         .route("/v1/jobs/{id}/retry", post(retry_job))
         .route("/v1/openapi.json", get(openapi))
         .with_state(state.clone())
+        // Per-request spans (method, path, status, latency): the only way
+        // to join a slow print across middleware and handler in the logs.
+        .layer(tower_http::trace::TraceLayer::new_for_http())
         .layer(middleware::from_fn(
             move |req: axum::extract::Request, next: Next| {
                 let auth = auth_ctx.clone();
@@ -246,11 +249,26 @@ use axum::response::IntoResponse;
 
 // ── Handlers ────────────────────────────────────────────────────────────────
 
-async fn health() -> Json<Value> {
+/// Liveness plus the dependencies a print needs: the database answers
+/// and the queue lock is acquirable. A wedged DB (or a poisoned lock)
+/// reports degraded instead of a lying "ok".
+async fn health(State(state): State<ApiState>) -> Json<Value> {
+    let db_ok = state
+        .db
+        .lock()
+        .ok()
+        .and_then(|guard| {
+            guard
+                .connection()
+                .query_row("SELECT 1", [], |_| Ok(()))
+                .ok()
+        })
+        .is_some();
     Json(json!({
-        "status": "ok",
+        "status": if db_ok { "ok" } else { "degraded" },
         "version": env!("CARGO_PKG_VERSION"),
-        "app": "PrintNinja"
+        "app": "PrintNinja",
+        "db": if db_ok { "up" } else { "down" },
     }))
 }
 
