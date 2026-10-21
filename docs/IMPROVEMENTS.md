@@ -1,14 +1,15 @@
 # Improvements & E2E testing backlog
 
-> Status (feat/improvements-backlog): slices 1–9 are implemented —
+> Status (feat/improvements-backlog): slices 1–10 are implemented —
 > print page_range/grayscale end-to-end (Rust+REST+OpenAPI+tests),
 > server body limits + /v2/ready (Docker healthcheck probes it),
 > auth timing-oracle fix + 20-session cap + Argon2 clamps, domain byte
 > caps + version label/note limits + dataset depth guard,
 > tombstone→user cascade, settings PUT status from the repository,
 > shared ETag matcher, restore nullish bodies, profile error details in
-> wire (snake_case) names. Everything below that is not marked
-> implemented is still open.
+> wire names, sync hasMore per-stream + batched head versions (fake
+> mirrors the fix, regression test). Everything below that is not
+> marked implemented is still open.
 
 Audited from the working tree (develop). Each item names the file that proves it.
 Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt with user impact, **P2** = hardening/polish.
