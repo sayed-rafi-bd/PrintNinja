@@ -152,6 +152,10 @@ pub fn ensure_v2_schema(conn: &Connection) -> rusqlite::Result<()> {
     if has_print_jobs > 0 && !column_exists(conn, "print_jobs", "data_json")? {
         conn.execute("ALTER TABLE print_jobs ADD COLUMN data_json TEXT", [])?;
     }
+    // Per-stage timing breakdown shown in History. Old rows keep NULL.
+    if has_print_jobs > 0 && !column_exists(conn, "print_jobs", "timings_json")? {
+        conn.execute("ALTER TABLE print_jobs ADD COLUMN timings_json TEXT", [])?;
+    }
 
     // `POST /v1/print` replays are atomic only if an idempotency key names
     // one job (P12): the job-row insert records the key before the send, and

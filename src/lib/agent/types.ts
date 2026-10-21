@@ -100,6 +100,8 @@ export interface HistoryJob {
 	started_at: string | null;
 	finished_at: string | null;
 	duration_ms: number | null;
+	/** JSON of `StageTimings`; null for a job that has not run or predates timings. */
+	timings_json: string | null;
 }
 
 export interface ApplyReport {
@@ -159,11 +161,24 @@ export interface PrintHtmlReq {
 	idempotency_key?: string | null;
 }
 
+/** Where one print job's time went, in ms per pipeline stage (0 = not reached). */
+export interface StageTimings {
+	fetch_ms: number;
+	template_ms: number;
+	layout_ms: number;
+	render_ms: number;
+	send_ms: number;
+	history_ms: number;
+	total_ms: number;
+}
+
 export interface PrintResponse {
 	success: boolean;
 	job_id: string;
 	duration_ms: number;
 	error: string | null;
+	/** Null when the job failed before any stage ran. */
+	timings?: StageTimings | null;
 }
 
 export interface FontRow {

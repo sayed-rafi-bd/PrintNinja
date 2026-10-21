@@ -12,6 +12,9 @@ vi.mock("@/lib/hooks/useSystemPrinters", () => ({
   useSystemPrinters: () => ({ printers: [{ id: "1", name: "Dock Zebra" }], refresh: async () => [{ id: "1", name: "Dock Zebra" }] }),
 }));
 
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
+import { toast } from "sonner";
 import { PrintPage } from "@/pages/Print";
 import { usePrintStore } from "@/lib/store/printStore";
 
@@ -23,12 +26,19 @@ beforeAll(() => {
 
 beforeEach(() => {
   invoke.mockReset();
-  usePrintStore.setState({ printerId: "", templateId: "", status: "idle", error: "", copies: 1 });
+  vi.mocked(toast.success).mockClear();
+  vi.mocked(toast.error).mockClear();
+  usePrintStore.setState({ printerId: "", templateId: "", status: "idle", error: "", copies: 1, timings: null });
   invoke.mockImplementation(async (cmd: string) => {
     if (cmd === "list_versions") return [{ id: 1, html: "<p>Hi {{store.name}}</p>", css: "" }];
     if (cmd === "list_batches") return [];
     if (cmd === "enumerate_system_printers") return [{ id: "1", name: "Dock Zebra" }];
-    if (cmd === "print_html") return { success: true, job_id: "9", duration_ms: 120 };
+    if (cmd === "print_html") {
+      return {
+        success: true, job_id: "9", duration_ms: 120,
+        timings: { fetch_ms: 0, template_ms: 1, layout_ms: 0, render_ms: 90, send_ms: 25, history_ms: 4, total_ms: 120 },
+      };
+    }
     return null;
   });
 });
@@ -82,5 +92,26 @@ describe("Print page", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Paper out");
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+
+  it("shows that the printer is ready before anything is printed", async () => {
+    renderPage();
+    expect(await screen.findByText("Printer is ready")).toBeInTheDocument();
+  });
+
+  it("reports a finished print in the alert, with its timing, and shows no toast", async () => {
+    renderPage();
+    const print = await screen.findByRole("button", { name: /^Print$/ });
+    await waitFor(() => expect(print).toBeEnabled());
+    fireEvent.click(print);
+    expect(await screen.findByText("Print sent")).toBeInTheDocument();
+    expect(screen.queryByText("Printer is ready")).toBeNull();
+    const timing = screen.getByTestId("timing-breakdown");
+    expect(timing).toHaveTextContent("Total 120 ms");
+    expect(timing).toHaveTextContent("Render 90 ms");
+    expect(timing).toHaveTextContent("Send 25 ms");
+    expect(timing).toHaveTextContent("History write 4 ms");
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });

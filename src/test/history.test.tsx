@@ -13,7 +13,7 @@ const job = (over: Partial<HistoryJob>): HistoryJob => ({
   id: 1, batch_id: null, record_index: null, template_id: 3, template_version_id: 1, printer_id: 1,
   source: "ui", source_url: null, status: "success", error: null, copies: 1, settings_json: null,
   rendered_html: null, idempotency_key: null, is_test: false, started_at: "2026-01-02T10:00:00Z",
-  finished_at: "2026-01-02T10:00:02Z", duration_ms: 2000, ...over,
+  finished_at: "2026-01-02T10:00:02Z", duration_ms: 2000, timings_json: null, ...over,
 });
 
 const JOBS = [job({ id: 1 }), job({ id: 2, status: "failed", error: "Paper out" }), job({ id: 3, printer_id: 2 })];
@@ -99,5 +99,33 @@ describe("History page", () => {
     fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Paper issues" } });
     fireEvent.click(screen.getByRole("button", { name: "Save filter" }));
     await waitFor(() => expect(JSON.parse(localStorage.getItem("printninja-history-filters")!)[0].name).toBe("Paper issues"));
+  });
+
+  it("shows the per-stage timing in the table and in the details dialog", async () => {
+    const TIMINGS = JSON.stringify({ fetch_ms: 0, template_ms: 2, layout_ms: 1, render_ms: 820, send_ms: 140, history_ms: 3, total_ms: 970 });
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "list_jobs") return [job({ id: 1, duration_ms: 970, timings_json: TIMINGS }), job({ id: 2 })];
+      if (cmd === "list_printers") return [{ id: 1, name: "Dock Zebra" }];
+      return null;
+    });
+    renderPage();
+    await screen.findByText("#1");
+    // Table: the stages worth reading at a glance sit under the duration.
+    expect(screen.getByText("Render 820 · Send 140 · History 3")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "View job 1" }));
+    const dialog = await screen.findByRole("dialog");
+    const breakdown = within(dialog).getByTestId("timing-breakdown");
+    expect(within(breakdown).getByText("820 ms")).toBeInTheDocument();
+    expect(within(breakdown).getByText("140 ms")).toBeInTheDocument();
+    expect(within(breakdown).getByText("970 ms")).toBeInTheDocument();
+  });
+
+  it("says so in the details dialog when a job has no timing breakdown", async () => {
+    renderPage();
+    await screen.findByText("#1");
+    fireEvent.click(screen.getByRole("button", { name: "View job 1" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/No timing breakdown was recorded/)).toBeInTheDocument();
   });
 });

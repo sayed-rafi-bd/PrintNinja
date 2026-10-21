@@ -24,6 +24,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Printer, Zap, CheckCircle2, XCircle, Play, ChevronDown } from "lucide-react";
 import { JobStatusBadge } from "@/components/StatusBadge";
+import { TimingBreakdown } from "@/components/TimingBreakdown";
 import { cn } from "@/lib/utils";
 import { useSystemPrinters } from "@/lib/hooks/useSystemPrinters";
 import { toast } from "sonner";
@@ -266,6 +267,7 @@ export function PrintPage() {
 
     store.setStatus("printing");
     store.setError("");
+    store.setTimings(null);
 
     try {
       const result = await agent("print_html", {
@@ -289,31 +291,31 @@ export function PrintPage() {
         },
       });
 
+      // The result alert above the form reports the outcome; no toast.
       store.setDurationMs(result.duration_ms);
+      store.setTimings(result.timings ?? null);
       if (result.success) {
         store.setStatus("success");
-        toast.success(`Printed in ${result.duration_ms}ms (job #${result.job_id})`);
       } else {
         store.setStatus("failed");
         store.setError(result.error || "Unknown error");
-        toast.error(`Print failed: ${result.error}`);
       }
     } catch (e) {
       store.setStatus("failed");
       store.setError(String(e));
-      toast.error(`Print failed: ${e}`);
     }
   };
 
   const handleSpikeTest = async () => {
     store.setStatus("printing");
     store.setError("");
+    store.setTimings(null);
     try {
       const result = await agent("spike_test_print", {});
       store.setDurationMs(result.duration_ms);
+      store.setTimings(result.timings ?? null);
       if (result.success) {
         store.setStatus("success");
-        toast.success(`Spike test printed in ${result.duration_ms}ms`);
       } else {
         store.setStatus("failed");
         store.setError(result.error || "Unknown error");
@@ -340,26 +342,41 @@ export function PrintPage() {
         </Button>
       </PageHeader>
 
-      {/* Result of the last print, always in the same place */}
+      {/* The one place a print's outcome is reported. It is always shown: ready
+          before the first print, then printing, then the result with its timing. */}
+      {(store.status === "idle" || store.status === "queued") && (
+        <div role="status" className="flex items-center gap-3 rounded-lg border border-success/30 bg-success-soft px-4 py-3 text-success">
+          <CheckCircle2 className="h-5 w-5 shrink-0" aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">Printer is ready</p>
+            <p className="break-words text-xs">
+              {store.printerId ? `Ready to print on ${store.printerId}.` : "Choose a printer and a template to start."}
+            </p>
+          </div>
+        </div>
+      )}
       {store.status === "success" && (
         <div role="status" className="flex items-center gap-3 rounded-lg border border-success/30 bg-success-soft px-4 py-3 text-success">
           <CheckCircle2 className="h-5 w-5 shrink-0" aria-hidden="true" />
-          <div className="flex-1">
+          <div className="min-w-0 flex-1 space-y-1">
             <p className="text-sm font-medium">Print sent</p>
-            <p className="text-xs">Finished in {store.durationMs} ms.</p>
+            {store.timings ? (
+              <TimingBreakdown timings={store.timings} />
+            ) : (
+              <p className="text-xs">Finished in {store.durationMs} ms.</p>
+            )}
           </div>
-          <Button variant="ghost" size="sm" onClick={() => store.setStatus("idle")}>Dismiss</Button>
         </div>
       )}
       {store.status === "failed" && (
         <div role="alert" className="flex items-center gap-3 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-danger">
           <XCircle className="h-5 w-5 shrink-0" aria-hidden="true" />
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 space-y-1">
             <p className="text-sm font-medium">Print failed</p>
             <p className="break-words text-xs">{store.error || "Unknown error"}</p>
+            {store.timings && <TimingBreakdown timings={store.timings} />}
           </div>
           <Button variant="outline" size="sm" onClick={handlePrint} disabled={!canPrint}>Try again</Button>
-          <Button variant="ghost" size="sm" onClick={() => store.setStatus("idle")}>Dismiss</Button>
         </div>
       )}
       {store.status === "printing" && (

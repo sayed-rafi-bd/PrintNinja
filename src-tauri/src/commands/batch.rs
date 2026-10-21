@@ -291,7 +291,7 @@ pub fn retry_batch(db: State<DbState>, queue: State<PrintQueue>, id: i64) -> App
     tx.execute(
         "UPDATE print_jobs
          SET status = 'queued', error = NULL, started_at = NULL,
-             finished_at = NULL, duration_ms = NULL
+             finished_at = NULL, duration_ms = NULL, timings_json = NULL
          WHERE batch_id = ?1 AND status IN ('failed', 'cancelled')",
         [id],
     )?;

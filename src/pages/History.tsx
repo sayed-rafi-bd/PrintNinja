@@ -8,6 +8,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataTable } from "@/components/DataTable";
 import { PageHeader } from "@/components/PageHeader";
 import { JobStatusBadge } from "@/components/StatusBadge";
+import { TimingBreakdown } from "@/components/TimingBreakdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -23,6 +24,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useHistoryStore, type HistoryFilter, type HistoryJob } from "@/lib/store/historyStore";
+import { parseTimings } from "@/lib/timings";
 
 interface PrinterOption { id: number; name: string }
 interface SavedFilter { name: string; filter: HistoryFilter }
@@ -211,7 +213,28 @@ export function HistoryPage() {
     { id: "template", header: "Template", meta: { className: "hidden lg:table-cell" }, cell: (c) => c.row.original.template_id != null ? `Template #${c.row.original.template_id}` : "—" },
     { id: "printer", header: "Printer", meta: { className: "hidden sm:table-cell" }, cell: (c) => printerName(c.row.original.printer_id) },
     { id: "status", header: "Status", accessorFn: (j) => j.status, enableSorting: true, cell: (c) => <JobStatusBadge status={c.row.original.status} /> },
-    { id: "duration", header: "Duration", meta: { className: "hidden xl:table-cell" }, cell: (c) => c.row.original.duration_ms != null ? `${c.row.original.duration_ms} ms` : "—" },
+    {
+      id: "duration", header: "Duration", meta: { className: "hidden lg:table-cell" },
+      cell: (c) => {
+        const j = c.row.original;
+        if (j.duration_ms == null) return "—";
+        const tm = parseTimings(j.timings_json);
+        return (
+          <div>
+            <span className="tabular-nums">{j.duration_ms} ms</span>
+            {/* Where the time went; older jobs have no breakdown. */}
+            {tm && (
+              <p
+                className="text-xs tabular-nums text-muted-foreground"
+                title={`Render ${tm.render_ms} ms, send ${tm.send_ms} ms, history write ${tm.history_ms} ms`}
+              >
+                Render {tm.render_ms} · Send {tm.send_ms} · History {tm.history_ms}
+              </p>
+            )}
+          </div>
+        );
+      },
+    },
     { id: "source", header: "Source", meta: { className: "hidden lg:table-cell" }, cell: (c) => <Badge variant="outline">{c.row.original.source}</Badge> },
     { id: "batch", header: "Batch", meta: { className: "hidden xl:table-cell" }, cell: (c) => c.row.original.batch_id != null ? `#${c.row.original.batch_id}` : "—" },
     {
@@ -261,14 +284,14 @@ export function HistoryPage() {
           on a phone it stacks to ~500px tall and would cover most of the screen. */}
       <div className="-mx-1 rounded-lg border bg-card p-3 shadow-[0_1px_0_hsl(var(--border))] md:sticky md:top-0 md:z-20" role="search" aria-label="Filter print jobs">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative w-full sm:min-w-[220px] sm:flex-1">
+          <div className="relative w-full sm:w-[180px] sm:flex-none">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input aria-label={t("common.search")} placeholder={t("common.search")} className="pl-9" value={f.search} onChange={(e) => store.setFilter({ search: e.target.value })} />
           </div>
           <Button
             variant="outline"
             size="sm"
-            className="md:hidden"
+            className="h-control md:hidden"
             aria-expanded={filtersOpen}
             aria-controls="history-more-filters"
             onClick={() => setFiltersOpen((v) => !v)}
@@ -312,7 +335,7 @@ export function HistoryPage() {
           <Input type="date" aria-label="To date" className="w-full sm:w-[140px]" value={f.dateTo} onChange={(e) => store.setFilter({ dateTo: e.target.value })} />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm"><Bookmark className="h-4 w-4" aria-hidden="true" />Saved filters</Button>
+              <Button variant="outline" size="sm" className="h-control"><Bookmark className="h-4 w-4" aria-hidden="true" />Saved filters</Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-[200px]">
               <DropdownMenuLabel>Saved filters</DropdownMenuLabel>
@@ -330,7 +353,7 @@ export function HistoryPage() {
             </DropdownMenuContent>
           </DropdownMenu>
           </div>
-          {filtersActive && <Button variant="ghost" size="sm" onClick={store.clearFilter}>Clear</Button>}
+          {filtersActive && <Button variant="ghost" size="sm" className="h-control" onClick={store.clearFilter}>Clear</Button>}
         </div>
       </div>
 
@@ -426,6 +449,19 @@ export function HistoryPage() {
               {job.error && (
                 <div role="alert" className="rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">{job.error}</div>
               )}
+              {(() => {
+                const tm = parseTimings(job.timings_json);
+                return (
+                  <div>
+                    <p className="mb-1.5 text-xs text-muted-foreground">Timing</p>
+                    {tm ? (
+                      <TimingBreakdown timings={tm} variant="list" />
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No timing breakdown was recorded for this job.</p>
+                    )}
+                  </div>
+                );
+              })()}
               {job.source_url && (
                 <div><p className="text-xs text-muted-foreground">Source URL</p><p className="break-all font-mono text-xs">{job.source_url}</p></div>
               )}

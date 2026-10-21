@@ -687,7 +687,7 @@ async fn retry_job(
     let affected = conn
         .execute(
             "UPDATE print_jobs SET status='queued', error=NULL, started_at=NULL,
-                    finished_at=NULL, duration_ms=NULL
+                    finished_at=NULL, duration_ms=NULL, timings_json=NULL
              WHERE id = ?1 AND status IN ('failed', 'cancelled')",
             [id],
         )

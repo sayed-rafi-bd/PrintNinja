@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { StageTimings } from "@/lib/agent/types";
 
 export interface PrinterProfile {
   id: number;
@@ -42,6 +43,7 @@ interface PrintState {
   status: "idle" | "queued" | "printing" | "success" | "failed";
   error: string;
   durationMs: number;
+  timings: StageTimings | null;
   batchMode: boolean;
   batchData: string;
   batchMode2: "single_job" | "per_record";
@@ -64,6 +66,7 @@ interface PrintState {
   setStatus: (v: "idle" | "queued" | "printing" | "success" | "failed") => void;
   setError: (v: string) => void;
   setDurationMs: (v: number) => void;
+  setTimings: (v: StageTimings | null) => void;
   setBatchMode: (v: boolean) => void;
   setBatchData: (v: string) => void;
   setBatchMode2: (v: "single_job" | "per_record") => void;
@@ -88,6 +91,7 @@ export const usePrintStore = create<PrintState>((set) => ({
   status: "idle",
   error: "",
   durationMs: 0,
+  timings: null,
   batchMode: false,
   batchData: "",
   batchMode2: "per_record",
@@ -110,6 +114,7 @@ export const usePrintStore = create<PrintState>((set) => ({
   setStatus: (status) => set({ status }),
   setError: (error) => set({ error }),
   setDurationMs: (durationMs) => set({ durationMs }),
+  setTimings: (timings) => set({ timings }),
   setBatchMode: (batchMode) => set({ batchMode }),
   setBatchData: (batchData) => set({ batchData }),
   setBatchMode2: (batchMode2) => set({ batchMode2 }),

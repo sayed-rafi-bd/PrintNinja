@@ -82,7 +82,11 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     started_at TEXT,
     finished_at TEXT,
-    duration_ms INTEGER
+    duration_ms INTEGER,
+    -- Per-stage breakdown of duration_ms (fetch/template/layout/render/send/
+    -- history, as JSON), written once the job has run. NULL for rows that
+    -- never ran or predate it.
+    timings_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS api_clients (
