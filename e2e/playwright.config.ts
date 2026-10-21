@@ -10,7 +10,10 @@ export default defineConfig({
   fullyParallel: true,
   reporter: [["list"], ["html", { open: "never" }]],
   retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 4 : undefined,
+  // Worker count matches the e2e stack (support/stack.ts): the setup
+  // starts one isolated API+database per worker. Keep the two in sync;
+  // E2E_WORKERS overrides both.
+  workers: Number(process.env.E2E_WORKERS ?? (process.env.CI ? 4 : 2)),
   globalSetup: "./support/stack.ts",
   globalTeardown: "./support/stack-teardown.ts",
   use: {
@@ -21,7 +24,9 @@ export default defineConfig({
   webServer: {
     command: "pnpm -C .. dev",
     url: "http://localhost:1420",
-    reuseExistingServer: true,
+    // Never reuse a stale dev server in CI: a leftover bundle from an
+    // earlier run would false-pass every spec.
+    reuseExistingServer: !process.env.CI,
     timeout: 60_000,
   },
 });
