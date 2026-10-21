@@ -1023,7 +1023,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Make a template private. */
+        /** @description Make a template private. Answers the updated template, like publish. */
         post: {
             parameters: {
                 query?: never;
@@ -1036,11 +1036,33 @@ export interface paths {
             requestBody?: never;
             responses: {
                 /** @description Default Response */
-                204: {
+                200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: uuid */
+                            owner_id: string;
+                            owner_handle: string;
+                            name: string;
+                            summary: string;
+                            page_w_mm: number;
+                            page_h_mm: number;
+                            language: string;
+                            use_count: number;
+                            revision: number;
+                            version_count: number;
+                            published_at: string | null;
+                            /** Format: date-time */
+                            updated_at: string;
+                            body: string;
+                            css: string;
+                            readme: string;
+                        };
+                    };
                 };
                 /** @description Default Response */
                 401: {

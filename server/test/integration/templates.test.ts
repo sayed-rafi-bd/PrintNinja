@@ -255,7 +255,7 @@ describe("ported B4/P1 characterization", () => {
       url: `/v2/templates/${id}/unpublish`,
       headers: headers(token),
     });
-    expect(unpub.statusCode).toBe(204);
+    expect(unpub.statusCode).toBe(200);
     const after = await app.inject({
       method: "GET",
       url: "/v2/community/templates?page_size=100",

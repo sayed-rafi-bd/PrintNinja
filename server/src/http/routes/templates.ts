@@ -206,26 +206,27 @@ export async function templateRoutes(
     {
       preHandler: [requireAuth(deps)],
       schema: {
-        description: "Make a template private.",
+        description:
+          "Make a template private. Answers the updated template, like publish.",
         params: templateIdParams,
         response: {
-          204: z.null(),
+          200: templateSchema,
           401: errorBody,
           403: errorBody,
           404: errorBody,
         },
       },
     },
-    async (request, reply) => {
+    async (request) => {
       if (!request.authUser) {
         throw new UnauthorizedError();
       }
-      await unpublishTemplate(
+      const template = await unpublishTemplate(
         { templates: deps.templates },
         request.params.id,
         request.authUser.id,
       );
-      return reply.status(204).send(null);
+      return toTemplate(template);
     },
   );
 

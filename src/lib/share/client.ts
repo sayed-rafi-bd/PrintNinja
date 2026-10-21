@@ -258,9 +258,11 @@ export async function publishRemoteTemplate(
   });
 }
 
-/** Make a template private. The server copy is kept. */
-export async function unpublishRemoteTemplate(id: string): Promise<void> {
-  await callApi<unknown>(apiDeps(), {
+/** Make a template private. The server copy is kept. Answers the updated template, like publish. */
+export async function unpublishRemoteTemplate(
+  id: string,
+): Promise<RemoteTemplate> {
+  return callApi<RemoteTemplate>(apiDeps(), {
     method: "POST",
     path: `/v2/templates/${id}/unpublish`,
   });

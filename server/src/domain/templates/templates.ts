@@ -78,13 +78,14 @@ export async function publishTemplate(
 
 /**
  * Makes a template private. The saved rows survive (unlike a delete),
- * so republishing restores the saved list as it was.
+ * so republishing restores the saved list as it was. Returns the
+ * updated template, mirroring publish.
  */
 export async function unpublishTemplate(
   repos: { templates: TemplateRepository },
   id: string,
   ownerId: string,
-): Promise<void> {
+): Promise<TemplateView> {
   const template = await repos.templates.findById(id);
   if (!template) {
     throw new NotFoundError();
@@ -92,7 +93,11 @@ export async function unpublishTemplate(
   if (template.ownerId !== ownerId) {
     throw new ForbiddenError();
   }
-  await repos.templates.setPublished(id, null);
+  const unpublished = await repos.templates.setPublished(id, null);
+  if (!unpublished) {
+    throw new NotFoundError();
+  }
+  return unpublished;
 }
 
 /** The owner's own templates, private and published, newest first. */
