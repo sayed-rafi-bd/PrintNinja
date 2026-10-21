@@ -2,7 +2,6 @@ use crate::db::DbState;
 use crate::error::{AppError, AppResult};
 use rusqlite::Connection;
 use tauri::{AppHandle, Manager, State};
-use tauri_plugin_autostart::ManagerExt;
 
 /// Background-behavior preferences, mirrored from the `settings` table.
 /// Every key defaults to off except close-to-tray, which keeps the print
@@ -64,20 +63,29 @@ pub fn refresh_background(app: AppHandle, db: State<DbState>) -> AppResult<()> {
     apply_autostart(&app, prefs.launch_at_startup)
 }
 
+/// Applies autostart registration on desktop. On mobile there is no
+/// OS autostart entry to manage (the foreground service covers it),
+/// so this is a successful no-op there.
 pub fn apply_autostart(app: &AppHandle, enabled: bool) -> AppResult<()> {
-    let launcher = app.autolaunch();
-    let current = launcher
-        .is_enabled()
-        .map_err(|e| AppError::Internal(format!("autostart state failed: {e}")))?;
-    if enabled && !current {
-        launcher
-            .enable()
-            .map_err(|e| AppError::Internal(format!("autostart enable failed: {e}")))?;
-    } else if !enabled && current {
-        launcher
-            .disable()
-            .map_err(|e| AppError::Internal(format!("autostart disable failed: {e}")))?;
+    #[cfg(desktop)]
+    {
+        use tauri_plugin_autostart::ManagerExt as _;
+        let launcher = app.autolaunch();
+        let current = launcher
+            .is_enabled()
+            .map_err(|e| AppError::Internal(format!("autostart state failed: {e}")))?;
+        if enabled && !current {
+            launcher
+                .enable()
+                .map_err(|e| AppError::Internal(format!("autostart enable failed: {e}")))?;
+        } else if !enabled && current {
+            launcher
+                .disable()
+                .map_err(|e| AppError::Internal(format!("autostart disable failed: {e}")))?;
+        }
     }
+    #[cfg(not(desktop))]
+    let _ = (app, enabled);
     Ok(())
 }
 
@@ -87,4 +95,65 @@ pub fn read_prefs(app: &AppHandle) -> BackgroundPrefs {
         .ok()
         .and_then(|guard| BackgroundPrefs::read(guard.connection()).ok())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+    use std::sync::{Arc, Mutex};
+
+    fn test_db() -> DbState {
+        let path = std::env::temp_dir().join(format!(
+            "printninja_background_{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        Arc::new(Mutex::new(
+            Database::open(&format!("sqlite:{}", path.display())).expect("open db"),
+        ))
+    }
+
+    fn read(db: &DbState) -> BackgroundPrefs {
+        let guard = db.lock().unwrap();
+        BackgroundPrefs::read(guard.connection()).unwrap()
+    }
+
+    fn write(db: &DbState, key: &str, value: &str) {
+        let guard = db.lock().unwrap();
+        guard
+            .connection()
+            .execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [key, value],
+            )
+            .unwrap();
+    }
+
+    /// Fresh installs keep the queue on close (default-on) and
+    /// autostart nothing (opt-in).
+    #[test]
+    fn fresh_install_defaults_keep_printing_without_autostart() {
+        let db = test_db();
+        let prefs = read(&db);
+        assert!(prefs.close_to_tray);
+        assert!(!prefs.launch_at_startup);
+        assert!(!prefs.start_minimized);
+        assert!(!prefs.minimize_to_tray);
+    }
+
+    /// Stored values round-trip, including explicit opt-out of the
+    /// close-to-tray default.
+    #[test]
+    fn stored_preferences_win_over_defaults() {
+        let db = test_db();
+        write(&db, KEY_LAUNCH_AT_STARTUP, "1");
+        write(&db, KEY_CLOSE_TO_TRAY, "0");
+        write(&db, KEY_MINIMIZE_TO_TRAY, "true");
+        let prefs = read(&db);
+        assert!(prefs.launch_at_startup);
+        assert!(!prefs.close_to_tray);
+        assert!(prefs.minimize_to_tray);
+        assert!(!prefs.start_minimized);
+    }
 }

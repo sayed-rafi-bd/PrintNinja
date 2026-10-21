@@ -54,6 +54,12 @@ function AppContent() {
 
   useEffect(() => {
     diagnostics.info("App started", { platform: navigator.platform });
+    // Android only: keep the print queue alive after the app is swiped
+    // away. No-op everywhere else; failures are best-effort (the
+    // service also starts from the native plugin load).
+    void import("@/lib/android/background")
+      .then((m) => m.ensureBackgroundService())
+      .catch(() => {});
   }, []);
 
   // DB is source of truth, localStorage is cache. Wait for DB before deciding

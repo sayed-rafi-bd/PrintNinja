@@ -113,3 +113,21 @@ with the platform message, never silently.
       with the reason, never `success`
 - [ ] USB/system printer setup is refused with the platform message
 - [ ] AppImage runs from a download folder with no install (`chmod +x`)
+
+## Appendix M. Android foreground service (manual — no emulator in CI)
+
+On a physical device with a debug APK (`android-build` CI artifact):
+- [ ] Launching the app shows the persistent notification "PrintNinja
+      print service is running"; tapping it reopens the app
+- [ ] Notification has a working Stop action; stopping removes the
+      notification without crashing the app
+- [ ] Print a job, swipe the app away mid-queue, confirm the job still
+      completes (foreground service survived the swipe)
+- [ ] Reboot the phone: service is stopped (no autostart — by design);
+      launching the app starts it again
+- [ ] Settings → Background shows the service status and the battery
+      exemption row (desktop tray toggles are hidden on Android);
+      "Request exemption" opens the system screen, and granting it
+      flips the status to allowed
+- [ ] With Battery Saver on and no exemption, a queued print still
+      completes (may be deferred by Doze — record the delay)

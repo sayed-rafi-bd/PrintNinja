@@ -97,6 +97,9 @@ pub fn run() {
 
     let builder = tauri::Builder::default();
 
+    // Android printing + background service (no-op stub on desktop).
+    let builder = builder.plugin(tauri_plugin_android_print::init());
+
     // A second launch (or deeplink) focuses the running window instead of
     // starting a second queue. Required once close-to-tray keeps the
     // process alive after the window is gone.

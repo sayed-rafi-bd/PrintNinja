@@ -3,6 +3,10 @@ import { useSearchParams } from "react-router-dom";
 import { AppearanceSettings } from "@/components/AppearanceSettings";
 import { PageHeader } from "@/components/PageHeader";
 import { SetupChecklist } from "@/components/SetupChecklist";
+import {
+  AndroidBackgroundControls,
+  isAndroidBackground,
+} from "@/components/BackgroundAndroid";
 import { parseSection, type SettingsSection } from "@/lib/setup/checklist";
 import { agent } from "@/lib/agent/commands";
 import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
@@ -110,6 +114,11 @@ export function SettingsPage() {
   const [startMinimized, setStartMinimized] = useState(false);
   const [minimizeToTray, setMinimizeToTray] = useState(false);
   const [closeToTray, setCloseToTray] = useState(true);
+  const [bgServiceRunning, setBgServiceRunning] = useState<boolean | null>(
+    null,
+  );
+  const [batteryExempt, setBatteryExempt] = useState<boolean | null>(null);
+  const [bgBusy, setBgBusy] = useState(false);
 
   const [trusted, setTrusted] = useState<string[]>([]);
   const [newTrusted, setNewTrusted] = useState("");
@@ -622,74 +631,113 @@ export function SettingsPage() {
                 </p>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="launch-at-startup"
-                    data-testid="settings-launch-at-startup"
-                    checked={launchAtStartup}
-                    onCheckedChange={(v) =>
-                      setBackgroundPref(
-                        "launch_at_startup",
-                        v,
-                        setLaunchAtStartup,
-                      )
+                <AndroidBackgroundControls
+                  running={bgServiceRunning}
+                  exempt={batteryExempt}
+                  busy={bgBusy}
+                  onRefresh={async () => {
+                    const bg = await import("@/lib/android/background");
+                    if (!bg.isAndroid()) return;
+                    setBgBusy(true);
+                    try {
+                      setBgServiceRunning(
+                        await bg.isBackgroundServiceRunning(),
+                      );
+                      setBatteryExempt(await bg.isBatteryExemptionGranted());
+                    } finally {
+                      setBgBusy(false);
                     }
-                  />
-                  <Label htmlFor="launch-at-startup">Launch at startup</Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="start-minimized"
-                    data-testid="settings-start-minimized"
-                    checked={startMinimized}
-                    disabled={!launchAtStartup}
-                    onCheckedChange={(v) =>
-                      setBackgroundPref("start_minimized", v, setStartMinimized)
+                  }}
+                  onRequestExemption={async () => {
+                    const bg = await import("@/lib/android/background");
+                    setBgBusy(true);
+                    try {
+                      await bg.requestBatteryExemption();
+                      setBatteryExempt(await bg.isBatteryExemptionGranted());
+                      toast.success("Battery setting updated");
+                    } finally {
+                      setBgBusy(false);
                     }
-                  />
-                  <Label htmlFor="start-minimized">
-                    Start minimized in the notification area
-                  </Label>
-                </div>
-                {!launchAtStartup && (
-                  <p className="text-xs text-muted-foreground">
-                    Start minimized needs launch at startup.
-                  </p>
-                )}
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="minimize-to-tray"
-                    data-testid="settings-minimize-to-tray"
-                    checked={minimizeToTray}
-                    onCheckedChange={(v) =>
-                      setBackgroundPref(
-                        "minimize_to_tray",
-                        v,
-                        setMinimizeToTray,
-                      )
-                    }
-                  />
-                  <Label htmlFor="minimize-to-tray">
-                    Minimizing sends the app to the notification area
-                  </Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="close-to-tray"
-                    data-testid="settings-close-to-tray"
-                    checked={closeToTray}
-                    onCheckedChange={(v) =>
-                      setBackgroundPref("close_to_tray", v, setCloseToTray)
-                    }
-                  />
-                  <Label htmlFor="close-to-tray">
-                    Closing keeps the app in the notification area
-                  </Label>
-                </div>
-                {!closeToTray && (
-                  <p className="text-xs text-warning">
-                    Closing will quit the app and stop the print queue.
-                  </p>
+                  }}
+                />
+                {!isAndroidBackground() && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="launch-at-startup"
+                        data-testid="settings-launch-at-startup"
+                        checked={launchAtStartup}
+                        onCheckedChange={(v) =>
+                          setBackgroundPref(
+                            "launch_at_startup",
+                            v,
+                            setLaunchAtStartup,
+                          )
+                        }
+                      />
+                      <Label htmlFor="launch-at-startup">
+                        Launch at startup
+                      </Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="start-minimized"
+                        data-testid="settings-start-minimized"
+                        checked={startMinimized}
+                        disabled={!launchAtStartup}
+                        onCheckedChange={(v) =>
+                          setBackgroundPref(
+                            "start_minimized",
+                            v,
+                            setStartMinimized,
+                          )
+                        }
+                      />
+                      <Label htmlFor="start-minimized">
+                        Start minimized in the notification area
+                      </Label>
+                    </div>
+                    {!launchAtStartup && (
+                      <p className="text-xs text-muted-foreground">
+                        Start minimized needs launch at startup.
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="minimize-to-tray"
+                        data-testid="settings-minimize-to-tray"
+                        checked={minimizeToTray}
+                        onCheckedChange={(v) =>
+                          setBackgroundPref(
+                            "minimize_to_tray",
+                            v,
+                            setMinimizeToTray,
+                          )
+                        }
+                      />
+                      <Label htmlFor="minimize-to-tray">
+                        Minimizing sends the app to the notification area
+                      </Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="close-to-tray"
+                        data-testid="settings-close-to-tray"
+                        checked={closeToTray}
+                        onCheckedChange={(v) =>
+                          setBackgroundPref("close_to_tray", v, setCloseToTray)
+                        }
+                      />
+                      <Label htmlFor="close-to-tray">
+                        Closing keeps the app in the notification area
+                      </Label>
+                    </div>
+                    {!closeToTray && (
+                      <p className="text-xs text-warning">
+                        Closing will quit the app and stop the print queue.
+                      </p>
+                    )}
+                  </>
                 )}
               </CardContent>
             </Card>

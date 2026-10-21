@@ -3032,6 +3032,7 @@ dependencies = [
  "sha2",
  "tauri",
  "tauri-build",
+ "tauri-plugin-android-print",
  "tauri-plugin-autostart",
  "tauri-plugin-single-instance",
  "thiserror 2.0.21",
@@ -4284,6 +4285,16 @@ dependencies = [
  "serde_json",
  "tauri-utils",
  "walkdir",
+]
+
+[[package]]
+name = "tauri-plugin-android-print"
+version = "0.5.0"
+dependencies = [
+ "serde",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

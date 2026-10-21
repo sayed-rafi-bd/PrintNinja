@@ -80,6 +80,8 @@ export const testids = {
   settingsMinimizeToTray: "settings-minimize-to-tray",
   /** Settings background: close-to-tray toggle. */
   settingsCloseToTray: "settings-close-to-tray",
+  /** Settings background (Android only): battery exemption button. */
+  settingsBatteryExemption: "settings-battery-exemption",
   /** Settings fonts: upload button. */
   settingsFontUpload: "settings-font-upload",
   /** Settings retention: open the full-reset confirmation. */

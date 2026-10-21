@@ -222,15 +222,29 @@ close-to-tray as user settings; autostart is **opt-in, off by default**.
   single-instance focus path. Tray show/hide/quit stays a manual
   HARDWARE_CHECKLIST item (no display in CI).
 
-### B. Android background (no tray on mobile)
-- Kotlin foreground service in `plugins/`: persistent notification
-  ("PrintNinja print service is running", taps open the app),
-  `START_STICKY`, Stop action. The local API server and queue live
-  under it so prints survive the app being swiped away.
-- Battery-optimization exemption is a user decision: prompt for
-  `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` from the new Background
-  settings, never silently. Document Doze limits (deferred network,
-  alarms) in the plan doc.
+### B. Android background (no tray on mobile) — implemented, CI-verified by `android-build`
+
+`plugins/tauri-plugin-android-print` is a real Tauri v2 plugin crate
+(Cargo + Gradle module, `android_path` wired through `build.rs`,
+registered in the app with `.plugin(tauri_plugin_android_print::init())`):
+- `PrintNinjaService`: foreground service, `dataSync` type, persistent
+  notification ("PrintNinja print service is running", tap opens the
+  app, Stop action), `START_STICKY`. Started from the plugin's
+  `load()` hook and from the webview on launch
+  (`ensureBackgroundService()` in App startup) — all three entry
+  points idempotent, so the queue survives before any print command.
+- `request_battery_exemption` / `is_battery_exemption_granted`
+  commands, surfaced in Settings → Background (Android only) as an
+  explicit "Request exemption" button with a status badge. Opt-in
+  only, never automatic. Doze and app standby otherwise defer the
+  worker and the local API server.
+- The previously orphaned `AndroidPrintPlugin`/`MdnsDiscovery` sources
+  were restructured into the crate (same behavior, compiles clean);
+  the print path itself is unchanged and stays a follow-up.
+- Verified here, not just in CI: `cargo check` desktop +
+  `aarch64-linux-android`, full `tauri android build --debug --apk`.
+  Runtime behavior (swipe-away survival, exemption prompt copy) stays
+  a manual HARDWARE_CHECKLIST item — no emulator in CI.
 
 ### C. Linux support — packaging is the small half
 - CI job (`ubuntu-24.04`) installing `libwebkit2gtk-4.1-dev`,

@@ -70,6 +70,13 @@ test("settings admin: brand, density, API port, trusted sources, logo", async ({
   await page.getByTestId(testids.settingsApiPort).fill("17799");
   await expect(page.getByTestId(testids.settingsApiPort)).toHaveValue("17799");
 
+  // Desktop shows tray toggles instead of the Android service card.
+  await page.goto("/settings?section=background");
+  await expect(page.getByTestId(testids.settingsCloseToTray)).toBeVisible();
+  await expect(
+    page.getByTestId(testids.settingsBatteryExemption),
+  ).toHaveCount(0);
+
   // Trusted sources add and remove.
   await page.getByLabel("Trusted source").fill("pos.local");
   await page.getByRole("button", { name: "Add" }).click();

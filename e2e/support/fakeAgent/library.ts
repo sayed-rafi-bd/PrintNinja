@@ -5,7 +5,7 @@
 // account allow-list matches the server (ui_density, brand_name,
 // brand_logo); device keys are never dirty.
 
-import { getSetting, setSetting } from "./store.js";
+import { getSetting, seedPrinters, setSetting } from "./store.js";
 import type { ApplyReport } from "./cache.js";
 
 export const ACCOUNT_SETTING_KEYS = ["ui_density", "brand_name", "brand_logo"];
@@ -165,19 +165,26 @@ export function createFakeLibrary(deps: {
   const persistedPrinters = readRows<FakePrinterRow>(PRINTERS_KEY);
   if (persistedPrinters) {
     for (const row of persistedPrinters) {
-      printers.set(row.id, row);
+      printers.set(row.id, {
+        id: row.id,
+        name: row.name,
+        printer_type: row.printer_type ?? "ipp",
+        address: row.address ?? "",
+        language: row.language ?? "pdf",
+      });
       nextPrinterId = Math.max(nextPrinterId, row.id + 1);
     }
   } else {
     try {
-      const seed = JSON.parse(
-        localStorage.getItem("fake-agent:seed") ?? "{}",
-      ) as {
-        printers?: Array<{ name?: string }>;
-      };
-      for (const p of seed.printers ?? []) {
+      for (const p of seedPrinters()) {
         const id = nextPrinterId++;
-        printers.set(id, { id, name: String(p.name ?? `E2E Printer ${id}`) });
+        printers.set(id, {
+          id,
+          name: String(p["name"] ?? `E2E Printer ${id}`),
+          printer_type: String(p["printer_type"] ?? "ipp"),
+          address: String(p["address"] ?? ""),
+          language: String(p["language"] ?? "pdf"),
+        });
       }
       if (printers.size > 0) persistAll();
     } catch {
