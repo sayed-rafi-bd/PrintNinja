@@ -265,6 +265,63 @@ fn find_edge(purpose: &str) -> Result<&'static str> {
         })
 }
 
+/// Start headless Edge once, in the background, on the reusable profile, so
+/// the first real print does not pay for Edge's first-run initialisation.
+///
+/// Call from app setup after `sweep_leftover_edge_profiles` and **before the
+/// worker spawns**: the profile is claimed synchronously here, and a job that
+/// arrives while the warm-up runs waits for it (bounded) instead of building a
+/// cold throwaway profile. Never blocks startup and never fails it: if Edge is
+/// missing or the warm-up fails, it is logged and the first job falls back to
+/// the old behaviour.
+#[cfg(windows)]
+pub fn warm_up_edge(cache_dir: PathBuf) {
+    let Ok(edge_path) = find_edge("warm-up") else {
+        tracing::warn!("Edge not found; skipping warm-up");
+        return;
+    };
+    let Some(claim) = edge::shared().claim_warm_up() else {
+        return;
+    };
+    tauri::async_runtime::spawn(async move {
+        let id = uuid::Uuid::new_v4();
+        let html = cache_dir.join(format!("warmup-{id}.html"));
+        let pdf = cache_dir.join(format!("warmup-{id}.pdf"));
+        if let Err(e) = tokio::fs::create_dir_all(&cache_dir).await {
+            tracing::warn!(error = %e, "Edge warm-up: cache dir unavailable");
+            return;
+        }
+        // Text, an @page rule and a web font family exercise the same paths
+        // a label does, so font and print-pipeline set-up happen here too.
+        let doc = "<!doctype html><html><head><meta charset=\"utf-8\">\
+                   <style>@page{size:50mm 30mm;margin:0}\
+                   body{font-family:Arial,sans-serif;font-size:12px}</style></head>\
+                   <body>PrintNinja warm-up 0123456789</body></html>";
+        if tokio::fs::write(&html, doc).await.is_err() {
+            return;
+        }
+        let url = format!("file:///{}", html.to_string_lossy().replace('\\', "/"));
+        // Same switches as `webview2_print_to_pdf`, so the same code paths load.
+        let mut args: Vec<String> = [
+            "--headless",
+            "--disable-gpu",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--print-to-pdf-no-header",
+            "--no-pdf-header-footer",
+        ]
+        .iter()
+        .map(|a| a.to_string())
+        .collect();
+        args.push(format!("--print-to-pdf={}", pdf.to_string_lossy()));
+        args.push(url);
+        claim
+            .run(std::path::Path::new(edge_path), &cache_dir, &args, &pdf)
+            .await;
+        let _ = tokio::fs::remove_file(&html).await;
+    });
+}
+
 /// Startup sweep: remove throwaway Edge profiles left behind by earlier
 /// runs (P17 follow-up — the stray `.pem` next to `last-render.pdf`).
 ///

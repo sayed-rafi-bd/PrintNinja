@@ -75,6 +75,11 @@ pub fn run() {
                 &cache_dir,
                 std::time::Duration::from_secs(60 * 30),
             );
+            // Start headless Edge on the reusable profile now, in the
+            // background, so the first print is as fast as the rest. Before
+            // the worker so the profile is claimed before any job can ask.
+            #[cfg(windows)]
+            render::warm_up_edge(cache_dir.clone());
             worker::spawn(db_state, queue, cache_dir);
             Ok(())
         })
