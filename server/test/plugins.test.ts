@@ -76,6 +76,8 @@ describe("error envelope", () => {
     expect(body.error.code).toBe("internal_error");
     expect(body.error.message).not.toContain("secret");
     expect(body.error.message).not.toMatch(/at .*\(/);
+    // Even a 500 carries the id, so the operator can quote it.
+    expect(response.headers["x-request-id"]).toBeTruthy();
   });
 });
 
@@ -130,6 +132,43 @@ describe("CORS allow-list", () => {
     });
 
     expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  it("answers preflights per origin without leaking the list", async () => {
+    app = await buildApp({ config: testConfig(), deps: fakeDeps() });
+    const allowed = await app.inject({
+      method: "OPTIONS",
+      url: "/v2/templates/mine",
+      headers: {
+        origin: "http://localhost:1420",
+        "access-control-request-method": "GET",
+      },
+    });
+    expect(allowed.statusCode).toBeLessThan(300);
+    expect(allowed.headers["access-control-allow-origin"]).toBe(
+      "http://localhost:1420",
+    );
+
+    const denied = await app.inject({
+      method: "OPTIONS",
+      url: "/v2/templates/mine",
+      headers: {
+        origin: "https://evil.example",
+        "access-control-request-method": "GET",
+      },
+    });
+    expect(denied.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+});
+
+describe("security headers", () => {
+  it("sends helmet's baseline headers on plain responses", async () => {
+    app = await buildApp({ config: testConfig(), deps: fakeDeps() });
+    const response = await app.inject({ method: "GET", url: "/v2/health" });
+
+    expect(response.headers["x-content-type-options"]).toBe("nosniff");
+    expect(response.headers["x-frame-options"]).toBeDefined();
+    expect(response.headers["referrer-policy"]).toBeDefined();
   });
 });
 

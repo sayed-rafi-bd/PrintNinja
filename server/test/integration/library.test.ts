@@ -103,6 +103,37 @@ describe("datasets", () => {
     );
   });
 
+  it("gives one 200 and one 409 for concurrent same-revision updates", async () => {
+    const token = await register("dsrace");
+    const id = randomUUID();
+    const created = await app.inject({
+      method: "PUT",
+      url: `/v2/datasets/${id}`,
+      headers: headers(token),
+      payload: { name: "Rows", dataJson: '{"rows":[]}' },
+    });
+    expect(created.statusCode).toBe(201);
+
+    const attempts = await Promise.allSettled([
+      app.inject({
+        method: "PUT",
+        url: `/v2/datasets/${id}`,
+        headers: headers(token),
+        payload: { name: "A", dataJson: '{"rows":[1]}', if_revision: 1 },
+      }),
+      app.inject({
+        method: "PUT",
+        url: `/v2/datasets/${id}`,
+        headers: headers(token),
+        payload: { name: "B", dataJson: '{"rows":[2]}', if_revision: 1 },
+      }),
+    ]);
+    const statuses = attempts.map((result) =>
+      result.status === "fulfilled" ? result.value.statusCode : "rejected",
+    );
+    expect(statuses.sort()).toEqual([200, 409]);
+  });
+
   it("needs auth, rejects other owners and requires revisions", async () => {
     const mine = await register("Mine");
     const theirs = await register("Theirs");
