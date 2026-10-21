@@ -1,4 +1,11 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { readCachedSetting, readSetting, writeSetting } from "@/lib/settings";
 import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
 import {
@@ -36,7 +43,12 @@ const PrefsContext = createContext<Prefs>(DEFAULTS);
 export const usePrefs = () => useContext(PrefsContext);
 
 async function setNativeWindowTitle(title: string) {
-  if (typeof window === "undefined" || !(window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) return;
+  if (
+    typeof window === "undefined" ||
+    !(window as unknown as { __TAURI_INTERNALS__?: unknown })
+      .__TAURI_INTERNALS__
+  )
+    return;
   try {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
     await getCurrentWindow().setTitle(title);
@@ -47,8 +59,12 @@ async function setNativeWindowTitle(title: string) {
 
 export function PrefsProvider({ children }: { children: React.ReactNode }) {
   // Start from the local cache so the first paint already has the right density and name.
-  const [density, setDensityState] = useState<Density>(() => parseDensity(readCachedSetting(SETTING_KEYS.density)));
-  const [appName, setAppNameState] = useState(() => sanitizeAppName(readCachedSetting(SETTING_KEYS.appName)));
+  const [density, setDensityState] = useState<Density>(() =>
+    parseDensity(readCachedSetting(SETTING_KEYS.density)),
+  );
+  const [appName, setAppNameState] = useState(() =>
+    sanitizeAppName(readCachedSetting(SETTING_KEYS.appName)),
+  );
   const [logo, setLogoState] = useState<string | null>(() => {
     const v = readCachedSetting(SETTING_KEYS.logo);
     return isValidLogoDataUrl(v) ? v : null;
@@ -98,7 +114,10 @@ export function PrefsProvider({ children }: { children: React.ReactNode }) {
     const clean = sanitizeAppName(name);
     setAppNameState(clean);
     // Store empty for the default so "reset" really clears the override.
-    await writeSetting(SETTING_KEYS.appName, clean === DEFAULT_APP_NAME ? "" : clean);
+    await writeSetting(
+      SETTING_KEYS.appName,
+      clean === DEFAULT_APP_NAME ? "" : clean,
+    );
     notifyLocalEdit();
   }, []);
   const setLogo = useCallback(async (dataUrl: string | null) => {
@@ -112,5 +131,7 @@ export function PrefsProvider({ children }: { children: React.ReactNode }) {
     () => ({ density, appName, logo, setDensity, setAppName, setLogo }),
     [density, appName, logo, setDensity, setAppName, setLogo],
   );
-  return <PrefsContext.Provider value={value}>{children}</PrefsContext.Provider>;
+  return (
+    <PrefsContext.Provider value={value}>{children}</PrefsContext.Provider>
+  );
 }

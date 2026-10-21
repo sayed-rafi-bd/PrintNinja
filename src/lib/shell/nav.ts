@@ -1,4 +1,12 @@
-import { History, Library, PencilRuler, Printer, Send, Settings, type LucideIcon } from "lucide-react";
+import {
+  History,
+  Library,
+  PencilRuler,
+  Printer,
+  Send,
+  Settings,
+  type LucideIcon,
+} from "lucide-react";
 
 export interface NavItem {
   path: string;
@@ -21,7 +29,12 @@ export const NAV_GROUPS: NavGroup[] = [
     labelKey: "nav.group_work",
     items: [
       { path: "/print", icon: Send, labelKey: "nav.print", shortcut: "p" },
-      { path: "/history", icon: History, labelKey: "nav.history", shortcut: "h" },
+      {
+        path: "/history",
+        icon: History,
+        labelKey: "nav.history",
+        shortcut: "h",
+      },
     ],
   },
   {
@@ -29,15 +42,30 @@ export const NAV_GROUPS: NavGroup[] = [
     labelKey: "nav.group_build",
     items: [
       { path: "/", icon: PencilRuler, labelKey: "nav.designer", shortcut: "d" },
-      { path: "/templates", icon: Library, labelKey: "nav.templates", shortcut: "t" },
+      {
+        path: "/templates",
+        icon: Library,
+        labelKey: "nav.templates",
+        shortcut: "t",
+      },
     ],
   },
   {
     id: "admin",
     labelKey: "nav.group_admin",
     items: [
-      { path: "/printers", icon: Printer, labelKey: "nav.printers", shortcut: "r" },
-      { path: "/settings", icon: Settings, labelKey: "nav.settings", shortcut: "s" },
+      {
+        path: "/printers",
+        icon: Printer,
+        labelKey: "nav.printers",
+        shortcut: "r",
+      },
+      {
+        path: "/settings",
+        icon: Settings,
+        labelKey: "nav.settings",
+        shortcut: "s",
+      },
     ],
   },
 ];
@@ -45,6 +73,7 @@ export const NAV_GROUPS: NavGroup[] = [
 export const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
 
 export function isActivePath(currentPath: string, itemPath: string): boolean {
-  if (itemPath === "/") return currentPath === "/" || currentPath.startsWith("/template/");
+  if (itemPath === "/")
+    return currentPath === "/" || currentPath.startsWith("/template/");
   return currentPath === itemPath || currentPath.startsWith(`${itemPath}/`);
 }

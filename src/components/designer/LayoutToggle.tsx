@@ -3,13 +3,24 @@ import { cn } from "@/lib/utils";
 
 export type DesignerLayout = "side" | "stacked" | "canvas";
 
-export const DESIGNER_LAYOUTS: readonly DesignerLayout[] = ["side", "stacked", "canvas"];
+export const DESIGNER_LAYOUTS: readonly DesignerLayout[] = [
+  "side",
+  "stacked",
+  "canvas",
+];
 
 export function isDesignerLayout(value: unknown): value is DesignerLayout {
-  return typeof value === "string" && (DESIGNER_LAYOUTS as readonly string[]).includes(value);
+  return (
+    typeof value === "string" &&
+    (DESIGNER_LAYOUTS as readonly string[]).includes(value)
+  );
 }
 
-const OPTIONS: { value: DesignerLayout; label: string; Icon: typeof Columns2 }[] = [
+const OPTIONS: {
+  value: DesignerLayout;
+  label: string;
+  Icon: typeof Columns2;
+}[] = [
   { value: "side", label: "Side by side", Icon: Columns2 },
   { value: "stacked", label: "Stacked", Icon: Rows2 },
   { value: "canvas", label: "Canvas only", Icon: PanelTop },
@@ -23,7 +34,11 @@ interface Props {
 /** Side by side, stacked (editor above canvas), or canvas only. Desktop only. */
 export function LayoutToggle({ value, onChange }: Props) {
   return (
-    <div role="group" aria-label="Workspace layout" className="inline-flex rounded-md border bg-background p-0.5">
+    <div
+      role="group"
+      aria-label="Workspace layout"
+      className="inline-flex rounded-md border bg-background p-0.5"
+    >
       {OPTIONS.map(({ value: v, label, Icon }) => (
         <button
           key={v}

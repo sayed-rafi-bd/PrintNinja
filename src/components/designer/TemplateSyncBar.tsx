@@ -39,7 +39,10 @@ export function TemplateSyncBar({
   const [unpublishOpen, setUnpublishOpen] = useState(false);
   const busy = pending != null;
   const published = !!remoteId && !!publishedAt;
-  const changedLocally = published && !!templateUpdatedAt && new Date(templateUpdatedAt) > new Date(publishedAt);
+  const changedLocally =
+    published &&
+    !!templateUpdatedAt &&
+    new Date(templateUpdatedAt) > new Date(publishedAt);
 
   const state = readOnly ? (
     <StatusBadge status="saved" label="Read-only copy" />
@@ -52,10 +55,18 @@ export function TemplateSyncBar({
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-card px-3 py-2">
-        <div className="flex items-center gap-2" data-testid="template-state" data-state={readOnly ? "read-only" : published ? "published" : "draft"}>
+        <div
+          className="flex items-center gap-2"
+          data-testid="template-state"
+          data-state={
+            readOnly ? "read-only" : published ? "published" : "draft"
+          }
+        >
           {state}
           {!readOnly && !remoteId && (
-            <span className="text-xs text-muted-foreground">Only on this computer</span>
+            <span className="text-xs text-muted-foreground">
+              Only on this computer
+            </span>
           )}
         </div>
         {!readOnly && (
@@ -72,11 +83,23 @@ export function TemplateSyncBar({
                 Unpublish
               </Button>
             ) : (
-              <Button data-testid="template-publish" variant="outline" size="sm" onClick={onPublish} disabled={busy}>
+              <Button
+                data-testid="template-publish"
+                variant="outline"
+                size="sm"
+                onClick={onPublish}
+                disabled={busy}
+              >
                 {pending === "publish" ? "Publishing…" : "Publish to Community"}
               </Button>
             )}
-            <Button data-testid="template-sync-now" variant="outline" size="sm" onClick={onSyncNow} disabled={busy}>
+            <Button
+              data-testid="template-sync-now"
+              variant="outline"
+              size="sm"
+              onClick={onSyncNow}
+              disabled={busy}
+            >
               <ArrowUpFromLine className="h-4 w-4" aria-hidden="true" />
               {pending === "sync" ? "Syncing…" : "Sync now"}
             </Button>
@@ -86,18 +109,24 @@ export function TemplateSyncBar({
 
       {readOnly && (
         <p role="status" className="text-xs text-muted-foreground">
-          This is a saved copy from another person. You can print it, but not change it.
+          This is a saved copy from another person. You can print it, but not
+          change it.
         </p>
       )}
       {!readOnly && changedLocally && publishedAt && (
-        <p role="status" className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning">
-          These changes are not on the server yet. Other people still see the version from{" "}
-          {new Date(publishedAt).toLocaleDateString()}. They send automatically.
+        <p
+          role="status"
+          className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning"
+        >
+          These changes are not on the server yet. Other people still see the
+          version from {new Date(publishedAt).toLocaleDateString()}. They send
+          automatically.
         </p>
       )}
       {!readOnly && remoteId && !published && (
         <p role="status" className="text-xs text-muted-foreground">
-          Saved on the server as a private copy. Publish to show it in Community.
+          Saved on the server as a private copy. Publish to show it in
+          Community.
         </p>
       )}
 

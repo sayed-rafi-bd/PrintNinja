@@ -18,11 +18,14 @@ describe("startOnPrint", () => {
     expect(window.location.hash).toBe("#x");
   });
 
-  it.each(["/history", "/template/4", "/print", "/templates"])("leaves %s alone", (path) => {
-    visit(path);
-    startOnPrint();
-    expect(window.location.pathname).toBe(path);
-  });
+  it.each(["/history", "/template/4", "/print", "/templates"])(
+    "leaves %s alone",
+    (path) => {
+      visit(path);
+      startOnPrint();
+      expect(window.location.pathname).toBe(path);
+    },
+  );
 });
 
 describe("AppRouter", () => {

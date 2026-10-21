@@ -7,8 +7,8 @@ import { PrismaClient } from "./generated/index.js";
  * repositories take it as a constructor argument.
  */
 export function createDbClient(url: string): PrismaClient {
-	const adapter = new PrismaPg({ connectionString: url });
-	return new PrismaClient({ adapter });
+  const adapter = new PrismaPg({ connectionString: url });
+  return new PrismaClient({ adapter });
 }
 
 export type DbClient = PrismaClient;

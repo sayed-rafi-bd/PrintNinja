@@ -46,7 +46,10 @@ describe("error envelope", () => {
     });
     await app.ready();
 
-    const response = await app.inject({ method: "GET", url: "/v2/__domain-error" });
+    const response = await app.inject({
+      method: "GET",
+      url: "/v2/__domain-error",
+    });
 
     expect(response.statusCode).toBe(409);
     const body = response.json() as {
@@ -67,7 +70,9 @@ describe("error envelope", () => {
     const response = await app.inject({ method: "GET", url: "/v2/__boom" });
 
     expect(response.statusCode).toBe(500);
-    const body = response.json() as { error: { code: string; message: string } };
+    const body = response.json() as {
+      error: { code: string; message: string };
+    };
     expect(body.error.code).toBe("internal_error");
     expect(body.error.message).not.toContain("secret");
     expect(body.error.message).not.toMatch(/at .*\(/);
@@ -96,7 +101,9 @@ describe("request ids", () => {
     const first = await app.inject({ method: "GET", url: "/v2/health" });
     const second = await app.inject({ method: "GET", url: "/v2/health" });
 
-    expect(first.headers["x-request-id"]).not.toBe(second.headers["x-request-id"]);
+    expect(first.headers["x-request-id"]).not.toBe(
+      second.headers["x-request-id"],
+    );
   });
 });
 
@@ -135,7 +142,10 @@ describe("client IP attribution", () => {
     headers: Record<string, string> = {},
     remoteAddress?: string,
   ): Promise<string> {
-    app = await buildApp({ config: testConfig({ trustProxy }), deps: fakeDeps() });
+    app = await buildApp({
+      config: testConfig({ trustProxy }),
+      deps: fakeDeps(),
+    });
     app.get("/v2/__ip", async (request) => ({ ip: request.ip }));
     await app.ready();
     const response = await app.inject({
@@ -148,9 +158,7 @@ describe("client IP attribution", () => {
   }
 
   it("ignores X-Forwarded-For when no proxy is trusted", async () => {
-    expect(await ipFor(0, { "x-forwarded-for": "9.9.9.9" })).toBe(
-      "127.0.0.1",
-    );
+    expect(await ipFor(0, { "x-forwarded-for": "9.9.9.9" })).toBe("127.0.0.1");
   });
 
   it("uses X-Forwarded-For from a local proxy when hops are trusted", async () => {
@@ -166,7 +174,10 @@ describe("client IP attribution", () => {
 
 describe("rate limit", () => {
   it("returns the 429 envelope once the limit is exhausted", async () => {
-    app = await buildApp({ config: testConfig({ rateLimitMax: 3 }), deps: fakeDeps() });
+    app = await buildApp({
+      config: testConfig({ rateLimitMax: 3 }),
+      deps: fakeDeps(),
+    });
     for (let i = 0; i < 3; i += 1) {
       await app.inject({ method: "GET", url: "/v2/health" });
     }
@@ -208,13 +219,19 @@ describe("body limit", () => {
 
 describe("docs gating", () => {
   it("serves /docs and /openapi.json when enabled", async () => {
-    app = await buildApp({ config: testConfig({ docsEnabled: true }), deps: fakeDeps() });
+    app = await buildApp({
+      config: testConfig({ docsEnabled: true }),
+      deps: fakeDeps(),
+    });
     expect((await app.inject({ url: "/docs" })).statusCode).toBe(200);
     expect((await app.inject({ url: "/openapi.json" })).statusCode).toBe(200);
   });
 
   it("returns the 404 envelope for /docs when disabled", async () => {
-    app = await buildApp({ config: testConfig({ docsEnabled: false }), deps: fakeDeps() });
+    app = await buildApp({
+      config: testConfig({ docsEnabled: false }),
+      deps: fakeDeps(),
+    });
     const response = await app.inject({ url: "/docs" });
 
     expect(response.statusCode).toBe(404);

@@ -65,11 +65,22 @@ function wrapSelection(
   const start = textarea.selectionStart;
   const end = textarea.selectionEnd;
   const selected = textarea.value.slice(start, end) || placeholder;
-  const next = textarea.value.slice(0, start) + before + selected + after + textarea.value.slice(end);
+  const next =
+    textarea.value.slice(0, start) +
+    before +
+    selected +
+    after +
+    textarea.value.slice(end);
   return next;
 }
 
-export function ReadmeEditor({ value, onChange, templateName, onReset, scaffoldForName }: ReadmeEditorProps) {
+export function ReadmeEditor({
+  value,
+  onChange,
+  templateName,
+  onReset,
+  scaffoldForName,
+}: ReadmeEditorProps) {
   const [tab, setTab] = useState<"edit" | "preview">("edit");
   const [showResetDialog, setShowResetDialog] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -87,8 +98,17 @@ export function ReadmeEditor({ value, onChange, templateName, onReset, scaffoldF
       ta.focus();
       const start = ta.selectionStart;
       // Place cursor inside the wrapped placeholder if it was empty
-      if (placeholder && ta.value.slice(start - placeholder.length - after.length, start - after.length) === placeholder) {
-        ta.setSelectionRange(start - placeholder.length - after.length, start - after.length);
+      if (
+        placeholder &&
+        ta.value.slice(
+          start - placeholder.length - after.length,
+          start - after.length,
+        ) === placeholder
+      ) {
+        ta.setSelectionRange(
+          start - placeholder.length - after.length,
+          start - after.length,
+        );
       }
     });
   };
@@ -143,7 +163,12 @@ export function ReadmeEditor({ value, onChange, templateName, onReset, scaffoldF
               return <span {...props}>{children}</span>;
             }
             return (
-              <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                {...props}
+              >
                 {children}
               </a>
             );
@@ -158,29 +183,69 @@ export function ReadmeEditor({ value, onChange, templateName, onReset, scaffoldF
   const editor = (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap gap-1 p-1 border rounded-md bg-muted/30">
-        <Button variant="ghost" size="sm" onClick={() => handleToolbar("bold")} title="Bold">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => handleToolbar("bold")}
+          title="Bold"
+        >
           <strong>B</strong>
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => handleToolbar("heading")} title="Heading">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => handleToolbar("heading")}
+          title="Heading"
+        >
           H
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => handleToolbar("link")} title="Link">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => handleToolbar("link")}
+          title="Link"
+        >
           🔗
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => handleToolbar("code")} title="Inline code">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => handleToolbar("code")}
+          title="Inline code"
+        >
           {"</>"}
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => handleToolbar("codeblock")} title="Code block">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => handleToolbar("codeblock")}
+          title="Code block"
+        >
           {"```"}
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => handleToolbar("list")} title="List">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => handleToolbar("list")}
+          title="List"
+        >
           • List
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => handleToolbar("quote")} title="Quote">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => handleToolbar("quote")}
+          title="Quote"
+        >
           ❝
         </Button>
         <div className="flex-1" />
-        <Button variant="ghost" size="sm" onClick={() => setShowResetDialog(true)} title="Reset to scaffold">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setShowResetDialog(true)}
+          title="Reset to scaffold"
+        >
           Reset
         </Button>
       </div>
@@ -192,7 +257,9 @@ export function ReadmeEditor({ value, onChange, templateName, onReset, scaffoldF
         className="min-h-[300px] font-mono text-sm"
         rows={16}
       />
-      <div className={`text-xs ${overCap ? "text-destructive font-medium" : "text-muted-foreground"}`}>
+      <div
+        className={`text-xs ${overCap ? "text-destructive font-medium" : "text-muted-foreground"}`}
+      >
         {bytes.toLocaleString()} / {README_MAX_BYTES.toLocaleString()} bytes
         {overCap && " — exceeds 64 KiB cap"}
       </div>
@@ -209,9 +276,7 @@ export function ReadmeEditor({ value, onChange, templateName, onReset, scaffoldF
             <TabsTrigger value="edit">Edit</TabsTrigger>
             <TabsTrigger value="preview">Preview</TabsTrigger>
           </TabsList>
-          <div className="mt-4">
-            {tab === "edit" ? editor : preview}
-          </div>
+          <div className="mt-4">{tab === "edit" ? editor : preview}</div>
         </Tabs>
       </div>
 
@@ -221,7 +286,8 @@ export function ReadmeEditor({ value, onChange, templateName, onReset, scaffoldF
             <DialogTitle>Reset README to scaffold?</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            This will replace the current README with the default scaffold. This cannot be undone.
+            This will replace the current README with the default scaffold. This
+            cannot be undone.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowResetDialog(false)}>

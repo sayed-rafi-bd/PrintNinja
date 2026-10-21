@@ -33,7 +33,9 @@ export function getLocalTemplate(id: number): Promise<TemplateRow> {
 }
 
 /** The version the local row points at, which is where editing happens. */
-async function getCurrentVersion(templateId: number): Promise<{ html: string; css: string }> {
+async function getCurrentVersion(
+  templateId: number,
+): Promise<{ html: string; css: string }> {
   const versions = await agent("list_versions", { template_id: templateId });
   const current = versions?.[0];
   if (!current) return { html: "", css: "" };
@@ -96,7 +98,10 @@ export async function saveToServer(
   // PUT, retrying once as an update when a concurrent push created
   // the row first (428): without this the loser of the race fails
   // instead of converging on the same revision.
-  const putUpsert = async (id: string, ifRevision: number | undefined): Promise<RemoteTemplate> => {
+  const putUpsert = async (
+    id: string,
+    ifRevision: number | undefined,
+  ): Promise<RemoteTemplate> => {
     try {
       return await putRemoteTemplate({
         id,
@@ -147,11 +152,18 @@ export async function saveToServer(
   const storedId = remote.id;
   // The push is recorded so the next engine push bases on the new
   // revision instead of 409ing on the stale one.
-  await agent("cache_mark_pushed", { server_id: storedId, revision: remote.revision });
+  await agent("cache_mark_pushed", {
+    server_id: storedId,
+    revision: remote.revision,
+  });
   // The local copy and the server copy now agree. A published template records the
   // moment the server copy was published; a private one has no publish time at all.
   await agent("set_publish_info", {
-    req: { id: template.id, remote_id: storedId, published_at: isPublished ? updatedAt : null },
+    req: {
+      id: template.id,
+      remote_id: storedId,
+      published_at: isPublished ? updatedAt : null,
+    },
   });
   return { remoteId: storedId, updatedAt, published: isPublished };
 }
@@ -167,7 +179,9 @@ export interface RefreshResult {
  * Pull the server copy over the local one. Everything is fetched before anything
  * is written, so a failed fetch leaves the local copy as it was.
  */
-export async function refreshFromServer(template: TemplateRow): Promise<RefreshResult> {
+export async function refreshFromServer(
+  template: TemplateRow,
+): Promise<RefreshResult> {
   const serverRef = template.server_id ?? template.remote_id;
   if (!serverRef) {
     throw new Error("This template is not on the server yet. Save it first.");
@@ -185,7 +199,9 @@ export async function refreshFromServer(template: TemplateRow): Promise<RefreshR
       created_by: "sync",
     },
   });
-  await agent("update_readme", { req: { id: template.id, readme: remote.readme ?? "" } });
+  await agent("update_readme", {
+    req: { id: template.id, readme: remote.readme ?? "" },
+  });
   await agent("update_template_meta", {
     req: {
       id: template.id,
@@ -225,7 +241,10 @@ export async function listAvailableRemoteTemplates(): Promise<{
   mine: RemoteTemplateSummary[];
   saved: RemoteTemplateSummary[];
 }> {
-  const [mine, saved] = await Promise.all([fetchMyRemoteTemplates(), fetchSavedRemoteTemplates()]);
+  const [mine, saved] = await Promise.all([
+    fetchMyRemoteTemplates(),
+    fetchSavedRemoteTemplates(),
+  ]);
   return { mine, saved };
 }
 
@@ -238,7 +257,9 @@ export async function downloadToLocal(
   const remote = await fetchRemoteTemplate(remoteId);
 
   const existing = await agent("list_templates", {});
-  const already = (existing ?? []).find((t) => t.remote_id === remoteId || t.server_id === remoteId);
+  const already = (existing ?? []).find(
+    (t) => t.remote_id === remoteId || t.server_id === remoteId,
+  );
   if (already) return { id: already.id, created: false };
 
   let created;
@@ -251,7 +272,8 @@ export async function downloadToLocal(
         name: remote.name,
         page_w_mm: Math.round(remote.page_w_mm),
         page_h_mm: Math.round(remote.page_h_mm),
-        orientation: remote.page_w_mm > remote.page_h_mm ? "landscape" : "portrait",
+        orientation:
+          remote.page_w_mm > remote.page_h_mm ? "landscape" : "portrait",
         html: remote.body ?? "",
         css: remote.css ?? "",
         ...(await compiledFields(remote.body ?? "")),
@@ -262,7 +284,8 @@ export async function downloadToLocal(
         server_revision: remote.revision,
         base_revision: remote.revision,
         kind: origin,
-        owner_handle: origin === "saved" ? (originOwner ?? remote.owner_handle) : null,
+        owner_handle:
+          origin === "saved" ? (originOwner ?? remote.owner_handle) : null,
       },
     });
   } catch (e) {
@@ -270,11 +293,19 @@ export async function downloadToLocal(
   }
 
   await agent("set_publish_info", {
-    req: { id: created.id, remote_id: remote.id, published_at: remote.updated_at },
+    req: {
+      id: created.id,
+      remote_id: remote.id,
+      published_at: remote.updated_at,
+    },
   });
   if (origin === "saved") {
     await agent("update_template_origin", {
-      req: { id: created.id, origin, origin_owner: originOwner ?? remote.owner_handle },
+      req: {
+        id: created.id,
+        origin,
+        origin_owner: originOwner ?? remote.owner_handle,
+      },
     });
   }
   return { id: created.id, created: true };
@@ -286,7 +317,16 @@ export async function downloadToLocal(
  */
 export async function adoptLocalTemplates(
   rows: Array<
-    Pick<TemplateRow, "id" | "name" | "summary" | "page_w_mm" | "page_h_mm" | "readme" | "server_id"> & {
+    Pick<
+      TemplateRow,
+      | "id"
+      | "name"
+      | "summary"
+      | "page_w_mm"
+      | "page_h_mm"
+      | "readme"
+      | "server_id"
+    > & {
       html: string;
       css: string;
     }
@@ -306,7 +346,10 @@ export async function adoptLocalTemplates(
       css: row.css,
       readme: row.readme ?? "",
     });
-    await agent("cache_mark_pushed", { server_id: remote.id, revision: remote.revision });
+    await agent("cache_mark_pushed", {
+      server_id: remote.id,
+      revision: remote.revision,
+    });
     pushed += 1;
   }
   return { pushed };

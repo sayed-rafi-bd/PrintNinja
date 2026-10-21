@@ -17,23 +17,26 @@ function registerHelpers() {
 
   // Handlebars passes the options object as the last argument, so any
   // optional param must be type-checked rather than assumed.
-  Handlebars.registerHelper("currency", function (
-    value: unknown,
-    symbol?: unknown,
-  ) {
-    const sym = typeof symbol === "string" ? symbol : "$";
-    return `${sym}${Number(value ?? 0).toFixed(2)}`;
-  });
+  Handlebars.registerHelper(
+    "currency",
+    function (value: unknown, symbol?: unknown) {
+      const sym = typeof symbol === "string" ? symbol : "$";
+      return `${sym}${Number(value ?? 0).toFixed(2)}`;
+    },
+  );
 
-  Handlebars.registerHelper("date", function (value: unknown, format?: unknown) {
-    if (!value) return "";
-    const d = new Date(String(value));
-    if (Number.isNaN(d.getTime())) return String(value);
-    const fmt = typeof format === "string" ? format : undefined;
-    if (fmt === "short") return d.toLocaleDateString();
-    if (fmt === "time") return d.toLocaleTimeString();
-    return d.toLocaleString();
-  });
+  Handlebars.registerHelper(
+    "date",
+    function (value: unknown, format?: unknown) {
+      if (!value) return "";
+      const d = new Date(String(value));
+      if (Number.isNaN(d.getTime())) return String(value);
+      const fmt = typeof format === "string" ? format : undefined;
+      if (fmt === "short") return d.toLocaleDateString();
+      if (fmt === "time") return d.toLocaleTimeString();
+      return d.toLocaleString();
+    },
+  );
 
   Handlebars.registerHelper("upper", (v: unknown) =>
     String(v ?? "").toUpperCase(),
@@ -42,51 +45,53 @@ function registerHelpers() {
     String(v ?? "").toLowerCase(),
   );
 
-  Handlebars.registerHelper("number", function (value: unknown, decimals?: unknown) {
-    const d = typeof decimals === "number" ? decimals : 0;
-    return Number(value ?? 0).toFixed(d);
-  });
+  Handlebars.registerHelper(
+    "number",
+    function (value: unknown, decimals?: unknown) {
+      const d = typeof decimals === "number" ? decimals : 0;
+      return Number(value ?? 0).toFixed(d);
+    },
+  );
 
-  Handlebars.registerHelper("padLeft", function (
-    value: unknown,
-    width?: unknown,
-    pad?: unknown,
-  ) {
-    const w = typeof width === "number" ? width : 0;
-    const filler = typeof pad === "string" && pad.length > 0 ? pad[0] : " ";
-    const s = String(value ?? "");
-    return filler.repeat(Math.max(0, w - s.length)) + s;
-  });
+  Handlebars.registerHelper(
+    "padLeft",
+    function (value: unknown, width?: unknown, pad?: unknown) {
+      const w = typeof width === "number" ? width : 0;
+      const filler = typeof pad === "string" && pad.length > 0 ? pad[0] : " ";
+      const s = String(value ?? "");
+      return filler.repeat(Math.max(0, w - s.length)) + s;
+    },
+  );
 
   // `{{barcode "code128" order.id width=50 text=false}}` and
   // `{{qrcode order.url size=30}}`. The Rust renderer implements the same
   // helpers (src-tauri/src/render/handlebars.rs); keep them in step.
   // The last argument Handlebars passes is always the options object, so a
   // missing value arrives as the options object and is read as empty.
-  Handlebars.registerHelper("barcode", function (
-    this: unknown,
-    ...args: unknown[]
-  ) {
-    const options = args.pop() as Handlebars.HelperOptions;
-    const [type, value] = args;
-    return new Handlebars.SafeString(
-      barcodeHelperHtml(type, value, options?.hash ?? {}),
-    );
-  });
+  Handlebars.registerHelper(
+    "barcode",
+    function (this: unknown, ...args: unknown[]) {
+      const options = args.pop() as Handlebars.HelperOptions;
+      const [type, value] = args;
+      return new Handlebars.SafeString(
+        barcodeHelperHtml(type, value, options?.hash ?? {}),
+      );
+    },
+  );
 
-  Handlebars.registerHelper("qrcode", function (
-    this: unknown,
-    ...args: unknown[]
-  ) {
-    const options = args.pop() as Handlebars.HelperOptions;
-    return new Handlebars.SafeString(
-      qrcodeHelperHtml(args[0], options?.hash ?? {}),
-    );
-  });
+  Handlebars.registerHelper(
+    "qrcode",
+    function (this: unknown, ...args: unknown[]) {
+      const options = args.pop() as Handlebars.HelperOptions;
+      return new Handlebars.SafeString(
+        qrcodeHelperHtml(args[0], options?.hash ?? {}),
+      );
+    },
+  );
 }
 
 const CSP_META =
-  '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'; font-src data:">';
+  "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:\">";
 
 function injectCsp(html: string): string {
   if (/http-equiv=["']Content-Security-Policy/i.test(html)) return html;
@@ -178,7 +183,10 @@ export function getTemplateError(
     const message = e instanceof Error ? e.message : String(e);
     // Parse errors span several lines (the message, the source line, a caret
     // pointer, what was expected). Keep the first and last.
-    const lines = message.split("\n").map((l) => l.trim()).filter(Boolean);
+    const lines = message
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
     if (lines.length <= 1) return lines[0] ?? "Unknown template error";
     return `${lines[0]} ${lines[lines.length - 1]}`;
   }

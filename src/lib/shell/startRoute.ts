@@ -15,5 +15,9 @@ export function startOnPrint(): void {
   if (window.location.pathname !== "/") return;
   // Keep any query string or hash the launcher passed along.
   const { search, hash } = window.location;
-  window.history.replaceState(window.history.state, "", `/print${search}${hash}`);
+  window.history.replaceState(
+    window.history.state,
+    "",
+    `/print${search}${hash}`,
+  );
 }

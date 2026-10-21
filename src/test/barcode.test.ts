@@ -66,30 +66,58 @@ describe("barcode geometry", () => {
   // Regression: `width: 2` made bwip-js squeeze the whole symbol into 2 mm, so
   // a long Code 128 came out as a tall, narrow, solid black block.
   const viewBox = (svg: string) =>
-    svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/)!.slice(1).map(Number);
+    svg
+      .match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/)!
+      .slice(1)
+      .map(Number);
 
   it("draws a long Code 128 wider than it is tall", () => {
-    const svg = generateBarcodeSvg({ type: "code128", value: "PN-7X9K-4242-BD", text: false });
+    const svg = generateBarcodeSvg({
+      type: "code128",
+      value: "PN-7X9K-4242-BD",
+      text: false,
+    });
     const [w, h] = viewBox(svg);
     expect(w).toBeGreaterThan(h * 3);
   });
 
   it("keeps the bars apart instead of overlapping them", () => {
-    const svg = generateBarcodeSvg({ type: "code128", value: "PN-7X9K-4242-BD", text: false });
+    const svg = generateBarcodeSvg({
+      type: "code128",
+      value: "PN-7X9K-4242-BD",
+      text: false,
+    });
     const strokeWidth = Number(svg.match(/stroke-width="([\d.]+)"/)![1]);
     const xs = [...svg.matchAll(/M([\d.]+) [\d.]+L/g)].map((m) => Number(m[1]));
-    const gaps = xs.slice(1).map((x, i) => x - xs[i]).filter((g) => g > 0);
+    const gaps = xs
+      .slice(1)
+      .map((x, i) => x - xs[i])
+      .filter((g) => g > 0);
     expect(Math.min(...gaps)).toBeGreaterThanOrEqual(strokeWidth);
   });
 
   it("a longer value makes a wider symbol", () => {
-    const short = viewBox(generateBarcodeSvg({ type: "code128", value: "AB", text: false }))[0];
-    const long = viewBox(generateBarcodeSvg({ type: "code128", value: "ABCDEFGHIJKL", text: false }))[0];
+    const short = viewBox(
+      generateBarcodeSvg({ type: "code128", value: "AB", text: false }),
+    )[0];
+    const long = viewBox(
+      generateBarcodeSvg({
+        type: "code128",
+        value: "ABCDEFGHIJKL",
+        text: false,
+      }),
+    )[0];
     expect(long).toBeGreaterThan(short);
   });
 
   it("draws a QR code as a square", () => {
-    const [w, h] = viewBox(generateBarcodeSvg({ type: "qr", value: "https://example.com/o/1", text: false }));
+    const [w, h] = viewBox(
+      generateBarcodeSvg({
+        type: "qr",
+        value: "https://example.com/o/1",
+        text: false,
+      }),
+    );
     expect(w).toBe(h);
   });
 });
@@ -124,9 +152,7 @@ describe("validateBarcode", () => {
   });
 
   it("rejects an EAN-13 with a wrong check digit", () => {
-    expect(validateBarcode("ean13", "4006381333932")).toContain(
-      "check digit",
-    );
+    expect(validateBarcode("ean13", "4006381333932")).toContain("check digit");
   });
 
   it("enforces exact digit counts for EAN/UPC", () => {
@@ -137,9 +163,7 @@ describe("validateBarcode", () => {
 
   it("enforces Code 39's restricted charset", () => {
     expect(validateBarcode("code39", "ABC-123")).toBeNull();
-    expect(validateBarcode("code39", "hello@world")).toContain(
-      "only supports",
-    );
+    expect(validateBarcode("code39", "hello@world")).toContain("only supports");
   });
 
   it("requires ITF values to have an even number of digits", () => {
@@ -266,7 +290,10 @@ describe("buildBarcodeSnippet", () => {
 
   it("validates a fixed value for its symbology", () => {
     const r = buildBarcodeSnippet("ean13", "123", false);
-    expect(r).toEqual({ ok: false, error: "EAN-13 requires exactly 13 digits" });
+    expect(r).toEqual({
+      ok: false,
+      error: "EAN-13 requires exactly 13 digits",
+    });
   });
 
   it("uses single quotes when the value holds a double quote, and rejects both", () => {
@@ -294,7 +321,10 @@ describe("buildBarcodeSnippet", () => {
 describe("print symbologies", () => {
   it("are all known to the Designer picker", () => {
     for (const t of PRINT_SYMBOLOGIES) {
-      expect(BARCODE_TYPES.some((b) => b.value === t), t).toBe(true);
+      expect(
+        BARCODE_TYPES.some((b) => b.value === t),
+        t,
+      ).toBe(true);
     }
   });
 

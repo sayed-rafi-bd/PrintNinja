@@ -3,18 +3,15 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { listCommunity } from "../../domain/templates/index.js";
 import type { AuthDeps } from "../../domain/ports.js";
 import type {
-	SavedRepository,
-	TemplateRepository,
+  SavedRepository,
+  TemplateRepository,
 } from "../../domain/templatePorts.js";
 import { toTemplateSummary } from "../mappers.js";
 import { errorBody } from "../schemas/error.js";
-import {
-	communityQuery,
-	templatePageSchema,
-} from "../schemas/templates.js";
+import { communityQuery, templatePageSchema } from "../schemas/templates.js";
 
 export interface CommunityRouteOptions {
-	deps: AuthDeps & { templates: TemplateRepository; saved: SavedRepository };
+  deps: AuthDeps & { templates: TemplateRepository; saved: SavedRepository };
 }
 
 /**
@@ -25,36 +22,36 @@ export interface CommunityRouteOptions {
  * query on this service.
  */
 export async function communityRoutes(
-	app: FastifyInstance,
-	options: CommunityRouteOptions,
+  app: FastifyInstance,
+  options: CommunityRouteOptions,
 ): Promise<void> {
-	const typed = app.withTypeProvider<ZodTypeProvider>();
-	const { deps } = options;
+  const typed = app.withTypeProvider<ZodTypeProvider>();
+  const { deps } = options;
 
-	typed.get(
-		"/v2/community/templates",
-		{
-			schema: {
-				description: "Published templates: search, sort, pages.",
-				querystring: communityQuery,
-				response: {
-					200: templatePageSchema,
-					400: errorBody,
-					429: errorBody,
-				},
-			},
-		},
-		async (request) => {
-			const page = await listCommunity(
-				{ templates: deps.templates },
-				{
-					page: request.query.page,
-					pageSize: request.query.page_size,
-					sort: request.query.sort,
-					...(request.query.q !== undefined ? { q: request.query.q } : {}),
-				},
-			);
-			return { ...page, items: page.items.map(toTemplateSummary) };
-		},
-	);
+  typed.get(
+    "/v2/community/templates",
+    {
+      schema: {
+        description: "Published templates: search, sort, pages.",
+        querystring: communityQuery,
+        response: {
+          200: templatePageSchema,
+          400: errorBody,
+          429: errorBody,
+        },
+      },
+    },
+    async (request) => {
+      const page = await listCommunity(
+        { templates: deps.templates },
+        {
+          page: request.query.page,
+          pageSize: request.query.page_size,
+          sort: request.query.sort,
+          ...(request.query.q !== undefined ? { q: request.query.q } : {}),
+        },
+      );
+      return { ...page, items: page.items.map(toTemplateSummary) };
+    },
+  );
 }

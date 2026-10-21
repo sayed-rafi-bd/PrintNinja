@@ -1,19 +1,44 @@
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/PageHeader";
-import { ControlsAccordion, type VersionRow } from "@/components/designer/ControlsAccordion";
+import {
+  ControlsAccordion,
+  type VersionRow,
+} from "@/components/designer/ControlsAccordion";
 import { CanvasWorkspace } from "@/components/designer/CanvasWorkspace";
-import { CodeEditors, EditorPane, type EditorPaneHandle } from "@/components/designer/EditorPane";
-import { ControlsRail, type ControlsSection } from "@/components/designer/ControlsRail";
-import { LayoutToggle, isDesignerLayout, type DesignerLayout } from "@/components/designer/LayoutToggle";
+import {
+  CodeEditors,
+  EditorPane,
+  type EditorPaneHandle,
+} from "@/components/designer/EditorPane";
+import {
+  ControlsRail,
+  type ControlsSection,
+} from "@/components/designer/ControlsRail";
+import {
+  LayoutToggle,
+  isDesignerLayout,
+  type DesignerLayout,
+} from "@/components/designer/LayoutToggle";
 import { DesignerActions } from "@/components/designer/DesignerActions";
 import { DesignerToolbar } from "@/components/designer/DesignerToolbar";
 import { HelpersPanel } from "@/components/designer/HelpersPanel";
 import { ReadmePanel } from "@/components/designer/ReadmePanel";
-import { SampleDataPanel, type Dataset } from "@/components/designer/SampleDataPanel";
+import {
+  SampleDataPanel,
+  type Dataset,
+} from "@/components/designer/SampleDataPanel";
 import { TemplateSyncBar } from "@/components/designer/TemplateSyncBar";
 import { ClassWarnings } from "@/components/designer/ClassWarnings";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { DESKTOP_QUERY, WIDE_QUERY, useMediaQuery } from "@/lib/hooks/useMediaQuery";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
+import {
+  DESKTOP_QUERY,
+  WIDE_QUERY,
+  useMediaQuery,
+} from "@/lib/hooks/useMediaQuery";
 import { usePersistentState } from "@/lib/hooks/usePersistentState";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { agent } from "@/lib/agent/commands";
@@ -39,12 +64,25 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { PanelLeftClose, QrCode } from "lucide-react";
-import { useTemplateStore, type Template, type TemplateVersion } from "@/lib/store/templateStore";
+import {
+  useTemplateStore,
+  type Template,
+  type TemplateVersion,
+} from "@/lib/store/templateStore";
 import { toast } from "sonner";
 import CodeMirror from "@uiw/react-codemirror";
 import { html } from "@codemirror/lang-html";
-import { BARCODE_TYPES, buildBarcodeSnippet, isHelperSymbology } from "@/lib/utils/barcode";
-import { DEFAULT_TEMPLATE_HTML, DEFAULT_TEMPLATE_CSS, DEFAULT_MOCK_DATA, STARTER_TEMPLATES } from "@/lib/templates/defaultTemplate";
+import {
+  BARCODE_TYPES,
+  buildBarcodeSnippet,
+  isHelperSymbology,
+} from "@/lib/utils/barcode";
+import {
+  DEFAULT_TEMPLATE_HTML,
+  DEFAULT_TEMPLATE_CSS,
+  DEFAULT_MOCK_DATA,
+  STARTER_TEMPLATES,
+} from "@/lib/templates/defaultTemplate";
 import { compiledFields } from "@/lib/templates/compileTemplateCss";
 import { useCompiledCss } from "@/lib/templates/useCompiledCss";
 import { formatCss, formatHtml } from "@/lib/utils/format";
@@ -65,7 +103,7 @@ const PAGE_PRESETS = [
   { label: "Letter", width: 216, height: 279 },
   { label: "80mm Roll", width: 80, height: 200 },
   { label: "58mm Roll", width: 58, height: 200 },
-  { label: "4x6 Label", width: 102, height:152 },
+  { label: "4x6 Label", width: 102, height: 152 },
 ];
 
 /** Which sync action is running, so only its button says so. */
@@ -89,17 +127,28 @@ export function DesignerPage() {
   const [htmlCode, setHtmlCode] = useState(DEFAULT_TEMPLATE_HTML);
   const [cssCode, setCssCode] = useState(DEFAULT_TEMPLATE_CSS);
   const [templateName, setTemplateName] = useState(STARTER_TEMPLATES[0].name);
-  const [pageWidth, setPageWidth] = useState(STARTER_TEMPLATES[0]?.page_w_mm ?? 80);
-  const [pageHeight, setPageHeight] = useState(STARTER_TEMPLATES[0]?.page_h_mm ?? 200);
-  const [orientation, setOrientation] = useState<"portrait" | "landscape">("portrait");
+  const [pageWidth, setPageWidth] = useState(
+    STARTER_TEMPLATES[0]?.page_w_mm ?? 80,
+  );
+  const [pageHeight, setPageHeight] = useState(
+    STARTER_TEMPLATES[0]?.page_h_mm ?? 200,
+  );
+  const [orientation, setOrientation] = useState<"portrait" | "landscape">(
+    "portrait",
+  );
   // Which tab is open on a phone. On desktop the canvas and editor are always both on screen.
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   // Desktop workspace preferences, remembered across launches.
-  const [layout, setLayout] = usePersistentState<DesignerLayout>("printninja.designer.layout", "side", isDesignerLayout);
+  const [layout, setLayout] = usePersistentState<DesignerLayout>(
+    "printninja.designer.layout",
+    "side",
+    isDesignerLayout,
+  );
   const [openSections, setOpenSections] = usePersistentState<string[]>(
     "printninja.designer.openSections",
     ["page"],
-    (v): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string"),
+    (v): v is string[] =>
+      Array.isArray(v) && v.every((x) => typeof x === "string"),
   );
   // Below ~1440 px the controls column shrinks to an icon rail. Crossing that
   // width in either direction resets it; the person can still toggle it by hand.
@@ -116,7 +165,11 @@ export function DesignerPage() {
     }
   }, [layout]);
   const openControlsSection = (section: ControlsSection) => {
-    setOpenSections(openSections.includes(section) ? openSections : [...openSections, section]);
+    setOpenSections(
+      openSections.includes(section)
+        ? openSections
+        : [...openSections, section],
+    );
     setControlsExpanded(true);
   };
   const [activeTab, setActiveTab] = useState("canvas");
@@ -124,7 +177,9 @@ export function DesignerPage() {
   const [readmeSaving, setReadmeSaving] = useState(false);
   const [remoteId, setRemoteId] = useState<string | null>(null);
   const [publishedAt, setPublishedAt] = useState<string | null>(null);
-  const [templateUpdatedAt, setTemplateUpdatedAt] = useState<string | null>(null);
+  const [templateUpdatedAt, setTemplateUpdatedAt] = useState<string | null>(
+    null,
+  );
   const [origin, setOrigin] = useState<"own" | "saved">("own");
   const [pending, setPending] = useState<SyncAction | null>(null);
   const [debouncedHtml, setDebouncedHtml] = useState(htmlCode);
@@ -137,7 +192,6 @@ export function DesignerPage() {
     return () => clearTimeout(id);
   }, [htmlCode, cssCode]);
   const compiledCss = useCompiledCss(debouncedHtml);
-
 
   // Templates available in the designer — persisted in SQLite via
   // `list_templates` / `create_template`. Starter templates are the
@@ -161,20 +215,29 @@ export function DesignerPage() {
       origin?: string;
     }>
   >([]);
-  const [currentTemplateId, setCurrentTemplateId] = useState<number | null>(null);
+  const [currentTemplateId, setCurrentTemplateId] = useState<number | null>(
+    null,
+  );
   const [_templatesLoading, setTemplatesLoading] = useState(true);
   void _templatesLoading;
 
   // Sample datasets (variables). Persisted through the agent and
   // synced like templates; the built-in Sample Order is the fallback
   // when the cache holds none yet.
-  const [datasets, setDatasets] = useState<Array<Dataset & { id?: number | null }>>([]);
+  const [datasets, setDatasets] = useState<
+    Array<Dataset & { id?: number | null }>
+  >([]);
 
   const loadDatasets = useCallback(async () => {
     try {
       const rows = (await agent("list_datasets", {})) ?? [];
       setDatasets(
-        rows.map((r) => ({ id: r.id, name: r.name, json: r.data_json, isDefault: false })),
+        rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          json: r.data_json,
+          isDefault: false,
+        })),
       );
     } catch {
       /* web mode or backend unavailable: the fallback below applies */
@@ -226,7 +289,8 @@ export function DesignerPage() {
     setCssCode(formatCss(tpl.css));
     if (tpl.page_w_mm) setPageWidth(tpl.page_w_mm);
     if (tpl.page_h_mm) setPageHeight(tpl.page_h_mm);
-    if (tpl.orientation) setOrientation(tpl.orientation as "portrait" | "landscape");
+    if (tpl.orientation)
+      setOrientation(tpl.orientation as "portrait" | "landscape");
     setCurrentTemplateDbId(tpl.id);
     setDiff(null);
     setShowDiff(false);
@@ -320,9 +384,18 @@ export function DesignerPage() {
           summary: row.summary ?? "",
         },
       });
-      setRemoteId((updated as { server_id?: string | null }).server_id ?? row.server_id ?? null);
+      setRemoteId(
+        (updated as { server_id?: string | null }).server_id ??
+          row.server_id ??
+          null,
+      );
       notifyLocalEdit();
-      return { ...row, name: templateName, page_w_mm: pageWidth, page_h_mm: pageHeight };
+      return {
+        ...row,
+        name: templateName,
+        page_w_mm: pageWidth,
+        page_h_mm: pageHeight,
+      };
     } finally {
       setPending(null);
     }
@@ -355,7 +428,8 @@ export function DesignerPage() {
     }
   };
 
-  const handlePublish = () => runPublish({ publish: true }, "Published to Community");
+  const handlePublish = () =>
+    runPublish({ publish: true }, "Published to Community");
 
   const handleSyncNow = async () => {
     setPending("sync");
@@ -365,7 +439,6 @@ export function DesignerPage() {
       setPending(null);
     }
   };
-
 
   const handleUnpublish = async () => {
     if (!currentTemplateDbId || !remoteId) return;
@@ -386,7 +459,10 @@ export function DesignerPage() {
   const handleImportFile = async (file: File) => {
     try {
       const text = await file.text();
-      const isHtml = file.name.toLowerCase().endsWith(".html") || text.trim().toLowerCase().startsWith("<!doctype") || text.trim().toLowerCase().startsWith("<html");
+      const isHtml =
+        file.name.toLowerCase().endsWith(".html") ||
+        text.trim().toLowerCase().startsWith("<!doctype") ||
+        text.trim().toLowerCase().startsWith("<html");
       if (isHtml) {
         setTemplateName(file.name.replace(/\.html$/i, ""));
         setHtmlCode(formatHtml(text));
@@ -405,7 +481,9 @@ export function DesignerPage() {
 
   const handleExport = () => {
     const data = { name: templateName, html: htmlCode, css: cssCode };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -454,7 +532,9 @@ export function DesignerPage() {
       toast.success(`Template "${name}" created`);
     } catch {
       // Web mode / DB unavailable — keep in-memory fallback so UI stays usable.
-      const id = templates.length ? Math.max(...templates.map((t) => t.id)) + 1 : 1;
+      const id = templates.length
+        ? Math.max(...templates.map((t) => t.id)) + 1
+        : 1;
       const tpl = {
         id,
         name,
@@ -474,7 +554,8 @@ export function DesignerPage() {
       setShowNewTemplateDialog(false);
     }
   };
-  const [selectedDatasetName, setSelectedDatasetName] = useState("Sample Order");
+  const [selectedDatasetName, setSelectedDatasetName] =
+    useState("Sample Order");
   const [showDatasetDialog, setShowDatasetDialog] = useState(false);
   const [datasetName, setDatasetName] = useState("");
   const [datasetJson, setDatasetJson] = useState("{\n  \n}");
@@ -511,7 +592,9 @@ export function DesignerPage() {
           const hydrated = await Promise.all(
             rows.map(async (r) => {
               try {
-                const versions = await agent("list_versions", { template_id: r.id });
+                const versions = await agent("list_versions", {
+                  template_id: r.id,
+                });
                 const latest = versions?.[0];
                 return {
                   id: r.id,
@@ -542,7 +625,9 @@ export function DesignerPage() {
           setCssCode(formatCss(hydrated[0].css));
           setPageWidth(hydrated[0].page_w_mm ?? 80);
           setPageHeight(hydrated[0].page_h_mm ?? 200);
-          setOrientation((hydrated[0].orientation as "portrait" | "landscape") ?? "portrait");
+          setOrientation(
+            (hydrated[0].orientation as "portrait" | "landscape") ?? "portrait",
+          );
           setCurrentTemplateDbId(hydrated[0].id);
           // Load README and publish info for the first template
           try {
@@ -587,7 +672,9 @@ export function DesignerPage() {
         if (!cancelled) setTemplatesLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -646,7 +733,12 @@ export function DesignerPage() {
         try {
           const row = await getLocalTemplate(currentTemplateDbId);
           const saved = await saveToServer(
-            { ...row, name: templateName, page_w_mm: pageWidth, page_h_mm: pageHeight },
+            {
+              ...row,
+              name: templateName,
+              page_w_mm: pageWidth,
+              page_h_mm: pageHeight,
+            },
             { version: { label: version.label, note: version.note } },
           );
           setRemoteId(saved.remoteId);
@@ -707,7 +799,9 @@ export function DesignerPage() {
     // Insert where the cursor is. A helper call such as {{barcode "code128"
     // order.id}} is drawn by the same renderer for the preview and for print,
     // so each print and each CSV row gets its own code.
-    insertHelper(snippet.kind === "static" ? "\n" + snippet.text : snippet.text);
+    insertHelper(
+      snippet.kind === "static" ? "\n" + snippet.text : snippet.text,
+    );
     setShowBarcodeDialog(false);
     setBarcodeValue("");
     setBarcodeError(null);
@@ -772,12 +866,18 @@ export function DesignerPage() {
       // current revision guards against overwriting a newer edit.
       try {
         const current = await share.fetchRemoteTemplate(remoteId);
-        const restored = await share.restoreRemoteVersion(remoteId, version.remoteNo, current.revision);
+        const restored = await share.restoreRemoteVersion(
+          remoteId,
+          version.remoteNo,
+          current.revision,
+        );
         await refreshVersions();
         setHtmlCode(formatHtml(restored.body ?? ""));
         setCssCode(formatCss(restored.css ?? ""));
         setTemplateUpdatedAt(restored.updated_at);
-        toast.success(`Restored v${version.versionNo} as v${restored.revision}`);
+        toast.success(
+          `Restored v${version.versionNo} as v${restored.revision}`,
+        );
       } catch (e) {
         toast.error(e instanceof Error ? e.message : String(e));
       }
@@ -823,7 +923,9 @@ export function DesignerPage() {
 
   const openDiff = async (from: VersionRow, to: VersionRow) => {
     // Server rows fetch bodies on demand; local rows already carry them.
-    const bodies = async (v: VersionRow): Promise<{ html: string; css: string }> => {
+    const bodies = async (
+      v: VersionRow,
+    ): Promise<{ html: string; css: string }> => {
       if (v.html !== undefined) return { html: v.html ?? "", css: v.css ?? "" };
       if (v.remoteNo != null && remoteId) {
         const full = await share.readRemoteVersion(remoteId, v.remoteNo);
@@ -834,7 +936,10 @@ export function DesignerPage() {
     try {
       const [f, t] = await Promise.all([bodies(from), bodies(to)]);
       if (from.localId != null && to.localId != null) {
-        const d = await agent("diff_versions", { from_id: from.localId, to_id: to.localId });
+        const d = await agent("diff_versions", {
+          from_id: from.localId,
+          to_id: to.localId,
+        });
         setDiff(d);
         return;
       }
@@ -849,7 +954,10 @@ export function DesignerPage() {
         css_changed: f.css !== t.css,
       });
     } catch {
-      const [f, t] = await Promise.all([bodies(from).catch(() => ({ html: "", css: "" })), bodies(to).catch(() => ({ html: "", css: "" }))]);
+      const [f, t] = await Promise.all([
+        bodies(from).catch(() => ({ html: "", css: "" })),
+        bodies(to).catch(() => ({ html: "", css: "" })),
+      ]);
       setDiff({
         from_version_no: from.versionNo,
         to_version_no: to.versionNo,
@@ -865,7 +973,9 @@ export function DesignerPage() {
 
   const sampleData = useMemo<Record<string, unknown>>(() => {
     try {
-      const ds = visibleDatasets.find((d) => d.name === selectedDatasetName) ?? visibleDatasets[0];
+      const ds =
+        visibleDatasets.find((d) => d.name === selectedDatasetName) ??
+        visibleDatasets[0];
       return JSON.parse(ds.json);
     } catch {
       return DEFAULT_MOCK_DATA as Record<string, unknown>;
@@ -884,7 +994,9 @@ export function DesignerPage() {
     }
     setReadmeSaving(true);
     try {
-      await agent("update_readme", { req: { id: currentTemplateDbId, readme } });
+      await agent("update_readme", {
+        req: { id: currentTemplateDbId, readme },
+      });
       notifyLocalEdit();
       toast.success("README saved");
     } catch (e) {
@@ -981,7 +1093,10 @@ export function DesignerPage() {
         onSaveReadme={() => void handleSaveReadme()}
         notices={<ClassWarnings html={debouncedHtml} />}
       />
-      <DesignerActions onBarcode={() => setShowBarcodeDialog(true)} onSaveVersion={() => setShowVersionDialog(true)} />
+      <DesignerActions
+        onBarcode={() => setShowBarcodeDialog(true)}
+        onSaveVersion={() => setShowVersionDialog(true)}
+      />
     </div>
   );
 
@@ -1002,7 +1117,12 @@ export function DesignerPage() {
     <div className="space-y-4 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:gap-4 lg:space-y-0">
       <PageHeader title={t("designer.title")} description={t("pages.designer")}>
         {isDesktop && <LayoutToggle value={layout} onChange={setLayout} />}
-        <DesignerToolbar onNew={() => setShowNewTemplateDialog(true)} onSave={() => void handleSave()} onImportFile={handleImportFile} onExport={handleExport} />
+        <DesignerToolbar
+          onNew={() => setShowNewTemplateDialog(true)}
+          onSave={() => void handleSave()}
+          onImportFile={handleImportFile}
+          onExport={handleExport}
+        />
       </PageHeader>
 
       <TemplateSyncBar
@@ -1020,7 +1140,10 @@ export function DesignerPage() {
       {isDesktop ? (
         <div className="flex min-h-0 flex-1 gap-4">
           {controlsExpanded ? (
-            <aside aria-label="Designer controls" className="flex w-[280px] shrink-0 flex-col gap-2 overflow-y-auto">
+            <aside
+              aria-label="Designer controls"
+              className="flex w-[280px] shrink-0 flex-col gap-2 overflow-y-auto"
+            >
               <button
                 type="button"
                 aria-label="Collapse controls"
@@ -1040,7 +1163,10 @@ export function DesignerPage() {
               />
             </aside>
           ) : (
-            <ControlsRail onOpenSection={openControlsSection} onExpand={() => setControlsExpanded(true)} />
+            <ControlsRail
+              onOpenSection={openControlsSection}
+              onExpand={() => setControlsExpanded(true)}
+            />
           )}
           {layout === "canvas" ? (
             <div className="min-h-0 min-w-0 flex-1">{canvas(true)}</div>
@@ -1051,12 +1177,28 @@ export function DesignerPage() {
               autoSaveId={`printninja.designer.split.${layout}`}
               className="min-w-0 flex-1"
             >
-              <ResizablePanel id="editor" order={1} defaultSize={50} minSize={25}>
+              <ResizablePanel
+                id="editor"
+                order={1}
+                defaultSize={50}
+                minSize={25}
+              >
                 {editorPane(layout === "stacked" ? "pb-2" : "pr-2")}
               </ResizablePanel>
               <ResizableHandle withHandle />
-              <ResizablePanel id="canvas" order={2} defaultSize={50} minSize={25}>
-                <div className={layout === "stacked" ? "h-full pt-2" : "h-full pl-2"}>{canvas(true)}</div>
+              <ResizablePanel
+                id="canvas"
+                order={2}
+                defaultSize={50}
+                minSize={25}
+              >
+                <div
+                  className={
+                    layout === "stacked" ? "h-full pt-2" : "h-full pl-2"
+                  }
+                >
+                  {canvas(true)}
+                </div>
               </ResizablePanel>
             </ResizablePanelGroup>
           )}
@@ -1064,20 +1206,41 @@ export function DesignerPage() {
       ) : (
         <div className="space-y-4">
           {/* Collapsed, so the canvas is not a long scroll away */}
-          <ControlsAccordion {...controls} showHelpers={false} defaultOpen={[]} />
+          <ControlsAccordion
+            {...controls}
+            showHelpers={false}
+            defaultOpen={[]}
+          />
 
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+          <Tabs
+            value={activeTab}
+            onValueChange={setActiveTab}
+            className="space-y-4"
+          >
             <div className="min-w-0 overflow-x-auto">
-              <TabsList aria-label="Designer views" className="h-8 w-max gap-0.5 p-0.5">
-                <TabsTrigger value="canvas" className="h-7 px-3 text-xs">{t("designer.canvas")}</TabsTrigger>
-                <TabsTrigger value="code" className="h-7 px-3 text-xs">{t("designer.code")}</TabsTrigger>
-                <TabsTrigger value="readme" className="h-7 px-3 text-xs">README</TabsTrigger>
-                <TabsTrigger value="sample-data" className="h-7 px-3 text-xs">{t("designer.sampleData")}</TabsTrigger>
+              <TabsList
+                aria-label="Designer views"
+                className="h-8 w-max gap-0.5 p-0.5"
+              >
+                <TabsTrigger value="canvas" className="h-7 px-3 text-xs">
+                  {t("designer.canvas")}
+                </TabsTrigger>
+                <TabsTrigger value="code" className="h-7 px-3 text-xs">
+                  {t("designer.code")}
+                </TabsTrigger>
+                <TabsTrigger value="readme" className="h-7 px-3 text-xs">
+                  README
+                </TabsTrigger>
+                <TabsTrigger value="sample-data" className="h-7 px-3 text-xs">
+                  {t("designer.sampleData")}
+                </TabsTrigger>
               </TabsList>
             </div>
 
             <TabsContent value={activeTab} className="mt-0 space-y-4">
-              {(activeTab === "canvas" || activeTab === "code") && <ClassWarnings html={debouncedHtml} />}
+              {(activeTab === "canvas" || activeTab === "code") && (
+                <ClassWarnings html={debouncedHtml} />
+              )}
               {activeTab === "canvas" && canvas(false)}
               {activeTab === "code" && (
                 <CodeEditors
@@ -1200,15 +1363,29 @@ export function DesignerPage() {
           <div className="space-y-3">
             <div className="space-y-1">
               <Label>Label</Label>
-              <Input data-testid="version-label" placeholder="e.g. Added logo" value={versionLabel} onChange={(e) => setVersionLabel(e.target.value)} />
+              <Input
+                data-testid="version-label"
+                placeholder="e.g. Added logo"
+                value={versionLabel}
+                onChange={(e) => setVersionLabel(e.target.value)}
+              />
             </div>
             <div className="space-y-1">
               <Label>Note</Label>
-              <Input placeholder="Optional note" value={versionNote} onChange={(e) => setVersionNote(e.target.value)} />
+              <Input
+                placeholder="Optional note"
+                value={versionNote}
+                onChange={(e) => setVersionNote(e.target.value)}
+              />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowVersionDialog(false)}>Cancel</Button>
+            <Button
+              variant="outline"
+              onClick={() => setShowVersionDialog(false)}
+            >
+              Cancel
+            </Button>
             <Button onClick={handleSaveVersion}>Save</Button>
           </DialogFooter>
         </DialogContent>
@@ -1229,7 +1406,9 @@ export function DesignerPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {BARCODE_TYPES.map((bc) => (
-                    <SelectItem key={bc.value} value={bc.value}>{bc.label}</SelectItem>
+                    <SelectItem key={bc.value} value={bc.value}>
+                      {bc.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -1242,18 +1421,30 @@ export function DesignerPage() {
                 id="barcode-from-data"
                 checked={barcodeFromData && isHelperSymbology(barcodeType)}
                 disabled={!isHelperSymbology(barcodeType)}
-                onCheckedChange={(on) => { setBarcodeFromData(on); setBarcodeError(null); }}
+                onCheckedChange={(on) => {
+                  setBarcodeFromData(on);
+                  setBarcodeError(null);
+                }}
               />
             </div>
             <div className="space-y-1">
               <Label htmlFor="barcode-value">
-                {barcodeFromData && isHelperSymbology(barcodeType) ? "Data field" : "Value"}
+                {barcodeFromData && isHelperSymbology(barcodeType)
+                  ? "Data field"
+                  : "Value"}
               </Label>
               <Input
                 id="barcode-value"
-                placeholder={barcodeFromData && isHelperSymbology(barcodeType) ? "order.id" : "Enter barcode value"}
+                placeholder={
+                  barcodeFromData && isHelperSymbology(barcodeType)
+                    ? "order.id"
+                    : "Enter barcode value"
+                }
                 value={barcodeValue}
-                onChange={(e) => { setBarcodeValue(e.target.value); setBarcodeError(null); }}
+                onChange={(e) => {
+                  setBarcodeValue(e.target.value);
+                  setBarcodeError(null);
+                }}
               />
               <p className="text-xs text-muted-foreground">
                 {!isHelperSymbology(barcodeType)
@@ -1263,13 +1454,28 @@ export function DesignerPage() {
                     : "The same code on every print."}
               </p>
               {barcodeError && (
-                <p id="barcode-error" role="alert" className="text-xs text-danger">{barcodeError}</p>
+                <p
+                  id="barcode-error"
+                  role="alert"
+                  className="text-xs text-danger"
+                >
+                  {barcodeError}
+                </p>
               )}
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowBarcodeDialog(false)}>Cancel</Button>
-            <Button id="barcode-insert" onClick={handleInsertBarcode} disabled={!barcodeValue}>
+            <Button
+              variant="outline"
+              onClick={() => setShowBarcodeDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              id="barcode-insert"
+              onClick={handleInsertBarcode}
+              disabled={!barcodeValue}
+            >
               <QrCode className="h-4 w-4" />
               Insert
             </Button>
@@ -1286,7 +1492,11 @@ export function DesignerPage() {
           <div className="space-y-3">
             <div className="space-y-1">
               <Label>Name</Label>
-              <Input value={datasetName} onChange={(e) => setDatasetName(e.target.value)} placeholder="e.g. Empty Order" />
+              <Input
+                value={datasetName}
+                onChange={(e) => setDatasetName(e.target.value)}
+                placeholder="e.g. Empty Order"
+              />
             </div>
             <div className="space-y-1">
               <Label>JSON data</Label>
@@ -1300,34 +1510,56 @@ export function DesignerPage() {
                   basicSetup={{ lintKeymap: true }}
                 />
               </div>
-              {(() => { try { JSON.parse(datasetJson); return null; } catch (e) { return <p className="text-xs text-danger">{String(e).split("\n")[0]}</p>; }})()}
+              {(() => {
+                try {
+                  JSON.parse(datasetJson);
+                  return null;
+                } catch (e) {
+                  return (
+                    <p className="text-xs text-danger">
+                      {String(e).split("\n")[0]}
+                    </p>
+                  );
+                }
+              })()}
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDatasetDialog(false)}>Cancel</Button>
-            <Button onClick={() => {
-              if (!datasetName.trim()) {
-                toast.error("Dataset name required");
-                return;
-              }
-              try {
-                JSON.parse(datasetJson);
-              } catch {
-                toast.error("Invalid JSON");
-                return;
-              }
-              void (async () => {
-                try {
-                  await agent("save_dataset", { req: { name: datasetName, data_json: datasetJson } });
-                  await loadDatasets();
-                  notifyLocalEdit();
-                  setShowDatasetDialog(false);
-                  toast.success(`Dataset "${datasetName}" added`);
-                } catch (e) {
-                  toast.error(`Add failed: ${e}`);
+            <Button
+              variant="outline"
+              onClick={() => setShowDatasetDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (!datasetName.trim()) {
+                  toast.error("Dataset name required");
+                  return;
                 }
-              })();
-            }}>Add</Button>
+                try {
+                  JSON.parse(datasetJson);
+                } catch {
+                  toast.error("Invalid JSON");
+                  return;
+                }
+                void (async () => {
+                  try {
+                    await agent("save_dataset", {
+                      req: { name: datasetName, data_json: datasetJson },
+                    });
+                    await loadDatasets();
+                    notifyLocalEdit();
+                    setShowDatasetDialog(false);
+                    toast.success(`Dataset "${datasetName}" added`);
+                  } catch (e) {
+                    toast.error(`Add failed: ${e}`);
+                  }
+                })();
+              }}
+            >
+              Add
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1348,38 +1580,62 @@ export function DesignerPage() {
                 theme="dark"
               />
             </div>
-            {(() => { try { JSON.parse(editJson); return null; } catch (e) { return <p className="text-xs text-danger">{String(e).split("\n")[0]}</p>; }})()}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowEditDataset(false)}>Cancel</Button>
-            <Button onClick={() => {
+            {(() => {
               try {
                 JSON.parse(editJson);
-              } catch {
-                toast.error("Invalid JSON");
-                return;
+                return null;
+              } catch (e) {
+                return (
+                  <p className="text-xs text-danger">
+                    {String(e).split("\n")[0]}
+                  </p>
+                );
               }
-              void (async () => {
+            })()}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditDataset(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
                 try {
-                  const row = datasets.find((d) => d.name === editingDataset);
-                  await agent("save_dataset", {
-                    req: { id: row?.id ?? null, name: editingDataset ?? "", data_json: editJson },
-                  });
-                  await loadDatasets();
-                  notifyLocalEdit();
-                  setShowEditDataset(false);
-                  toast.success("Dataset updated");
-                } catch (e) {
-                  toast.error(`Save failed: ${e}`);
+                  JSON.parse(editJson);
+                } catch {
+                  toast.error("Invalid JSON");
+                  return;
                 }
-              })();
-            }}>Save</Button>
+                void (async () => {
+                  try {
+                    const row = datasets.find((d) => d.name === editingDataset);
+                    await agent("save_dataset", {
+                      req: {
+                        id: row?.id ?? null,
+                        name: editingDataset ?? "",
+                        data_json: editJson,
+                      },
+                    });
+                    await loadDatasets();
+                    notifyLocalEdit();
+                    setShowEditDataset(false);
+                    toast.success("Dataset updated");
+                  } catch (e) {
+                    toast.error(`Save failed: ${e}`);
+                  }
+                })();
+              }}
+            >
+              Save
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* New Template Dialog */}
-      <Dialog open={showNewTemplateDialog} onOpenChange={setShowNewTemplateDialog}>
+      <Dialog
+        open={showNewTemplateDialog}
+        onOpenChange={setShowNewTemplateDialog}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>New Template</DialogTitle>
@@ -1387,11 +1643,20 @@ export function DesignerPage() {
           <div className="space-y-3">
             <div className="space-y-1">
               <Label>Template Name</Label>
-              <Input placeholder="My Template" value={newTemplateName} onChange={(e) => setNewTemplateName(e.target.value)} />
+              <Input
+                placeholder="My Template"
+                value={newTemplateName}
+                onChange={(e) => setNewTemplateName(e.target.value)}
+              />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowNewTemplateDialog(false)}>Cancel</Button>
+            <Button
+              variant="outline"
+              onClick={() => setShowNewTemplateDialog(false)}
+            >
+              Cancel
+            </Button>
             <Button onClick={createNewTemplate}>Create</Button>
           </DialogFooter>
         </DialogContent>

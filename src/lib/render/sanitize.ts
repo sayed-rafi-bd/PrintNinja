@@ -45,24 +45,33 @@ export function findRemoteRefs(html: string, css: string): string[] | null {
   const issues: string[] = [];
 
   // HTML src/href with remote URL
-  const remoteAttr = /(?:src|href)\s*=\s*["']\s*(?:https?:\/\/|\/\/)[^"']*["']/gi;
+  const remoteAttr =
+    /(?:src|href)\s*=\s*["']\s*(?:https?:\/\/|\/\/)[^"']*["']/gi;
   let m: RegExpExecArray | null;
   while ((m = remoteAttr.exec(html)) !== null) {
-    issues.push(`Remote reference in HTML: ${m[0].trim().slice(0, 80)} — use data: URIs`);
+    issues.push(
+      `Remote reference in HTML: ${m[0].trim().slice(0, 80)} — use data: URIs`,
+    );
   }
 
   // CSS url(http...), url(//...), url("https:..."), @import
   const urlPattern = /url\s*\(\s*["']?\s*(?:https?:\/\/|\/\/)[^)]*\)/gi;
   while ((m = urlPattern.exec(css)) !== null) {
-    issues.push(`Remote url() in CSS: ${m[0].trim().slice(0, 80)} — use data: URIs`);
+    issues.push(
+      `Remote url() in CSS: ${m[0].trim().slice(0, 80)} — use data: URIs`,
+    );
   }
   while ((m = urlPattern.exec(html)) !== null) {
-    issues.push(`Remote url() in HTML style: ${m[0].trim().slice(0, 80)} — use data: URIs`);
+    issues.push(
+      `Remote url() in HTML style: ${m[0].trim().slice(0, 80)} — use data: URIs`,
+    );
   }
 
   const importPattern = /@import\s+(?:url\s*\()?["']?\s*(?:https?:\/\/|\/\/)/gi;
   if (importPattern.test(css) || importPattern.test(html)) {
-    issues.push(`@import with remote URL — use data: URIs or inline the resource`);
+    issues.push(
+      `@import with remote URL — use data: URIs or inline the resource`,
+    );
   }
 
   return issues.length ? issues : null;

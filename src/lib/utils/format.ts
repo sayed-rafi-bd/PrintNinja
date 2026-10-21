@@ -1,5 +1,18 @@
 const VOID_HTML = new Set([
-  "area","base","br","col","embed","hr","img","input","link","meta","param","source","track","wbr",
+  "area",
+  "base",
+  "br",
+  "col",
+  "embed",
+  "hr",
+  "img",
+  "input",
+  "link",
+  "meta",
+  "param",
+  "source",
+  "track",
+  "wbr",
 ]);
 
 function isVoidTag(tag: string): boolean {
@@ -18,14 +31,15 @@ function isClosingTag(tag: string): boolean {
 }
 
 function isOpeningTag(tag: string): boolean {
-  if (isClosingTag(tag) || isVoidTag(tag) || isDoctypeOrComment(tag)) return false;
+  if (isClosingTag(tag) || isVoidTag(tag) || isDoctypeOrComment(tag))
+    return false;
   // <tag ...> without trailing slash
   return /^<\s*[a-z0-9-]+/i.test(tag) && !/\/\s*>$/.test(tag);
 }
 
 function isHandlebarsOpen(token: string): boolean {
   // {{#each ...}} , {{#if ...}}
-  return /^\{\{\s*#/ .test(token);
+  return /^\{\{\s*#/.test(token);
 }
 function isHandlebarsClose(token: string): boolean {
   // {{/each}} , {{/if}}
@@ -139,7 +153,7 @@ export function formatCss(css: string): string {
     .replace(/\s*\}\s*/g, "\n}\n")
     .replace(/\/\*\s*/g, "\n/* ")
     .split("\n")
-    .map(s => s.trim())
+    .map((s) => s.trim())
     .filter(Boolean);
 
   let depth = 0;

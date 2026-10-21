@@ -57,7 +57,9 @@ interface PrintState {
   setMarginRight: (v: number) => void;
   setMarginBottom: (v: number) => void;
   setMarginLeft: (v: number) => void;
-  setFitMode: (v: "actual" | "fit-width" | "fit-page" | "shrink" | "fill") => void;
+  setFitMode: (
+    v: "actual" | "fit-width" | "fit-page" | "shrink" | "fill",
+  ) => void;
   setCopies: (v: number) => void;
   setUseTestData: (v: boolean) => void;
   setSelectedDataset: (v: string) => void;
@@ -106,7 +108,8 @@ export const usePrintStore = create<PrintState>((set) => ({
   setMarginBottom: (marginBottom) => set({ marginBottom }),
   setMarginLeft: (marginLeft) => set({ marginLeft }),
   setFitMode: (fitMode) => set({ fitMode }),
-  setCopies: (copies) => set({ copies: Math.max(1, Math.floor(Number(copies) || 1)) }),
+  setCopies: (copies) =>
+    set({ copies: Math.max(1, Math.floor(Number(copies) || 1)) }),
   setUseTestData: (useTestData) => set({ useTestData }),
   setSelectedDataset: (selectedDataset) => set({ selectedDataset }),
   setPageRange: (pageRange) => set({ pageRange }),

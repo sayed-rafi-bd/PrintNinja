@@ -1,11 +1,11 @@
 import { ForbiddenError, NotFoundError } from "../errors.js";
 import type { Page } from "../pagination.js";
 import type {
-	PageQuery,
-	PublishedQuery,
-	TemplateRepository,
-	TemplateSummaryView,
-	TemplateView,
+  PageQuery,
+  PublishedQuery,
+  TemplateRepository,
+  TemplateSummaryView,
+  TemplateView,
 } from "../templatePorts.js";
 
 /**
@@ -14,18 +14,18 @@ import type {
  * token case never reaches here — the HTTP layer answers 401 first.
  */
 export async function getTemplate(
-	repos: { templates: TemplateRepository },
-	id: string,
-	viewerUserId: string | null,
+  repos: { templates: TemplateRepository },
+  id: string,
+  viewerUserId: string | null,
 ): Promise<TemplateView> {
-	const template = await repos.templates.findById(id);
-	if (
-		!template ||
-		(template.publishedAt === null && template.ownerId !== viewerUserId)
-	) {
-		throw new NotFoundError();
-	}
-	return template;
+  const template = await repos.templates.findById(id);
+  if (
+    !template ||
+    (template.publishedAt === null && template.ownerId !== viewerUserId)
+  ) {
+    throw new NotFoundError();
+  }
+  return template;
 }
 
 /**
@@ -34,18 +34,18 @@ export async function getTemplate(
  * the same transaction so delta sync never misses the delete.
  */
 export async function deleteTemplate(
-	repos: { templates: TemplateRepository },
-	id: string,
-	ownerId: string,
+  repos: { templates: TemplateRepository },
+  id: string,
+  ownerId: string,
 ): Promise<void> {
-	const template = await repos.templates.findById(id);
-	if (!template) {
-		throw new NotFoundError();
-	}
-	if (template.ownerId !== ownerId) {
-		throw new ForbiddenError();
-	}
-	await repos.templates.deleteWithTombstone(id);
+  const template = await repos.templates.findById(id);
+  if (!template) {
+    throw new NotFoundError();
+  }
+  if (template.ownerId !== ownerId) {
+    throw new ForbiddenError();
+  }
+  await repos.templates.deleteWithTombstone(id);
 }
 
 /**
@@ -54,26 +54,26 @@ export async function deleteTemplate(
  * the content is untouched so the revision stands still.
  */
 export async function publishTemplate(
-	repos: { templates: TemplateRepository },
-	id: string,
-	ownerId: string,
-	now: Date,
+  repos: { templates: TemplateRepository },
+  id: string,
+  ownerId: string,
+  now: Date,
 ): Promise<TemplateView> {
-	const template = await repos.templates.findById(id);
-	if (!template) {
-		throw new NotFoundError();
-	}
-	if (template.ownerId !== ownerId) {
-		throw new ForbiddenError();
-	}
-	const published = await repos.templates.setPublished(
-		id,
-		template.publishedAt ?? now,
-	);
-	if (!published) {
-		throw new NotFoundError();
-	}
-	return published;
+  const template = await repos.templates.findById(id);
+  if (!template) {
+    throw new NotFoundError();
+  }
+  if (template.ownerId !== ownerId) {
+    throw new ForbiddenError();
+  }
+  const published = await repos.templates.setPublished(
+    id,
+    template.publishedAt ?? now,
+  );
+  if (!published) {
+    throw new NotFoundError();
+  }
+  return published;
 }
 
 /**
@@ -81,35 +81,35 @@ export async function publishTemplate(
  * so republishing restores the saved list as it was.
  */
 export async function unpublishTemplate(
-	repos: { templates: TemplateRepository },
-	id: string,
-	ownerId: string,
+  repos: { templates: TemplateRepository },
+  id: string,
+  ownerId: string,
 ): Promise<void> {
-	const template = await repos.templates.findById(id);
-	if (!template) {
-		throw new NotFoundError();
-	}
-	if (template.ownerId !== ownerId) {
-		throw new ForbiddenError();
-	}
-	await repos.templates.setPublished(id, null);
+  const template = await repos.templates.findById(id);
+  if (!template) {
+    throw new NotFoundError();
+  }
+  if (template.ownerId !== ownerId) {
+    throw new ForbiddenError();
+  }
+  await repos.templates.setPublished(id, null);
 }
 
 /** The owner's own templates, private and published, newest first. */
 export async function listMine(
-	repos: { templates: TemplateRepository },
-	ownerId: string,
-	query: PageQuery,
+  repos: { templates: TemplateRepository },
+  ownerId: string,
+  query: PageQuery,
 ): Promise<Page<TemplateSummaryView>> {
-	return repos.templates.listByOwner(ownerId, query);
+  return repos.templates.listByOwner(ownerId, query);
 }
 
 /** Published templates for everyone: search, sort, pages. */
 export async function listCommunity(
-	repos: { templates: TemplateRepository },
-	query: PublishedQuery,
+  repos: { templates: TemplateRepository },
+  query: PublishedQuery,
 ): Promise<Page<TemplateSummaryView>> {
-	return repos.templates.listPublished(query);
+  return repos.templates.listPublished(query);
 }
 
 /**
@@ -117,12 +117,12 @@ export async function listCommunity(
  * 404, so the counter cannot probe for private ids either.
  */
 export async function recordUse(
-	repos: { templates: TemplateRepository },
-	id: string,
-	count: number,
+  repos: { templates: TemplateRepository },
+  id: string,
+  count: number,
 ): Promise<void> {
-	const counted = await repos.templates.incrementUseCount(id, count);
-	if (!counted) {
-		throw new NotFoundError();
-	}
+  const counted = await repos.templates.incrementUseCount(id, count);
+  if (!counted) {
+    throw new NotFoundError();
+  }
 }

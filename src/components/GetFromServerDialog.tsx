@@ -15,7 +15,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import type { RemoteTemplateSummary } from "@/lib/share/client";
-import { downloadToLocal, listAvailableRemoteTemplates } from "@/lib/share/sync";
+import {
+  downloadToLocal,
+  listAvailableRemoteTemplates,
+} from "@/lib/share/sync";
 
 type Row = RemoteTemplateSummary & { group: "Mine" | "Saved" };
 
@@ -30,7 +33,11 @@ interface Props {
  * Put templates from the server on this computer: the user's own, and the ones
  * they saved from Community. How a new PC gets the templates it is missing.
  */
-export function GetFromServerDialog({ open, onOpenChange, onDownloaded }: Props) {
+export function GetFromServerDialog({
+  open,
+  onOpenChange,
+  onDownloaded,
+}: Props) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -57,10 +64,15 @@ export function GetFromServerDialog({ open, onOpenChange, onDownloaded }: Props)
     }
   }, [open, load]);
 
-  const byId = useMemo(() => new Map((rows ?? []).map((r) => [r.id, r])), [rows]);
+  const byId = useMemo(
+    () => new Map((rows ?? []).map((r) => [r.id, r])),
+    [rows],
+  );
 
   const handleDownload = async () => {
-    const wanted = [...selected].map((id) => byId.get(id)).filter((r): r is Row => !!r);
+    const wanted = [...selected]
+      .map((id) => byId.get(id))
+      .filter((r): r is Row => !!r);
     if (wanted.length === 0) return;
     setDownloading(true);
     let added = 0;
@@ -81,8 +93,14 @@ export function GetFromServerDialog({ open, onOpenChange, onDownloaded }: Props)
     }
     setDownloading(false);
     onOpenChange(false);
-    if (added > 0) toast.success(`Added ${added} template${added === 1 ? "" : "s"} to this computer`);
-    if (already > 0) toast.success(`${already} template${already === 1 ? " is" : "s are"} already on this computer`);
+    if (added > 0)
+      toast.success(
+        `Added ${added} template${added === 1 ? "" : "s"} to this computer`,
+      );
+    if (already > 0)
+      toast.success(
+        `${already} template${already === 1 ? " is" : "s are"} already on this computer`,
+      );
     for (const message of failed) toast.error(message);
     onDownloaded();
   };
@@ -97,20 +115,31 @@ export function GetFromServerDialog({ open, onOpenChange, onDownloaded }: Props)
         cell: (c) => (
           <div className="min-w-0">
             <p className="truncate font-medium">{c.row.original.name}</p>
-            <p className="truncate text-xs text-muted-foreground">{c.row.original.summary || "No summary"}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {c.row.original.summary || "No summary"}
+            </p>
           </div>
         ),
       },
       {
         id: "where",
         header: "Where",
-        cell: (c) => (c.row.original.group === "Mine" ? <StatusBadge status="published" label="Yours" /> : <StatusBadge status="saved" />),
+        cell: (c) =>
+          c.row.original.group === "Mine" ? (
+            <StatusBadge status="published" label="Yours" />
+          ) : (
+            <StatusBadge status="saved" />
+          ),
       },
       {
         id: "owner",
         header: "From",
         meta: { className: "hidden md:table-cell" },
-        cell: (c) => <span className="font-mono text-xs">{c.row.original.owner_handle}</span>,
+        cell: (c) => (
+          <span className="font-mono text-xs">
+            {c.row.original.owner_handle}
+          </span>
+        ),
       },
       {
         id: "visibility",
@@ -133,7 +162,8 @@ export function GetFromServerDialog({ open, onOpenChange, onDownloaded }: Props)
         <DialogHeader>
           <DialogTitle>Get templates from the server</DialogTitle>
           <DialogDescription>
-            Your templates and the ones you saved from Community, with their HTML, CSS and README.
+            Your templates and the ones you saved from Community, with their
+            HTML, CSS and README.
           </DialogDescription>
         </DialogHeader>
 
@@ -156,18 +186,28 @@ export function GetFromServerDialog({ open, onOpenChange, onDownloaded }: Props)
             maxHeight="50vh"
             empty={{
               title: "Nothing on the server yet",
-              description: "Save a template to the server from Templates or the Designer, then it shows up here.",
+              description:
+                "Save a template to the server from Templates or the Designer, then it shows up here.",
             }}
           />
         )}
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={downloading}>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={downloading}
+          >
             Cancel
           </Button>
           <Button
             onClick={() => void handleDownload()}
-            disabled={downloading || selected.size === 0 || rows == null || rows.length === 0}
+            disabled={
+              downloading ||
+              selected.size === 0 ||
+              rows == null ||
+              rows.length === 0
+            }
           >
             {downloading
               ? "Adding…"

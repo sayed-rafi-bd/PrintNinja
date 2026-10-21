@@ -18,11 +18,26 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, Printer, Wifi, Usb, Bluetooth, Monitor, Trash2, TestTube, Scan, RefreshCw } from "lucide-react";
+import {
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Plus,
+  Printer,
+  Wifi,
+  Usb,
+  Bluetooth,
+  Monitor,
+  Trash2,
+  TestTube,
+  Scan,
+  RefreshCw,
+} from "lucide-react";
 import { toast } from "sonner";
 import type { PrinterRow } from "@/lib/agent/types";
-
 
 const PRINTER_TYPES = [
   { value: "ipp", label: "Wi-Fi / LAN (IPP)" },
@@ -157,8 +172,12 @@ export function PrinterSetupPage() {
       await load();
       // refresh discovered list too
       setSystemPrinters(list);
-      if (added > 0) toast.success(`Added ${added} system printer(s)${skipped ? `, ${skipped} already existed` : ""}`);
-      else if (skipped) toast.info(`All ${skipped} system printer(s) already added`);
+      if (added > 0)
+        toast.success(
+          `Added ${added} system printer(s)${skipped ? `, ${skipped} already existed` : ""}`,
+        );
+      else if (skipped)
+        toast.info(`All ${skipped} system printer(s) already added`);
       else toast.info("No new system printers to add");
     } catch (e) {
       toast.error(`Scan failed: ${e}`);
@@ -234,74 +253,135 @@ export function PrinterSetupPage() {
   };
 
   const counts = (types: string[] | null) =>
-    types ? printers.filter((p) => types.includes(p.printer_type)).length : printers.length;
+    types
+      ? printers.filter((p) => types.includes(p.printer_type)).length
+      : printers.length;
   const group = GROUPS.find((g) => g.key === tab) ?? GROUPS[0];
-  const filtered = group.types ? printers.filter((p) => group.types?.includes(p.printer_type)) : printers;
+  const filtered = group.types
+    ? printers.filter((p) => group.types?.includes(p.printer_type))
+    : printers;
 
-  const columns = useMemo<ColumnDef<PrinterRow>[]>(() => [
-    {
-      id: "name", header: "Printer", accessorFn: (p) => p.name.toLowerCase(), enableSorting: true,
-      cell: (c) => {
-        const p = c.row.original;
-        const Icon = TYPE_ICONS[p.printer_type] ?? Printer;
-        return (
-          <div className="flex min-w-0 items-center gap-3">
-            <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <div className="min-w-0">
-              <p className="truncate font-medium">{p.name}</p>
-              <p
-                className="max-w-[140px] truncate font-mono text-xs text-muted-foreground sm:max-w-[260px]"
-                title={p.address}
-              >
-                {p.address}
-              </p>
+  const columns = useMemo<ColumnDef<PrinterRow>[]>(
+    () => [
+      {
+        id: "name",
+        header: "Printer",
+        accessorFn: (p) => p.name.toLowerCase(),
+        enableSorting: true,
+        cell: (c) => {
+          const p = c.row.original;
+          const Icon = TYPE_ICONS[p.printer_type] ?? Printer;
+          return (
+            <div className="flex min-w-0 items-center gap-3">
+              <Icon
+                className="h-4 w-4 shrink-0 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <div className="min-w-0">
+                <p className="truncate font-medium">{p.name}</p>
+                <p
+                  className="max-w-[140px] truncate font-mono text-xs text-muted-foreground sm:max-w-[260px]"
+                  title={p.address}
+                >
+                  {p.address}
+                </p>
+              </div>
             </div>
-          </div>
-        );
+          );
+        },
       },
-    },
-    {
-      id: "status", header: "Status",
-      cell: (c) => {
-        const st = c.row.original.status;
-        if (st === "online" || st === "offline") return <StatusBadge status={st} />;
-        return <span className="text-xs text-muted-foreground">Not checked</span>;
+      {
+        id: "status",
+        header: "Status",
+        cell: (c) => {
+          const st = c.row.original.status;
+          if (st === "online" || st === "offline")
+            return <StatusBadge status={st} />;
+          return (
+            <span className="text-xs text-muted-foreground">Not checked</span>
+          );
+        },
       },
-    },
-    { id: "connection", header: "Connection", meta: { className: "hidden md:table-cell" }, cell: (c) => PRINTER_TYPES.find((x) => x.value === c.row.original.printer_type)?.label ?? c.row.original.printer_type },
-    { id: "language", header: "Language", meta: { className: "hidden lg:table-cell" }, cell: (c) => LANGUAGES.find((x) => x.value === c.row.original.language)?.label ?? c.row.original.language },
-    { id: "paper", header: "Paper", meta: { className: "hidden lg:table-cell" }, cell: (c) => (c.row.original.paper_width_mm ? `${c.row.original.paper_width_mm} mm` : "—") },
-    {
-      id: "actions", header: () => <span className="sr-only">Actions</span>, meta: { className: "text-right" },
-      cell: (c) => {
-        const p = c.row.original;
-        return (
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button variant="outline" size="sm" disabled={testing === p.id} onClick={() => testPrinter(p)} aria-label={`Test print on ${p.name}`} title={t("printers.test_print")}>
-              <TestTube className="h-4 w-4" aria-hidden="true" />
-              {/* Icon-only on phones so the row fits; the aria-label keeps it named. */}
-              <span className="hidden sm:inline">{testing === p.id ? "Testing…" : t("printers.test_print")}</span>
-            </Button>
-            <Button variant="ghost" size="icon" aria-label={`Remove ${p.name}`} title="Remove" onClick={() => setRemoveTarget(p)}>
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-        );
+      {
+        id: "connection",
+        header: "Connection",
+        meta: { className: "hidden md:table-cell" },
+        cell: (c) =>
+          PRINTER_TYPES.find((x) => x.value === c.row.original.printer_type)
+            ?.label ?? c.row.original.printer_type,
       },
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [testing, t]);
+      {
+        id: "language",
+        header: "Language",
+        meta: { className: "hidden lg:table-cell" },
+        cell: (c) =>
+          LANGUAGES.find((x) => x.value === c.row.original.language)?.label ??
+          c.row.original.language,
+      },
+      {
+        id: "paper",
+        header: "Paper",
+        meta: { className: "hidden lg:table-cell" },
+        cell: (c) =>
+          c.row.original.paper_width_mm
+            ? `${c.row.original.paper_width_mm} mm`
+            : "—",
+      },
+      {
+        id: "actions",
+        header: () => <span className="sr-only">Actions</span>,
+        meta: { className: "text-right" },
+        cell: (c) => {
+          const p = c.row.original;
+          return (
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={testing === p.id}
+                onClick={() => testPrinter(p)}
+                aria-label={`Test print on ${p.name}`}
+                title={t("printers.test_print")}
+              >
+                <TestTube className="h-4 w-4" aria-hidden="true" />
+                {/* Icon-only on phones so the row fits; the aria-label keeps it named. */}
+                <span className="hidden sm:inline">
+                  {testing === p.id ? "Testing…" : t("printers.test_print")}
+                </span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={`Remove ${p.name}`}
+                title="Remove"
+                onClick={() => setRemoveTarget(p)}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          );
+        },
+      },
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    ],
+    [testing, t],
+  );
 
   const field = "space-y-1.5";
   const addressLabel =
-    form.printer_type === "system" ? "Printer name"
-    : form.printer_type === "usb" ? "USB device ID"
-    : form.printer_type === "bluetooth" ? "Bluetooth MAC or COM port"
-    : "Address";
+    form.printer_type === "system"
+      ? "Printer name"
+      : form.printer_type === "usb"
+        ? "USB device ID"
+        : form.printer_type === "bluetooth"
+          ? "Bluetooth MAC or COM port"
+          : "Address";
   const addressHint =
-    form.printer_type === "ipp" ? "For example http://192.168.1.100"
-    : form.printer_type === "raw_tcp" ? "For example 192.168.1.100:9100"
-    : "";
+    form.printer_type === "ipp"
+      ? "For example http://192.168.1.100"
+      : form.printer_type === "raw_tcp"
+        ? "For example 192.168.1.100:9100"
+        : "";
 
   return (
     <div className="space-y-4">
@@ -310,7 +390,12 @@ export function PrinterSetupPage() {
           <RefreshCw className="h-4 w-4" aria-hidden="true" />
           Refresh
         </Button>
-        <Button variant="outline" size="sm" onClick={scanAndAddSystem} disabled={scanning}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={scanAndAddSystem}
+          disabled={scanning}
+        >
           <Scan className="h-4 w-4" aria-hidden="true" />
           {scanning ? "Scanning…" : "Scan system"}
         </Button>
@@ -330,29 +415,40 @@ export function PrinterSetupPage() {
         </TabsList>
 
         <TabsContent value={tab} className="mt-4">
-      <DataTable
-        caption="Printers"
-        columns={columns}
-        data={filtered}
-        getRowId={(p) => String(p.id)}
-        loading={loading}
-        empty={{
-          title: tab === "all" ? "No printers yet" : `No ${group.label.toLowerCase()} printers`,
-          description: tab === "all" ? "Add a printer, or scan this computer for installed printers." : "Add one, or pick another group.",
-          action: { label: "Add printer", onClick: () => setShowAdd(true) },
-        }}
-      />
+          <DataTable
+            caption="Printers"
+            columns={columns}
+            data={filtered}
+            getRowId={(p) => String(p.id)}
+            loading={loading}
+            empty={{
+              title:
+                tab === "all"
+                  ? "No printers yet"
+                  : `No ${group.label.toLowerCase()} printers`,
+              description:
+                tab === "all"
+                  ? "Add a printer, or scan this computer for installed printers."
+                  : "Add one, or pick another group.",
+              action: { label: "Add printer", onClick: () => setShowAdd(true) },
+            }}
+          />
         </TabsContent>
       </Tabs>
 
       <ConfirmDialog
         open={removeTarget != null}
-        onOpenChange={(o) => { if (!o) setRemoveTarget(null); }}
+        onOpenChange={(o) => {
+          if (!o) setRemoveTarget(null);
+        }}
         title={`Remove “${removeTarget?.name ?? ""}”?`}
         description="The printer is removed from PrintNinja. Past jobs stay in History."
         confirmLabel="Remove printer"
         destructive
-        onConfirm={async () => { if (removeTarget) await removePrinter(removeTarget); setRemoveTarget(null); }}
+        onConfirm={async () => {
+          if (removeTarget) await removePrinter(removeTarget);
+          setRemoveTarget(null);
+        }}
       />
 
       {/* Setup lives in a side panel so the list stays in view */}
@@ -360,7 +456,9 @@ export function PrinterSetupPage() {
         <SheetContent className="flex w-full flex-col gap-0 overflow-y-auto p-0 sm:max-w-md">
           <DialogHeader className="border-b p-5 pr-12">
             <DialogTitle>Add printer</DialogTitle>
-            <DialogDescription>Connect a printer, then send a test page from the list.</DialogDescription>
+            <DialogDescription>
+              Connect a printer, then send a test page from the list.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="flex-1 space-y-4 p-5">
@@ -368,7 +466,9 @@ export function PrinterSetupPage() {
               <div className="rounded-md border p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <p className="text-xs font-medium">Found on this computer</p>
-                  <Button variant="ghost" size="sm" onClick={refreshSystem}>Rescan</Button>
+                  <Button variant="ghost" size="sm" onClick={refreshSystem}>
+                    Rescan
+                  </Button>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {systemPrinters.map((sp) => (
@@ -376,7 +476,14 @@ export function PrinterSetupPage() {
                       key={sp.id}
                       variant="outline"
                       size="sm"
-                      onClick={() => setForm((f) => ({ ...f, name: sp.name, address: sp.name, printer_type: "system" }))}
+                      onClick={() =>
+                        setForm((f) => ({
+                          ...f,
+                          name: sp.name,
+                          address: sp.name,
+                          printer_type: "system",
+                        }))
+                      }
                     >
                       {sp.name}
                     </Button>
@@ -387,25 +494,55 @@ export function PrinterSetupPage() {
 
             <div className={field}>
               <Label htmlFor="printer-name">Printer name</Label>
-              <Input id="printer-name" value={form.name} placeholder="Front desk" onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+              <Input
+                id="printer-name"
+                value={form.name}
+                placeholder="Front desk"
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, name: e.target.value }))
+                }
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className={field}>
                 <Label htmlFor="printer-connection">Connection</Label>
-                <Select value={form.printer_type} onValueChange={(v) => setForm((f) => ({ ...f, printer_type: v }))}>
-                  <SelectTrigger id="printer-connection" aria-label="Connection"><SelectValue /></SelectTrigger>
+                <Select
+                  value={form.printer_type}
+                  onValueChange={(v) =>
+                    setForm((f) => ({ ...f, printer_type: v }))
+                  }
+                >
+                  <SelectTrigger
+                    id="printer-connection"
+                    aria-label="Connection"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
-                    {PRINTER_TYPES.map((x) => <SelectItem key={x.value} value={x.value}>{x.label}</SelectItem>)}
+                    {PRINTER_TYPES.map((x) => (
+                      <SelectItem key={x.value} value={x.value}>
+                        {x.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className={field}>
                 <Label htmlFor="printer-language">Language</Label>
-                <Select value={form.language} onValueChange={(v) => setForm((f) => ({ ...f, language: v }))}>
-                  <SelectTrigger id="printer-language" aria-label="Language"><SelectValue /></SelectTrigger>
+                <Select
+                  value={form.language}
+                  onValueChange={(v) => setForm((f) => ({ ...f, language: v }))}
+                >
+                  <SelectTrigger id="printer-language" aria-label="Language">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
-                    {LANGUAGES.map((x) => <SelectItem key={x.value} value={x.value}>{x.label}</SelectItem>)}
+                    {LANGUAGES.map((x) => (
+                      <SelectItem key={x.value} value={x.value}>
+                        {x.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -416,26 +553,53 @@ export function PrinterSetupPage() {
               <Input
                 id="printer-address"
                 value={form.address}
-                aria-describedby={addressHint ? "printer-address-hint" : undefined}
-                onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+                aria-describedby={
+                  addressHint ? "printer-address-hint" : undefined
+                }
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, address: e.target.value }))
+                }
               />
-              {addressHint && <p id="printer-address-hint" className="text-xs text-muted-foreground">{addressHint}</p>}
+              {addressHint && (
+                <p
+                  id="printer-address-hint"
+                  className="text-xs text-muted-foreground"
+                >
+                  {addressHint}
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className={field}>
                 <Label htmlFor="printer-paper">Paper width</Label>
-                <Select value={form.paper_width_mm} onValueChange={(v) => setForm((f) => ({ ...f, paper_width_mm: v }))}>
-                  <SelectTrigger id="printer-paper" aria-label="Paper width"><SelectValue /></SelectTrigger>
+                <Select
+                  value={form.paper_width_mm}
+                  onValueChange={(v) =>
+                    setForm((f) => ({ ...f, paper_width_mm: v }))
+                  }
+                >
+                  <SelectTrigger id="printer-paper" aria-label="Paper width">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
-                    {PAPERS.map((x) => <SelectItem key={x.value} value={x.value}>{x.label}</SelectItem>)}
+                    {PAPERS.map((x) => (
+                      <SelectItem key={x.value} value={x.value}>
+                        {x.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className={field}>
                 <Label htmlFor="printer-dpi">DPI</Label>
-                <Select value={form.dpi} onValueChange={(v) => setForm((f) => ({ ...f, dpi: v }))}>
-                  <SelectTrigger id="printer-dpi" aria-label="DPI"><SelectValue /></SelectTrigger>
+                <Select
+                  value={form.dpi}
+                  onValueChange={(v) => setForm((f) => ({ ...f, dpi: v }))}
+                >
+                  <SelectTrigger id="printer-dpi" aria-label="DPI">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="203">203</SelectItem>
                     <SelectItem value="300">300</SelectItem>
@@ -447,7 +611,9 @@ export function PrinterSetupPage() {
           </div>
 
           <DialogFooter className="gap-2 border-t p-5 sm:space-x-0">
-            <Button variant="outline" onClick={() => setShowAdd(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setShowAdd(false)}>
+              Cancel
+            </Button>
             <Button onClick={addPrinter}>Save printer</Button>
           </DialogFooter>
         </SheetContent>

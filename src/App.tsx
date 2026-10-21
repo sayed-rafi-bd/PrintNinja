@@ -14,7 +14,9 @@ import { diagnostics } from "./lib/diagnostics";
 import { startOnPrint } from "./lib/shell/startRoute";
 
 // Reference page for shared components. Not bundled into production builds.
-const UiKitPage = import.meta.env.DEV ? lazy(() => import("./pages/UiKit")) : null;
+const UiKitPage = import.meta.env.DEV
+  ? lazy(() => import("./pages/UiKit"))
+  : null;
 
 /** Nothing renders until there is a session the server accepts. */
 export default function App() {
@@ -37,9 +39,17 @@ export function AppRouter({ children }: { children: React.ReactNode }) {
 }
 
 function AppContent() {
-  const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(() => {
-    try { return localStorage.getItem("printninja-onboarding-complete") === "true"; } catch { return null; }
-  });
+  const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(
+    () => {
+      try {
+        return (
+          localStorage.getItem("printninja-onboarding-complete") === "true"
+        );
+      } catch {
+        return null;
+      }
+    },
+  );
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
@@ -52,20 +62,37 @@ function AppContent() {
     let cancelled = false;
     (async () => {
       try {
-        const v = await agent("get_setting", { key: "onboarding_done" }).catch(() => null);
+        const v = await agent("get_setting", { key: "onboarding_done" }).catch(
+          () => null,
+        );
         if (cancelled) return;
         if (v === "true") {
-          try { localStorage.setItem("printninja-onboarding-complete", "true"); } catch {}
+          try {
+            localStorage.setItem("printninja-onboarding-complete", "true");
+          } catch {}
           setOnboardingComplete(true);
         } else if (v === "false" || v === null) {
           // DB says not done — respect it even if localStorage says true (reinstall/cleared DB)
-          const lsDone = (() => { try { return localStorage.getItem("printninja-onboarding-complete") === "true"; } catch { return false; }})();
+          const lsDone = (() => {
+            try {
+              return (
+                localStorage.getItem("printninja-onboarding-complete") ===
+                "true"
+              );
+            } catch {
+              return false;
+            }
+          })();
           if (lsDone && v === null) {
             // DB cleared but LS says done — reinstall, clear LS and re-show
-            try { localStorage.removeItem("printninja-onboarding-complete"); } catch {}
+            try {
+              localStorage.removeItem("printninja-onboarding-complete");
+            } catch {}
             setOnboardingComplete(false);
           } else if (lsDone && v === "false") {
-            try { localStorage.removeItem("printninja-onboarding-complete"); } catch {}
+            try {
+              localStorage.removeItem("printninja-onboarding-complete");
+            } catch {}
             setOnboardingComplete(false);
           } else if (!lsDone) {
             setOnboardingComplete(false);
@@ -74,7 +101,15 @@ function AppContent() {
         }
       } catch {
         // Web mode: rely on localStorage only
-        const lsDone = (() => { try { return localStorage.getItem("printninja-onboarding-complete") === "true"; } catch { return false; }})();
+        const lsDone = (() => {
+          try {
+            return (
+              localStorage.getItem("printninja-onboarding-complete") === "true"
+            );
+          } catch {
+            return false;
+          }
+        })();
         setOnboardingComplete(lsDone);
         if (!lsDone) diagnostics.info("First run detected, showing onboarding");
       } finally {
@@ -82,14 +117,22 @@ function AppContent() {
       }
     })();
     // Also handle case where invoke never resolves (web mode) — fallback after 500ms
-    const timer = setTimeout(() => { if (!cancelled) setChecking(false); }, 600);
-    return () => { cancelled = true; clearTimeout(timer); };
+    const timer = setTimeout(() => {
+      if (!cancelled) setChecking(false);
+    }, 600);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, []);
 
   const handleOnboardingComplete = async (destination?: string) => {
     localStorage.setItem("printninja-onboarding-complete", "true");
     try {
-      await agent("set_setting", { key: "onboarding_done", value: "true" }).catch(() => {});
+      await agent("set_setting", {
+        key: "onboarding_done",
+        value: "true",
+      }).catch(() => {});
     } catch {}
     // The router has not mounted yet, so set the starting address before it does.
     if (destination) window.history.replaceState(null, "", destination);
@@ -98,7 +141,11 @@ function AppContent() {
   };
 
   if (checking && onboardingComplete === null) {
-    return <div className="min-h-screen flex items-center justify-center bg-background"><div className="h-6 w-6 border-2 border-primary border-t-transparent rounded-full animate-spin" /></div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="h-6 w-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
   }
   if (!onboardingComplete) {
     return <Onboarding onComplete={handleOnboardingComplete} />;

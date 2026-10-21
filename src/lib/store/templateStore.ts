@@ -57,7 +57,9 @@ export const useTemplateStore = create<TemplateState>((set) => ({
   setDirty: (dirty) => set({ dirty }),
   updateTemplate: (id, updates) =>
     set((state) => ({
-      templates: state.templates.map((t) => (t.id === id ? { ...t, ...updates } : t)),
+      templates: state.templates.map((t) =>
+        t.id === id ? { ...t, ...updates } : t,
+      ),
       currentTemplate:
         state.currentTemplate?.id === id
           ? { ...state.currentTemplate, ...updates }

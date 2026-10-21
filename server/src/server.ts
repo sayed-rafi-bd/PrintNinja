@@ -25,29 +25,29 @@ const config = loadConfig();
 const db = createDbClient(config.databaseUrl);
 
 const deps: AppDeps = {
-	users: createUserRepository(db),
-	sessions: createSessionRepository(db),
-	hasher: createPasswordHasher({
-		memoryKib: config.argon2MemoryKib,
-		timeCost: config.argon2TimeCost,
-		parallelism: config.argon2Parallelism,
-	}),
-	tokens: createTokenService(),
-	clock: { now: () => new Date() },
-	ids: { newId: () => randomUUID() },
-	sessionTtlDays: config.sessionTtlDays,
-	templates: createTemplateRepository(db),
-	datasets: createDatasetRepository(db),
-	profiles: createProfileRepository(db),
-	settings: createSettingRepository(db),
-	fonts: createFontRepository(db),
-	saved: createSavedRepository(db),
-	sync: createSyncRepository(db),
+  users: createUserRepository(db),
+  sessions: createSessionRepository(db),
+  hasher: createPasswordHasher({
+    memoryKib: config.argon2MemoryKib,
+    timeCost: config.argon2TimeCost,
+    parallelism: config.argon2Parallelism,
+  }),
+  tokens: createTokenService(),
+  clock: { now: () => new Date() },
+  ids: { newId: () => randomUUID() },
+  sessionTtlDays: config.sessionTtlDays,
+  templates: createTemplateRepository(db),
+  datasets: createDatasetRepository(db),
+  profiles: createProfileRepository(db),
+  settings: createSettingRepository(db),
+  fonts: createFontRepository(db),
+  saved: createSavedRepository(db),
+  sync: createSyncRepository(db),
 };
 
 const app = await buildApp({ config, deps });
 app.addHook("onClose", async () => {
-	await db.$disconnect();
+  await db.$disconnect();
 });
 
 // Cleanup: once at startup, then hourly. Sessions past their TTL go, and
@@ -56,36 +56,40 @@ app.addHook("onClose", async () => {
 // No job queue — a timer in the process entry is the whole mechanism.
 // buildApp stays schedule-free so tests never inherit timers.
 const purgedSessionsAtStartup = await purgeExpiredSessions(deps);
-const purgedTombstonesAtStartup = await purgeOldTombstones(deps, new Date(), config.syncTombstoneDays);
-app.log.info({ purgedSessionsAtStartup, purgedTombstonesAtStartup }, "purged at startup");
-const cleanupTimer = setInterval(
-	() => {
-		purgeExpiredSessions(deps).then(
-			(purged) => app.log.info({ purged }, "purged expired sessions"),
-			(error: unknown) => app.log.error({ err: error }, "session purge failed"),
-		);
-		purgeOldTombstones(deps, new Date(), config.syncTombstoneDays).then(
-			(purged) => app.log.info({ purged }, "purged old tombstones"),
-			(error: unknown) => app.log.error({ err: error }, "tombstone purge failed"),
-		);
-	},
-	config.sessionCleanupMinutes * 60_000,
+const purgedTombstonesAtStartup = await purgeOldTombstones(
+  deps,
+  new Date(),
+  config.syncTombstoneDays,
 );
+app.log.info(
+  { purgedSessionsAtStartup, purgedTombstonesAtStartup },
+  "purged at startup",
+);
+const cleanupTimer = setInterval(() => {
+  purgeExpiredSessions(deps).then(
+    (purged) => app.log.info({ purged }, "purged expired sessions"),
+    (error: unknown) => app.log.error({ err: error }, "session purge failed"),
+  );
+  purgeOldTombstones(deps, new Date(), config.syncTombstoneDays).then(
+    (purged) => app.log.info({ purged }, "purged old tombstones"),
+    (error: unknown) => app.log.error({ err: error }, "tombstone purge failed"),
+  );
+}, config.sessionCleanupMinutes * 60_000);
 app.addHook("onClose", async () => {
-	clearInterval(cleanupTimer);
+  clearInterval(cleanupTimer);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-	process.once(signal, () => {
-		app.log.info({ signal }, "shutting down");
-		app
-			.close()
-			.then(() => process.exit(0))
-			.catch((error: unknown) => {
-				app.log.error({ err: error }, "error during shutdown");
-				process.exit(1);
-			});
-	});
+  process.once(signal, () => {
+    app.log.info({ signal }, "shutting down");
+    app
+      .close()
+      .then(() => process.exit(0))
+      .catch((error: unknown) => {
+        app.log.error({ err: error }, "error during shutdown");
+        process.exit(1);
+      });
+  });
 }
 
 await app.listen({ port: config.port, host: config.host });

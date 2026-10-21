@@ -1,9 +1,22 @@
-import { Clock, FileText, Database, PanelLeftOpen, Ruler, Wand2, type LucideIcon } from "lucide-react";
+import {
+  Clock,
+  FileText,
+  Database,
+  PanelLeftOpen,
+  Ruler,
+  Wand2,
+  type LucideIcon,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 /** The accordion section ids, in the order the accordion lists them. */
-export type ControlsSection = "templates" | "page" | "sample-data" | "versions" | "helpers";
+export type ControlsSection =
+  | "templates"
+  | "page"
+  | "sample-data"
+  | "versions"
+  | "helpers";
 
 interface Props {
   /** Open the controls column, with this section open. */
@@ -28,13 +41,29 @@ export function ControlsRail({ onOpenSection, onExpand }: Props) {
   const button =
     "flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11";
   return (
-    <nav aria-label="Designer controls (collapsed)" className="flex w-12 flex-col items-center gap-1 rounded-lg border bg-card py-2">
-      <button type="button" aria-label="Expand controls" title="Expand controls" onClick={onExpand} className={button}>
+    <nav
+      aria-label="Designer controls (collapsed)"
+      className="flex w-12 flex-col items-center gap-1 rounded-lg border bg-card py-2"
+    >
+      <button
+        type="button"
+        aria-label="Expand controls"
+        title="Expand controls"
+        onClick={onExpand}
+        className={button}
+      >
         <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
       </button>
       <div className="my-1 h-px w-6 bg-border" />
       {sections.map(({ id, label, Icon }) => (
-        <button key={id} type="button" aria-label={`Open ${label}`} title={label} onClick={() => onOpenSection(id)} className={cn(button)}>
+        <button
+          key={id}
+          type="button"
+          aria-label={`Open ${label}`}
+          title={label}
+          onClick={() => onOpenSection(id)}
+          className={cn(button)}
+        >
           <Icon className="h-4 w-4" aria-hidden="true" />
         </button>
       ))}

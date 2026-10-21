@@ -46,10 +46,13 @@ const resources = {
         checking: "Connecting to the server...",
         sign_in_title: "Sign in to {{appName}}",
         register_title: "Create your account",
-        sign_in_description: "Your templates are stored on the server. Printing still works from this PC.",
+        sign_in_description:
+          "Your templates are stored on the server. Printing still works from this PC.",
         server_address: "Server address",
-        server_address_hint: "The address of your PrintNinja server, for example https://printninja.example.com.",
-        server_address_invalid: "Enter the full server address, starting with http:// or https://.",
+        server_address_hint:
+          "The address of your PrintNinja server, for example https://printninja.example.com.",
+        server_address_invalid:
+          "Enter the full server address, starting with http:// or https://.",
         handle: "Handle",
         password: "Password",
         password_hint: "At least 8 characters.",
@@ -62,10 +65,13 @@ const resources = {
         registering: "Creating account...",
         switch_to_register: "New here? Create an account",
         switch_to_sign_in: "Already have an account? Sign in",
-        session_expired: "Your session ended. Sign in again to keep working. Your edits on this PC are kept.",
-        unreachable_inline: "Cannot reach the server at {{url}}. Check the address and your network.",
+        session_expired:
+          "Your session ended. Sign in again to keep working. Your edits on this PC are kept.",
+        unreachable_inline:
+          "Cannot reach the server at {{url}}. Check the address and your network.",
         unreachable_title: "Cannot reach the server",
-        unreachable_body: "{{appName}} needs the server to sign in. Check your network connection, then try again.",
+        unreachable_body:
+          "{{appName}} needs the server to sign in. Check your network connection, then try again.",
         unreachable_address: "Server address: {{url}}",
         retry: "Retry",
         retrying: "Trying again...",
@@ -101,7 +107,8 @@ const resources = {
         share_online: "Share service connected as {{handle}}",
         share_offline: "Share service unreachable",
         share_signed_out: "Share service: not signed in",
-        offline_banner: "Working offline — your templates and printers still work, and changes send when the server is back",
+        offline_banner:
+          "Working offline — your templates and printers still work, and changes send when the server is back",
         sync_conflict: "Sync conflict — review in Templates",
         sync_pending: "{{count}} change(s) waiting to send",
         sync_synced: "Last synced {{time}}",

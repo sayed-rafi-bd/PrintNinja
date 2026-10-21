@@ -10,24 +10,24 @@ import { fileURLToPath } from "node:url";
 // sits wherever outDir puts it. So the version is found by walking up
 // from this file to the first package.json that carries one.
 function findPackageVersion(): string {
-	let dir = dirname(fileURLToPath(import.meta.url));
-	for (let i = 0; i < 5; i += 1) {
-		const candidate = join(dir, "package.json");
-		if (existsSync(candidate)) {
-			const parsed = JSON.parse(readFileSync(candidate, "utf8")) as {
-				version?: unknown;
-			};
-			if (typeof parsed.version === "string" && parsed.version.length > 0) {
-				return parsed.version;
-			}
-		}
-		const parent = dirname(dir);
-		if (parent === dir) {
-			break;
-		}
-		dir = parent;
-	}
-	throw new Error("version.ts: no package.json with a version found above");
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 5; i += 1) {
+    const candidate = join(dir, "package.json");
+    if (existsSync(candidate)) {
+      const parsed = JSON.parse(readFileSync(candidate, "utf8")) as {
+        version?: unknown;
+      };
+      if (typeof parsed.version === "string" && parsed.version.length > 0) {
+        return parsed.version;
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      break;
+    }
+    dir = parent;
+  }
+  throw new Error("version.ts: no package.json with a version found above");
 }
 
 export const APP_VERSION = findPackageVersion();

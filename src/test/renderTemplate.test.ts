@@ -48,7 +48,9 @@ describe("base print stylesheet", () => {
 describe("buildTemplateCss", () => {
   it("puts the base print rules before the template's Tailwind CSS", () => {
     const css = buildTemplateCss("", ".flex{display:flex}");
-    expect(css.indexOf("@page")).toBeLessThan(css.indexOf(".flex{display:flex}"));
+    expect(css.indexOf("@page")).toBeLessThan(
+      css.indexOf(".flex{display:flex}"),
+    );
   });
 
   it("is just the base rules for a template with no compiled CSS", () => {
@@ -85,7 +87,9 @@ describe("injectStyles", () => {
   });
 
   it("handles a bare fragment", () => {
-    expect(injectStyles("<p>x</p>", "a{}")).toContain("<style data-printninja>");
+    expect(injectStyles("<p>x</p>", "a{}")).toContain(
+      "<style data-printninja>",
+    );
   });
 
   it("marks the tag so callers can find and replace it", () => {
@@ -151,7 +155,9 @@ describe("helpers", () => {
     expect(renderTemplate("{{currency p}}", "", { p: 10.5 })).toContain(
       "$10.50",
     );
-    expect(renderTemplate('{{currency p "€"}}', "", { p: 3 })).toContain("€3.00");
+    expect(renderTemplate('{{currency p "€"}}', "", { p: 3 })).toContain(
+      "€3.00",
+    );
   });
 
   it("currency tolerates a missing value", () => {
@@ -188,11 +194,9 @@ describe("helpers", () => {
   });
 
   it("each loops", () => {
-    const out = renderTemplate(
-      "{{#each items}}{{name}};{{/each}}",
-      "",
-      { items: [{ name: "a" }, { name: "b" }] },
-    );
+    const out = renderTemplate("{{#each items}}{{name}};{{/each}}", "", {
+      items: [{ name: "a" }, { name: "b" }],
+    });
     expect(out).toContain("a;");
     expect(out).toContain("b;");
   });
@@ -203,7 +207,9 @@ describe("barcode and qrcode helpers", () => {
     renderTemplate(html, "", data);
 
   it("barcode reads its value from the data", () => {
-    const out = body('{{barcode "code128" order.id}}', { order: { id: "ORD-1042" } });
+    const out = body('{{barcode "code128" order.id}}', {
+      order: { id: "ORD-1042" },
+    });
     expect(out).toContain('<div class="barcode"');
     expect(out).toContain("<svg");
     expect(out).toContain('width="40mm"');
@@ -223,32 +229,45 @@ describe("barcode and qrcode helpers", () => {
   });
 
   it("barcode clamps the width like the Rust helper", () => {
-    expect(body('{{barcode "code128" v width=9999}}', { v: "X" })).toContain('width="200mm"');
-    expect(body('{{barcode "code128" v width=1}}', { v: "X" })).toContain('width="5mm"');
+    expect(body('{{barcode "code128" v width=9999}}', { v: "X" })).toContain(
+      'width="200mm"',
+    );
+    expect(body('{{barcode "code128" v width=1}}', { v: "X" })).toContain(
+      'width="5mm"',
+    );
   });
 
   it("barcode prints nothing for a missing, invalid or preview-only value", () => {
     const empty = (html: string, data: Record<string, unknown> = {}) =>
-      body(html, data).match(/<body>([\s\S]*?)<\/body>/)?.[1]?.trim();
+      body(html, data)
+        .match(/<body>([\s\S]*?)<\/body>/)?.[1]
+        ?.trim();
     expect(empty('{{barcode "code128" nope}}')).toBe("");
     expect(empty('{{barcode "code128"}}')).toBe("");
     // EAN-13 needs 13 digits with a correct check digit.
     expect(empty('{{barcode "ean13" v}}', { v: "123" })).toBe("");
     expect(empty('{{barcode "ean13" v}}', { v: "5901234123458" })).toBe("");
-    expect(empty('{{barcode "ean13" v}}', { v: "5901234123457" })).toContain("<svg");
+    expect(empty('{{barcode "ean13" v}}', { v: "5901234123457" })).toContain(
+      "<svg",
+    );
     // Data Matrix is not implemented by the Rust renderer, so no preview either.
     expect(empty('{{barcode "datamatrix" v}}', { v: "123" })).toBe("");
   });
 
   it("barcode works inside {{#each}} for batch printing", () => {
-    const out = body('{{#each rows}}[{{barcode "code128" this.sku}}]{{/each}}', {
-      rows: [{ sku: "A1" }, { sku: "B2" }],
-    });
+    const out = body(
+      '{{#each rows}}[{{barcode "code128" this.sku}}]{{/each}}',
+      {
+        rows: [{ sku: "A1" }, { sku: "B2" }],
+      },
+    );
     expect(out.match(/<svg/g)?.length).toBe(2);
   });
 
   it("qrcode reads its value from the data and honours size", () => {
-    const out = body("{{qrcode url size=30}}", { url: "https://example.com/o/1" });
+    const out = body("{{qrcode url size=30}}", {
+      url: "https://example.com/o/1",
+    });
     expect(out).toContain("<svg");
     expect(out).toContain('width="30mm"');
   });
@@ -259,7 +278,9 @@ describe("barcode and qrcode helpers", () => {
   });
 
   it("the sanitizer keeps the barcode but would still strip a script in the value", () => {
-    const out = body('{{barcode "code128" v}}', { v: "<script>alert(1)</script>" });
+    const out = body('{{barcode "code128" v}}', {
+      v: "<script>alert(1)</script>",
+    });
     expect(out).not.toContain("<script");
   });
 });
@@ -284,11 +305,7 @@ describe("starter templates", () => {
 
   it("the label resolves the mock order data", () => {
     const label = STARTER_TEMPLATES[0];
-    const out = renderTemplate(
-      label.html,
-      label.css,
-      DEFAULT_MOCK_DATA as any,
-    );
+    const out = renderTemplate(label.html, label.css, DEFAULT_MOCK_DATA as any);
     expect(out).toContain(DEFAULT_MOCK_DATA.store.name);
     expect(out).toContain(DEFAULT_MOCK_DATA.order.id);
     expect(out).not.toContain("{{");
@@ -338,7 +355,12 @@ describe("per-template compiled CSS", () => {
   it.each([undefined, null, "", "  \n "])(
     "renders with the base rules only for %j",
     (blank) => {
-      const doc = renderTemplate("<p>x</p>", "", {}, blank as string | null | undefined);
+      const doc = renderTemplate(
+        "<p>x</p>",
+        "",
+        {},
+        blank as string | null | undefined,
+      );
       expect(doc).toContain("box-sizing:border-box");
       expect(doc).not.toContain("--tw-");
     },

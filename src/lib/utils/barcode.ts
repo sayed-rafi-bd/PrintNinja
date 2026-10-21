@@ -118,7 +118,8 @@ export const DEFAULT_QR_SIZE_MM = 25;
 /** A helper argument as text: strings and numbers are used, anything else is empty. */
 function helperText(value: unknown): string {
   if (typeof value === "string") return value.trim();
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
   return "";
 }
 
@@ -142,12 +143,17 @@ export function barcodeHelperHtml(
 ): string {
   const kind = helperText(type);
   const text = helperText(value);
-  if (!isPrintSymbology(kind) || validateBarcode(kind, text) !== null) return "";
+  if (!isPrintSymbology(kind) || validateBarcode(kind, text) !== null)
+    return "";
 
   const showText =
     options.text === undefined
       ? true
-      : !(options.text === false || options.text === 0 || String(options.text).toLowerCase() === "false");
+      : !(
+          options.text === false ||
+          options.text === 0 ||
+          String(options.text).toLowerCase() === "false"
+        );
 
   return buildBarcodeHtml({
     type: kind,
@@ -158,7 +164,10 @@ export function barcodeHelperHtml(
 }
 
 /** HTML for `{{qrcode order.url size=30}}`; "" for an empty value. */
-export function qrcodeHelperHtml(value: unknown, options: { size?: unknown } = {}): string {
+export function qrcodeHelperHtml(
+  value: unknown,
+  options: { size?: unknown } = {},
+): string {
   const text = helperText(value);
   if (!text) return "";
   return buildBarcodeHtml({
@@ -227,7 +236,10 @@ export function buildBarcodeSnippet(
 
   // A Handlebars string literal can hold either quote, but not both.
   if (v.includes('"') && v.includes("'")) {
-    return { ok: false, error: "The value cannot contain both ' and \" characters" };
+    return {
+      ok: false,
+      error: "The value cannot contain both ' and \" characters",
+    };
   }
   const literal = v.includes('"') ? `'${v}'` : `"${v}"`;
   return { ok: true, kind: "helper", text: call(literal) };

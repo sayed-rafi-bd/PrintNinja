@@ -197,7 +197,13 @@ export function SettingsPage() {
   }, [loadApiStatus, loadFonts]);
 
   // Same behaviour for every numeric setting: validate, save, and say so.
-  const saveNumber = async (key: string, value: string, min: number, label: string, setErr: (m: string) => void) => {
+  const saveNumber = async (
+    key: string,
+    value: string,
+    min: number,
+    label: string,
+    setErr: (m: string) => void,
+  ) => {
     const n = Number(value);
     if (!Number.isInteger(n) || n < min) {
       setErr(`${label} must be a whole number of at least ${min}.`);
@@ -241,7 +247,9 @@ export function SettingsPage() {
       const key = await agent("regenerate_api_key", {});
       setApiKey(key);
       setShowKey(true);
-      toast.success("New API key generated — copy it now, it is not shown again");
+      toast.success(
+        "New API key generated — copy it now, it is not shown again",
+      );
     } catch (e) {
       toast.error(`Failed: ${e}`);
     }
@@ -380,457 +388,557 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title={t("settings_page.title")} description={t("pages.settings")} />
+      <PageHeader
+        title={t("settings_page.title")}
+        description={t("pages.settings")}
+      />
 
-      <Tabs value={section} onValueChange={(v) => openSection(v as SettingsSection)} orientation="vertical" className="flex flex-col gap-4 md:flex-row md:items-start md:gap-8">
-        <TabsList aria-label="Settings sections" className="h-auto w-full shrink-0 flex-row items-stretch justify-start gap-1 overflow-x-auto bg-transparent p-0 md:w-56 md:flex-col md:overflow-visible">
-          <TabsTrigger value="setup" className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none">
+      <Tabs
+        value={section}
+        onValueChange={(v) => openSection(v as SettingsSection)}
+        orientation="vertical"
+        className="flex flex-col gap-4 md:flex-row md:items-start md:gap-8"
+      >
+        <TabsList
+          aria-label="Settings sections"
+          className="h-auto w-full shrink-0 flex-row items-stretch justify-start gap-1 overflow-x-auto bg-transparent p-0 md:w-56 md:flex-col md:overflow-visible"
+        >
+          <TabsTrigger
+            value="setup"
+            className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
+          >
             <ListChecks className="h-4 w-4 shrink-0" aria-hidden="true" />
             Setup
           </TabsTrigger>
-          <TabsTrigger value="general" className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none">
+          <TabsTrigger
+            value="general"
+            className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
+          >
             <Type className="h-4 w-4 shrink-0" aria-hidden="true" />
             General
           </TabsTrigger>
-          <TabsTrigger value="share" className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none">
+          <TabsTrigger
+            value="share"
+            className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
+          >
             <Globe className="h-4 w-4 shrink-0" aria-hidden="true" />
             Share
           </TabsTrigger>
-          <TabsTrigger value="api" className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none">
+          <TabsTrigger
+            value="api"
+            className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
+          >
             <Key className="h-4 w-4 shrink-0" aria-hidden="true" />
             API and automation
           </TabsTrigger>
-          <TabsTrigger value="data" className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none">
+          <TabsTrigger
+            value="data"
+            className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
+          >
             <Shield className="h-4 w-4 shrink-0" aria-hidden="true" />
             Data sources
           </TabsTrigger>
-          <TabsTrigger value="retention" className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none">
+          <TabsTrigger
+            value="retention"
+            className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
+          >
             <Archive className="h-4 w-4 shrink-0" aria-hidden="true" />
             Retention
           </TabsTrigger>
-          <TabsTrigger value="diagnostics" className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none">
+          <TabsTrigger
+            value="diagnostics"
+            className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
+          >
             <Activity className="h-4 w-4 shrink-0" aria-hidden="true" />
             Diagnostics
           </TabsTrigger>
         </TabsList>
 
         <div className="min-w-0 max-w-3xl flex-1">
-        <TabsContent value="setup" className="mt-0 space-y-4">
-          <SetupChecklist onOpenSection={openSection} />
-        </TabsContent>
+          <TabsContent value="setup" className="mt-0 space-y-4">
+            <SetupChecklist onOpenSection={openSection} />
+          </TabsContent>
 
-        <TabsContent value="general" className="mt-0 space-y-4">
-          <AppearanceSettings />
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Installed Fonts</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {fonts.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No custom fonts installed. Noto Sans is bundled.
-                </p>
-              ) : (
-                fonts.map((f) => (
-                  <div
-                    key={f.id}
-                    data-testid={`font-row-${f.id}`}
-                    className="flex items-center justify-between p-3 rounded-md border"
-                  >
-                    <div>
-                      <p className="text-sm font-medium">{f.family}</p>
-                      <p className="text-xs text-muted-foreground uppercase">
-                        {f.format}
-                      </p>
-                      <p data-testid={`font-state-${f.id}`} className="text-xs text-muted-foreground">
-                        {f.state === "ready"
-                          ? "Ready"
-                          : f.state === "error"
-                            ? "Download failed — will retry"
-                            : "Downloading…"}
-                      </p>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`Remove ${f.family}`}
-                      data-testid={`font-delete-${f.id}`}
-                      onClick={async () => {
-                        try {
-                          await agent("delete_font", { id: f.id });
-                          await loadFonts();
-                          notifyLocalEdit();
-                          toast.success(`Removed ${f.family}`);
-                        } catch (e) {
-                          toast.error(`Failed: ${e}`);
-                        }
-                      }}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </div>
-                ))
-              )}
-
-              <input
-                ref={fileRef}
-                type="file"
-                aria-label="Upload font file"
-                tabIndex={-1}
-                accept=".ttf,.otf,.woff,.woff2"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) uploadFont(f);
-                  e.target.value = "";
-                }}
-              />
-              <Button variant="outline" data-testid="settings-font-upload" onClick={() => fileRef.current?.click()}>
-                <Upload className="h-4 w-4" />
-                Upload Font (TTF, OTF, WOFF2)
-              </Button>
-              {fontUploadError && (
-                <p role="alert" className="text-sm text-danger">{fontUploadError}</p>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="share" className="mt-0 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Share Service</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-1">
-                <Label htmlFor="share-url">Service URL</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="share-url"
-                    placeholder="https://share.printninja.example"
-                    value={shareUrl}
-                    onChange={(e) => setShareUrl(e.target.value)}
-                  />
-                  <Button variant="outline" onClick={saveShareUrl}>
-                    Save
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Leave empty to hide sharing features (V1 behaviour). No database credentials are bundled in the app — the service keeps its own database.
-                </p>
-              </div>
-
-              {!shareUser ? (
-                <div className="space-y-3 border-t pt-4">
-                  <p className="text-sm font-medium">Sign in to publish</p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label htmlFor="share-handle">Handle</Label>
-                      <Input
-                        id="share-handle"
-                        placeholder="alice"
-                        value={shareHandle}
-                        onChange={(e) => setShareHandle(e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <Label htmlFor="share-password">Password</Label>
-                      <Input
-                        id="share-password"
-                        type="password"
-                        value={sharePassword}
-                        onChange={(e) => setSharePassword(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button onClick={doLogin} disabled={shareBusy}>
-                      {shareBusy ? "…" : "Sign in"}
-                    </Button>
-                    <Button variant="outline" onClick={doRegister} disabled={shareBusy}>
-                      {shareBusy ? "…" : "Register"}
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">Handle: 1–32 chars, alphanumeric + _ -. Password ≥ 8 chars. Throttled 5/min per handle/IP.</p>
-                </div>
-              ) : (
-                <div className="space-y-3 border-t pt-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm">
-                      Signed in as <span className="font-medium">{shareUser.handle}</span>
-                    </p>
-                    <Button variant="outline" size="sm" onClick={doLogout} disabled={shareBusy}>
-                      Sign out
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="api" className="mt-0 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Local REST API</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between p-3 rounded-md border">
-                <div>
-                  <p className="text-sm font-medium">Status</p>
-                  <p className="text-xs text-muted-foreground">
-                    {apiStatus?.running
-                      ? `${apiStatus.address}:${apiStatus.port}`
-                      : `Default: ${lanAccess ? "0.0.0.0" : "127.0.0.1"}:${apiPort}`}
+          <TabsContent value="general" className="mt-0 space-y-4">
+            <AppearanceSettings />
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Installed Fonts</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {fonts.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No custom fonts installed. Noto Sans is bundled.
                   </p>
-                </div>
-                <Badge variant={apiStatus?.running ? "success" : "secondary"}>
-                  {apiStatus?.running ? "running" : "disabled"}
-                </Badge>
-              </div>
-
-              <div className="space-y-1">
-                <Label htmlFor="api-port">Port</Label>
-                <Input
-                  id="api-port"
-                  data-testid="settings-api-port"
-                  type="number"
-                  min="1"
-                  max="65535"
-                  value={apiPort}
-                  onChange={(e) => setApiPort(e.target.value)}
-                  disabled={apiStatus?.running}
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="lan-access"
-                    checked={lanAccess}
-                    disabled={apiStatus?.running}
-                    onCheckedChange={(v) => {
-                      setLanAccess(v);
-                      writeSetting("api_lan_access", String(v));
-                    }}
-                  />
-                  <Label htmlFor="lan-access">Allow LAN access</Label>
-                </div>
-                {apiStatus?.running ? (
-                  <Button variant="destructive" onClick={stopApi}>
-                    Stop Server
-                  </Button>
                 ) : (
-                  <Button onClick={startApi} disabled={starting}>
-                    {starting ? "Starting…" : "Start Server"}
-                  </Button>
-                )}
-              </div>
-
-              {lanAccess && (
-                <p className="text-xs text-warning">
-                  LAN access is enabled: anyone on your network who has an API
-                  key can trigger prints.
-                </p>
-              )}
-
-              <div className="space-y-1">
-                <Label>API Key</Label>
-                <div className="flex gap-2">
-                  <Input
-                    readOnly
-                    type={showKey ? "text" : "password"}
-                    value={apiKey}
-                    aria-label="API key"
-                  />
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    aria-label={showKey ? "Hide key" : "Reveal key"}
-                    onClick={() => setShowKey((s) => !s)}
-                  >
-                    {showKey ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </Button>
-                  <Button variant="outline" onClick={copyKey}>
-                    Copy
-                  </Button>
-                  <Button variant="outline" onClick={regenerateKey}>
-                    Regenerate
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Only a hash is stored. Regenerating invalidates the old key.
-                </p>
-              </div>
-
-              <div className="rounded-md bg-muted p-3">
-                <p className="text-xs font-medium mb-1">curl example</p>
-                <pre className="text-[11px] overflow-x-auto">{`curl -X POST http://127.0.0.1:${apiPort}/v1/print \\
-  -H "Authorization: Bearer ${apiKey === DEFAULT_KEY ? "<your-key>" : apiKey}" \\
-  -H "Content-Type: application/json" \\
-  -d '{"template":"Receipt","printer":"Front Desk","data":{"order":1042}}'`}</pre>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Trusted Sources</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Sources listed here skip the print confirmation sheet.
-              </p>
-              {trusted.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No trusted sources yet — every deep link asks for
-                  confirmation.
-                </p>
-              ) : (
-                trusted.map((src) => (
-                  <div
-                    key={src}
-                    className="flex items-center justify-between p-3 rounded-md border"
-                  >
-                    <span className="text-sm font-mono">{src}</span>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="success">Trusted</Badge>
+                  fonts.map((f) => (
+                    <div
+                      key={f.id}
+                      data-testid={`font-row-${f.id}`}
+                      className="flex items-center justify-between p-3 rounded-md border"
+                    >
+                      <div>
+                        <p className="text-sm font-medium">{f.family}</p>
+                        <p className="text-xs text-muted-foreground uppercase">
+                          {f.format}
+                        </p>
+                        <p
+                          data-testid={`font-state-${f.id}`}
+                          className="text-xs text-muted-foreground"
+                        >
+                          {f.state === "ready"
+                            ? "Ready"
+                            : f.state === "error"
+                              ? "Download failed — will retry"
+                              : "Downloading…"}
+                        </p>
+                      </div>
                       <Button
                         variant="ghost"
                         size="sm"
-                        aria-label={`Remove ${src}`}
-                        onClick={() => removeTrusted(src)}
+                        aria-label={`Remove ${f.family}`}
+                        data-testid={`font-delete-${f.id}`}
+                        onClick={async () => {
+                          try {
+                            await agent("delete_font", { id: f.id });
+                            await loadFonts();
+                            notifyLocalEdit();
+                            toast.success(`Removed ${f.family}`);
+                          } catch (e) {
+                            toast.error(`Failed: ${e}`);
+                          }
+                        }}
                       >
                         <Trash2 className="h-3 w-3" />
                       </Button>
                     </div>
-                  </div>
-                ))
-              )}
+                  ))
+                )}
 
-              <div className="flex gap-2">
-                <Input
-                  aria-label="Trusted source"
-                  placeholder="pos.local or com.example.app"
-                  value={newTrusted}
-                  onChange={(e) => setNewTrusted(e.target.value)}
-                />
-                <Button variant="outline" onClick={addTrusted}>
-                  <Plus className="h-4 w-4" />
-                  Add
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="data" className="mt-0 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Data Sources</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-1">
-                <Label htmlFor="allowed-domains">
-                  {t("settings_page.allowed_domains")}
-                </Label>
-                <Input
-                  id="allowed-domains"
-                  placeholder="api.example.com, pos.local"
-                  value={allowedDomains}
-                  onChange={(e) => setAllowedDomains(e.target.value)}
-                  onBlur={() =>
-                    writeSetting("allowed_domains", allowedDomains)
-                  }
-                />
-                <p className="text-xs text-muted-foreground">
-                  Comma-separated. Leave empty to allow any domain.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="block-private"
-                  checked={blockPrivate}
-                  onCheckedChange={(v) => {
-                    setBlockPrivate(v);
-                    writeSetting("block_private_ips", String(v));
+                <input
+                  ref={fileRef}
+                  type="file"
+                  aria-label="Upload font file"
+                  tabIndex={-1}
+                  accept=".ttf,.otf,.woff,.woff2"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) uploadFont(f);
+                    e.target.value = "";
                   }}
                 />
-                <Label htmlFor="block-private">Block private IP ranges</Label>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+                <Button
+                  variant="outline"
+                  data-testid="settings-font-upload"
+                  onClick={() => fileRef.current?.click()}
+                >
+                  <Upload className="h-4 w-4" />
+                  Upload Font (TTF, OTF, WOFF2)
+                </Button>
+                {fontUploadError && (
+                  <p role="alert" className="text-sm text-danger">
+                    {fontUploadError}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-        <TabsContent value="retention" className="mt-0 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">
-                {t("settings_page.retention")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label htmlFor="retention-days">Keep history for (days)</Label>
-                <Input
-                  id="retention-days"
-                  type="number"
-                  min="1"
-                  value={retentionDays}
-                  aria-invalid={!!retentionError}
-                  aria-describedby={retentionError ? "retention-days-error" : undefined}
-                  onChange={(e) => { setRetentionDays(e.target.value); setRetentionError(""); }}
-                  onBlur={() => saveNumber("retention_days", retentionDays, 1, "Keep history for", setRetentionError)}
-                />
-                {retentionError && <p id="retention-days-error" role="alert" className="text-xs text-danger">{retentionError}</p>}
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="max-records">Max records</Label>
-                <Input
-                  id="max-records"
-                  type="number"
-                  min="100"
-                  value={maxRecords}
-                  aria-invalid={!!maxError}
-                  aria-describedby={maxError ? "max-records-error" : undefined}
-                  onChange={(e) => { setMaxRecords(e.target.value); setMaxError(""); }}
-                  onBlur={() => saveNumber("max_records", maxRecords, 100, "Max records", setMaxError)}
-                />
-                {maxError && <p id="max-records-error" role="alert" className="text-xs text-danger">{maxError}</p>}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+          <TabsContent value="share" className="mt-0 space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Share Service</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-1">
+                  <Label htmlFor="share-url">Service URL</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="share-url"
+                      placeholder="https://share.printninja.example"
+                      value={shareUrl}
+                      onChange={(e) => setShareUrl(e.target.value)}
+                    />
+                    <Button variant="outline" onClick={saveShareUrl}>
+                      Save
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Leave empty to hide sharing features (V1 behaviour). No
+                    database credentials are bundled in the app — the service
+                    keeps its own database.
+                  </p>
+                </div>
 
-        <TabsContent value="diagnostics" className="mt-0 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Diagnostics</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Export application logs and diagnostics for troubleshooting.
-              </p>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  diagnostics.download();
-                  toast.success("Diagnostics exported");
-                }}
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Export Diagnostics
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                Secrets and API tokens are redacted from the export.
-              </p>
-            </CardContent>
-          </Card>
-        </TabsContent>
+                {!shareUser ? (
+                  <div className="space-y-3 border-t pt-4">
+                    <p className="text-sm font-medium">Sign in to publish</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="share-handle">Handle</Label>
+                        <Input
+                          id="share-handle"
+                          placeholder="alice"
+                          value={shareHandle}
+                          onChange={(e) => setShareHandle(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="share-password">Password</Label>
+                        <Input
+                          id="share-password"
+                          type="password"
+                          value={sharePassword}
+                          onChange={(e) => setSharePassword(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button onClick={doLogin} disabled={shareBusy}>
+                        {shareBusy ? "…" : "Sign in"}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={doRegister}
+                        disabled={shareBusy}
+                      >
+                        {shareBusy ? "…" : "Register"}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Handle: 1–32 chars, alphanumeric + _ -. Password ≥ 8
+                      chars. Throttled 5/min per handle/IP.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3 border-t pt-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm">
+                        Signed in as{" "}
+                        <span className="font-medium">{shareUser.handle}</span>
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={doLogout}
+                        disabled={shareBusy}
+                      >
+                        Sign out
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="api" className="mt-0 space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Local REST API</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between p-3 rounded-md border">
+                  <div>
+                    <p className="text-sm font-medium">Status</p>
+                    <p className="text-xs text-muted-foreground">
+                      {apiStatus?.running
+                        ? `${apiStatus.address}:${apiStatus.port}`
+                        : `Default: ${lanAccess ? "0.0.0.0" : "127.0.0.1"}:${apiPort}`}
+                    </p>
+                  </div>
+                  <Badge variant={apiStatus?.running ? "success" : "secondary"}>
+                    {apiStatus?.running ? "running" : "disabled"}
+                  </Badge>
+                </div>
+
+                <div className="space-y-1">
+                  <Label htmlFor="api-port">Port</Label>
+                  <Input
+                    id="api-port"
+                    data-testid="settings-api-port"
+                    type="number"
+                    min="1"
+                    max="65535"
+                    value={apiPort}
+                    onChange={(e) => setApiPort(e.target.value)}
+                    disabled={apiStatus?.running}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="lan-access"
+                      checked={lanAccess}
+                      disabled={apiStatus?.running}
+                      onCheckedChange={(v) => {
+                        setLanAccess(v);
+                        writeSetting("api_lan_access", String(v));
+                      }}
+                    />
+                    <Label htmlFor="lan-access">Allow LAN access</Label>
+                  </div>
+                  {apiStatus?.running ? (
+                    <Button variant="destructive" onClick={stopApi}>
+                      Stop Server
+                    </Button>
+                  ) : (
+                    <Button onClick={startApi} disabled={starting}>
+                      {starting ? "Starting…" : "Start Server"}
+                    </Button>
+                  )}
+                </div>
+
+                {lanAccess && (
+                  <p className="text-xs text-warning">
+                    LAN access is enabled: anyone on your network who has an API
+                    key can trigger prints.
+                  </p>
+                )}
+
+                <div className="space-y-1">
+                  <Label>API Key</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      readOnly
+                      type={showKey ? "text" : "password"}
+                      value={apiKey}
+                      aria-label="API key"
+                    />
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      aria-label={showKey ? "Hide key" : "Reveal key"}
+                      onClick={() => setShowKey((s) => !s)}
+                    >
+                      {showKey ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </Button>
+                    <Button variant="outline" onClick={copyKey}>
+                      Copy
+                    </Button>
+                    <Button variant="outline" onClick={regenerateKey}>
+                      Regenerate
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Only a hash is stored. Regenerating invalidates the old key.
+                  </p>
+                </div>
+
+                <div className="rounded-md bg-muted p-3">
+                  <p className="text-xs font-medium mb-1">curl example</p>
+                  <pre className="text-[11px] overflow-x-auto">{`curl -X POST http://127.0.0.1:${apiPort}/v1/print \\
+  -H "Authorization: Bearer ${apiKey === DEFAULT_KEY ? "<your-key>" : apiKey}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"template":"Receipt","printer":"Front Desk","data":{"order":1042}}'`}</pre>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Trusted Sources</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Sources listed here skip the print confirmation sheet.
+                </p>
+                {trusted.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No trusted sources yet — every deep link asks for
+                    confirmation.
+                  </p>
+                ) : (
+                  trusted.map((src) => (
+                    <div
+                      key={src}
+                      className="flex items-center justify-between p-3 rounded-md border"
+                    >
+                      <span className="text-sm font-mono">{src}</span>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="success">Trusted</Badge>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Remove ${src}`}
+                          onClick={() => removeTrusted(src)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+
+                <div className="flex gap-2">
+                  <Input
+                    aria-label="Trusted source"
+                    placeholder="pos.local or com.example.app"
+                    value={newTrusted}
+                    onChange={(e) => setNewTrusted(e.target.value)}
+                  />
+                  <Button variant="outline" onClick={addTrusted}>
+                    <Plus className="h-4 w-4" />
+                    Add
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="data" className="mt-0 space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Data Sources</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-1">
+                  <Label htmlFor="allowed-domains">
+                    {t("settings_page.allowed_domains")}
+                  </Label>
+                  <Input
+                    id="allowed-domains"
+                    placeholder="api.example.com, pos.local"
+                    value={allowedDomains}
+                    onChange={(e) => setAllowedDomains(e.target.value)}
+                    onBlur={() =>
+                      writeSetting("allowed_domains", allowedDomains)
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Comma-separated. Leave empty to allow any domain.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="block-private"
+                    checked={blockPrivate}
+                    onCheckedChange={(v) => {
+                      setBlockPrivate(v);
+                      writeSetting("block_private_ips", String(v));
+                    }}
+                  />
+                  <Label htmlFor="block-private">Block private IP ranges</Label>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="retention" className="mt-0 space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">
+                  {t("settings_page.retention")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <Label htmlFor="retention-days">
+                    Keep history for (days)
+                  </Label>
+                  <Input
+                    id="retention-days"
+                    type="number"
+                    min="1"
+                    value={retentionDays}
+                    aria-invalid={!!retentionError}
+                    aria-describedby={
+                      retentionError ? "retention-days-error" : undefined
+                    }
+                    onChange={(e) => {
+                      setRetentionDays(e.target.value);
+                      setRetentionError("");
+                    }}
+                    onBlur={() =>
+                      saveNumber(
+                        "retention_days",
+                        retentionDays,
+                        1,
+                        "Keep history for",
+                        setRetentionError,
+                      )
+                    }
+                  />
+                  {retentionError && (
+                    <p
+                      id="retention-days-error"
+                      role="alert"
+                      className="text-xs text-danger"
+                    >
+                      {retentionError}
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="max-records">Max records</Label>
+                  <Input
+                    id="max-records"
+                    type="number"
+                    min="100"
+                    value={maxRecords}
+                    aria-invalid={!!maxError}
+                    aria-describedby={
+                      maxError ? "max-records-error" : undefined
+                    }
+                    onChange={(e) => {
+                      setMaxRecords(e.target.value);
+                      setMaxError("");
+                    }}
+                    onBlur={() =>
+                      saveNumber(
+                        "max_records",
+                        maxRecords,
+                        100,
+                        "Max records",
+                        setMaxError,
+                      )
+                    }
+                  />
+                  {maxError && (
+                    <p
+                      id="max-records-error"
+                      role="alert"
+                      className="text-xs text-danger"
+                    >
+                      {maxError}
+                    </p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="diagnostics" className="mt-0 space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Diagnostics</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Export application logs and diagnostics for troubleshooting.
+                </p>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    diagnostics.download();
+                    toast.success("Diagnostics exported");
+                  }}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Export Diagnostics
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  Secrets and API tokens are redacted from the export.
+                </p>
+              </CardContent>
+            </Card>
+          </TabsContent>
         </div>
       </Tabs>
 

@@ -7,17 +7,17 @@ import type { TokenService } from "../../domain/ports.js";
  * keep working — the token is opaque and the hash function is unchanged.
  */
 export function createTokenService(): TokenService {
-	return {
-		generate() {
-			const token = randomBytes(32).toString("base64url");
-			return { token, tokenHash: hashToken(token) };
-		},
-		hash(token) {
-			return hashToken(token);
-		},
-	};
+  return {
+    generate() {
+      const token = randomBytes(32).toString("base64url");
+      return { token, tokenHash: hashToken(token) };
+    },
+    hash(token) {
+      return hashToken(token);
+    },
+  };
 }
 
 function hashToken(token: string): string {
-	return createHash("sha256").update(token, "utf8").digest("hex");
+  return createHash("sha256").update(token, "utf8").digest("hex");
 }

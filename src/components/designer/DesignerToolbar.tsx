@@ -13,7 +13,12 @@ interface Props {
 /** New, Save, Import, and Export for the template being edited. Save
  * writes a version locally and the engine pushes it; nothing here
  * talks to the server directly. */
-export function DesignerToolbar({ onNew, onSave, onImportFile, onExport }: Props) {
+export function DesignerToolbar({
+  onNew,
+  onSave,
+  onImportFile,
+  onExport,
+}: Props) {
   const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
   return (
@@ -22,11 +27,20 @@ export function DesignerToolbar({ onNew, onSave, onImportFile, onExport }: Props
         <Plus className="h-4 w-4" aria-hidden="true" />
         {t("designer.newTemplate")}
       </Button>
-      <Button variant="outline" size="sm" onClick={onSave} data-testid="designer-save">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={onSave}
+        data-testid="designer-save"
+      >
         <Save className="h-4 w-4" aria-hidden="true" />
         Save
       </Button>
-      <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => fileInputRef.current?.click()}
+      >
         <Upload className="h-4 w-4" aria-hidden="true" />
         Import
       </Button>

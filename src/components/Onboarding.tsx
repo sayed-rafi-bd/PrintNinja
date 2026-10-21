@@ -38,12 +38,17 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             <Button className="sm:flex-1" onClick={() => onComplete("/print")}>
               Start printing
             </Button>
-            <Button variant="outline" className="sm:flex-1" onClick={() => onComplete("/settings?section=setup")}>
+            <Button
+              variant="outline"
+              className="sm:flex-1"
+              onClick={() => onComplete("/settings?section=setup")}
+            >
               Set up this workstation
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Setting up a printer, templates, or sharing? The checklist in Settings walks through it.
+            Setting up a printer, templates, or sharing? The checklist in
+            Settings walks through it.
           </p>
         </CardContent>
       </Card>

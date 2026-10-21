@@ -70,7 +70,12 @@ interface StatusBadgeProps {
 
 export function StatusBadge({ status, label, className }: StatusBadgeProps) {
   const { t } = useTranslation();
-  const def = STATUS[status] as { tone: StatusTone; icon: LucideIcon; label: string; spin?: boolean };
+  const def = STATUS[status] as {
+    tone: StatusTone;
+    icon: LucideIcon;
+    label: string;
+    spin?: boolean;
+  };
   const Icon = def.icon;
   return (
     <span
@@ -83,7 +88,10 @@ export function StatusBadge({ status, label, className }: StatusBadgeProps) {
     >
       <Icon
         aria-hidden="true"
-        className={cn("h-3.5 w-3.5 shrink-0", "spin" in def && def.spin && "motion-safe:animate-spin")}
+        className={cn(
+          "h-3.5 w-3.5 shrink-0",
+          "spin" in def && def.spin && "motion-safe:animate-spin",
+        )}
       />
       {label ?? t(`status.${status}`, { defaultValue: def.label })}
     </span>

@@ -33,7 +33,9 @@ export function useSystemPrinters() {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const refresh = async () => {

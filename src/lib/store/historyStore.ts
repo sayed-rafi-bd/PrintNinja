@@ -48,7 +48,8 @@ export const useHistoryStore = create<HistoryState>((set) => ({
   maxRecords: 10000,
 
   setJobs: (jobs) => set({ jobs }),
-  setFilter: (filter) => set((state) => ({ filter: { ...state.filter, ...filter } })),
+  setFilter: (filter) =>
+    set((state) => ({ filter: { ...state.filter, ...filter } })),
   setSelectedJob: (selectedJob) => set({ selectedJob }),
   setRetentionDays: (retentionDays) => set({ retentionDays }),
   setMaxRecords: (maxRecords) => set({ maxRecords }),

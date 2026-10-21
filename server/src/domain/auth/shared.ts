@@ -14,35 +14,35 @@ export const PASSWORD_MAX_LENGTH = 128;
  * lives here, not in the database collation, so every query uses the
  * unique handle_key column. */
 export function handleKey(handle: string): string {
-	return handle.trim().toLowerCase();
+  return handle.trim().toLowerCase();
 }
 
 export function assertValidHandle(field: string, handle: string): void {
-	const trimmed = handle.trim();
-	if (
-		trimmed.length < HANDLE_MIN_LENGTH ||
-		trimmed.length > HANDLE_MAX_LENGTH ||
-		!HANDLE_PATTERN.test(trimmed)
-	) {
-		throw new ValidationError("Invalid handle", [
-			{
-				path: field,
-				message: "Handle must be 1-32 of A-Z a-z 0-9 _ -",
-			},
-		]);
-	}
+  const trimmed = handle.trim();
+  if (
+    trimmed.length < HANDLE_MIN_LENGTH ||
+    trimmed.length > HANDLE_MAX_LENGTH ||
+    !HANDLE_PATTERN.test(trimmed)
+  ) {
+    throw new ValidationError("Invalid handle", [
+      {
+        path: field,
+        message: "Handle must be 1-32 of A-Z a-z 0-9 _ -",
+      },
+    ]);
+  }
 }
 
 export function assertValidPassword(field: string, password: string): void {
-	if (
-		password.length < PASSWORD_MIN_LENGTH ||
-		password.length > PASSWORD_MAX_LENGTH
-	) {
-		throw new ValidationError("Invalid password", [
-			{
-				path: field,
-				message: "Password must be 8-128 characters",
-			},
-		]);
-	}
+  if (
+    password.length < PASSWORD_MIN_LENGTH ||
+    password.length > PASSWORD_MAX_LENGTH
+  ) {
+    throw new ValidationError("Invalid password", [
+      {
+        path: field,
+        message: "Password must be 8-128 characters",
+      },
+    ]);
+  }
 }

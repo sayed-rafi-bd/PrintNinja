@@ -37,9 +37,7 @@ describe("ensureStarterTemplates", () => {
 
     // Every starter must reach the database, otherwise the Print tab's
     // dropdown is empty and shows "No templates — create one in Designer".
-    const created = invoke.mock.calls.filter(
-      (c) => c[0] === "create_template",
-    );
+    const created = invoke.mock.calls.filter((c) => c[0] === "create_template");
     expect(created).toHaveLength(STARTER_TEMPLATES.length);
     expect(rows.length).toBeGreaterThan(0);
 
@@ -59,14 +57,22 @@ describe("ensureStarterTemplates", () => {
   });
 
   it("bundles only the Shipping Label 4x6 starter", () => {
-    expect(STARTER_TEMPLATES.map((t) => t.name)).toEqual(["Shipping Label 4x6"]);
+    expect(STARTER_TEMPLATES.map((t) => t.name)).toEqual([
+      "Shipping Label 4x6",
+    ]);
     expect(STARTER_TEMPLATES[0].page_w_mm).toBe(102);
     expect(STARTER_TEMPLATES[0].page_h_mm).toBe(152);
   });
 
   it("does not re-seed when templates already exist", async () => {
     const existing = [
-      { id: 7, name: "My Template", page_w_mm: 100, page_h_mm: 150, orientation: "portrait" },
+      {
+        id: 7,
+        name: "My Template",
+        page_w_mm: 100,
+        page_h_mm: 150,
+        orientation: "portrait",
+      },
     ];
     invoke.mockResolvedValue(existing);
 
@@ -85,7 +91,13 @@ describe("ensureStarterTemplates", () => {
     invoke.mockResolvedValue([]).mockImplementation((cmd: string) =>
       Promise.resolve(
         cmd === "create_template"
-          ? { id: 1, name: "x", page_w_mm: 1, page_h_mm: 1, orientation: "portrait" }
+          ? {
+              id: 1,
+              name: "x",
+              page_w_mm: 1,
+              page_h_mm: 1,
+              orientation: "portrait",
+            }
           : [],
       ),
     );
@@ -99,7 +111,9 @@ describe("ensureStarterTemplates", () => {
     ]);
 
     expect(a).toBe(b);
-    expect(invoke.mock.calls.filter((c) => c[0] === "list_templates")).toHaveLength(1);
+    expect(
+      invoke.mock.calls.filter((c) => c[0] === "list_templates"),
+    ).toHaveLength(1);
   });
 
   it("returns an empty list in web mode instead of throwing", async () => {

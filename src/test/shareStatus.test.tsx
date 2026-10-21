@@ -14,7 +14,11 @@ vi.mock("@/lib/share/client", () => share);
 
 function Probe() {
   const status = useShareStatus();
-  return <p data-testid="status">{status.state + ("handle" in status ? `:${status.handle}` : "")}</p>;
+  return (
+    <p data-testid="status">
+      {status.state + ("handle" in status ? `:${status.handle}` : "")}
+    </p>
+  );
 }
 
 beforeEach(() => {
@@ -27,30 +31,42 @@ describe("useShareStatus", () => {
   it("is unconfigured with no server address", async () => {
     share.getServiceUrl.mockResolvedValue(null);
     render(<Probe />);
-    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("unconfigured"));
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("unconfigured"),
+    );
   });
 
   it("is signed out with no token", async () => {
     share.getSessionToken.mockResolvedValue(null);
     render(<Probe />);
-    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("signed_out"));
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("signed_out"),
+    );
   });
 
   it("is online with the handle from /v2/auth/me", async () => {
     share.fetchMe.mockResolvedValue({ id: "u1", handle: "rafi" });
     render(<Probe />);
-    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("online:rafi"));
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("online:rafi"),
+    );
   });
 
   it("returns to sign-in when the session expired", async () => {
     share.fetchMe.mockRejectedValue(new SessionExpiredError());
     render(<Probe />);
-    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("signed_out"));
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("signed_out"),
+    );
   });
 
   it("is offline when the server cannot be reached", async () => {
-    share.fetchMe.mockRejectedValue(new ServerUnreachableError("https://srv.test"));
+    share.fetchMe.mockRejectedValue(
+      new ServerUnreachableError("https://srv.test"),
+    );
     render(<Probe />);
-    await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("offline"));
+    await waitFor(() =>
+      expect(screen.getByTestId("status")).toHaveTextContent("offline"),
+    );
   });
 });

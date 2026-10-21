@@ -3,7 +3,11 @@ import { useTranslation } from "react-i18next";
 import { ServerUnreachableScreen } from "@/components/ServerUnreachableScreen";
 import { SignInScreen } from "@/components/SignInScreen";
 import { getServiceUrl, onSessionEnded } from "@/lib/share/client";
-import { checkSession, canOpenOffline, type SessionCheck } from "@/lib/share/session";
+import {
+  checkSession,
+  canOpenOffline,
+  type SessionCheck,
+} from "@/lib/share/session";
 
 type Gate =
   | { kind: "checking" }
@@ -69,7 +73,10 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           setGate((g) => ({
             kind: "signin",
             url,
-            expired: g.kind === "signin" ? g.expired : reason === "expired" && g.kind === "ready",
+            expired:
+              g.kind === "signin"
+                ? g.expired
+                : reason === "expired" && g.kind === "ready",
           })),
         );
       }),
@@ -104,7 +111,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           url={gate.url}
           retrying={gate.retrying}
           onRetry={() => void retry()}
-          onChangeServer={() => setGate({ kind: "signin", url: gate.url, expired: false })}
+          onChangeServer={() =>
+            setGate({ kind: "signin", url: gate.url, expired: false })
+          }
         />
       )}
 

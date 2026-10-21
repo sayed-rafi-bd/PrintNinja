@@ -183,7 +183,9 @@ describe("extractClasses: classes built from data", () => {
   });
 
   it("does not warn when a bare fragment has no expression next to it", () => {
-    const { candidates, warnings } = extractClasses(`<b class="bg- flex">x</b>`);
+    const { candidates, warnings } = extractClasses(
+      `<b class="bg- flex">x</b>`,
+    );
     expect(warnings).toEqual([]);
     expect(candidates).toEqual(["flex"]);
   });

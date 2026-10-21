@@ -2,7 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ZoomIn, ZoomOut } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { getTemplateError } from "@/lib/render/renderTemplate";
 import { cn } from "@/lib/utils";
 import { CanvasPane } from "./CanvasPane";
@@ -24,7 +30,10 @@ type ZoomMode = "fit" | number;
 export function fitZoom(availableWidth: number, pageWidthPx: number): number {
   // Width is 0 before the first measurement (and in jsdom): show the page at full size.
   if (availableWidth <= 0 || pageWidthPx <= 0) return 1;
-  return Math.min(1, Math.max(MIN_ZOOM, (availableWidth - PAD_X) / pageWidthPx));
+  return Math.min(
+    1,
+    Math.max(MIN_ZOOM, (availableWidth - PAD_X) / pageWidthPx),
+  );
 }
 
 /** The next zoom step above or below `zoom`, or `zoom` itself at the end of the range. */
@@ -47,7 +56,16 @@ interface Props {
 }
 
 /** The canvas with its toolbar: Fit, −, zoom %, +. Owns the zoom, which starts on Fit. */
-export function CanvasWorkspace({ html, css, compiledCss, data, pageWidthMm, pageHeightMm, fill = false, className }: Props) {
+export function CanvasWorkspace({
+  html,
+  css,
+  compiledCss,
+  data,
+  pageWidthMm,
+  pageHeightMm,
+  fill = false,
+  className,
+}: Props) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [mode, setMode] = useState<ZoomMode>("fit");
@@ -73,10 +91,17 @@ export function CanvasWorkspace({ html, css, compiledCss, data, pageWidthMm, pag
   const error = useMemo(() => getTemplateError(html, data), [html, data]);
 
   const isPreset = mode !== "fit" && ZOOM_PRESETS.includes(mode);
-  const selectValue = mode === "fit" ? "fit" : isPreset ? String(mode) : "custom";
+  const selectValue =
+    mode === "fit" ? "fit" : isPreset ? String(mode) : "custom";
 
   return (
-    <div className={cn("flex flex-col overflow-hidden rounded-lg border bg-card", fill && "h-full", className)}>
+    <div
+      className={cn(
+        "flex flex-col overflow-hidden rounded-lg border bg-card",
+        fill && "h-full",
+        className,
+      )}
+    >
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-3 py-1.5">
         <span className="text-sm font-medium">{t("designer.canvas")}</span>
         <div className="flex items-center gap-1">
@@ -93,9 +118,13 @@ export function CanvasWorkspace({ html, css, compiledCss, data, pageWidthMm, pag
             <SelectContent>
               <SelectItem value="fit">Fit</SelectItem>
               {ZOOM_PRESETS.map((p) => (
-                <SelectItem key={p} value={String(p)}>{Math.round(p * 100)}%</SelectItem>
+                <SelectItem key={p} value={String(p)}>
+                  {Math.round(p * 100)}%
+                </SelectItem>
               ))}
-              {selectValue === "custom" && <SelectItem value="custom">{pct}%</SelectItem>}
+              {selectValue === "custom" && (
+                <SelectItem value="custom">{pct}%</SelectItem>
+              )}
             </SelectContent>
           </Select>
           <Button
@@ -109,7 +138,9 @@ export function CanvasWorkspace({ html, css, compiledCss, data, pageWidthMm, pag
           >
             <ZoomOut className="h-4 w-4" />
           </Button>
-          <span className="w-12 text-center text-xs" aria-live="polite">{pct}%</span>
+          <span className="w-12 text-center text-xs" aria-live="polite">
+            {pct}%
+          </span>
           <Button
             variant="ghost"
             size="icon"
@@ -124,8 +155,14 @@ export function CanvasWorkspace({ html, css, compiledCss, data, pageWidthMm, pag
         </div>
       </div>
       {error && (
-        <div role="alert" className="flex shrink-0 items-start gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <div
+          role="alert"
+          className="flex shrink-0 items-start gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+        >
+          <AlertTriangle
+            className="mt-0.5 h-3.5 w-3.5 shrink-0"
+            aria-hidden="true"
+          />
           <span className="min-w-0 break-words">
             <strong className="font-semibold">Template error:</strong> {error}
           </span>
@@ -135,10 +172,21 @@ export function CanvasWorkspace({ html, css, compiledCss, data, pageWidthMm, pag
           The stable gutter stops a scrollbar appearing and re-fitting the page in a loop. */}
       <div
         ref={scrollRef}
-        className={cn("flex overflow-auto bg-muted p-4 [scrollbar-gutter:stable]", fill ? "min-h-0 flex-1" : "min-h-[500px]")}
+        className={cn(
+          "flex overflow-auto bg-muted p-4 [scrollbar-gutter:stable]",
+          fill ? "min-h-0 flex-1" : "min-h-[500px]",
+        )}
       >
         <div className="m-auto">
-          <CanvasPane html={html} css={css} compiledCss={compiledCss} data={data} width={pageWidth} height={pageHeight} zoom={zoom} />
+          <CanvasPane
+            html={html}
+            css={css}
+            compiledCss={compiledCss}
+            data={data}
+            width={pageWidth}
+            height={pageHeight}
+            zoom={zoom}
+          />
         </div>
       </div>
     </div>

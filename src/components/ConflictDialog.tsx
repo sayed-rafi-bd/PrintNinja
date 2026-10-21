@@ -61,7 +61,11 @@ export function ConflictDialog({
       // Rebase onto the server's current revision so the next push
       // overwrites cleanly; the other PC's edit stays in version history.
       const remote = await share.fetchRemoteTemplate(serverId);
-      await agent("cache_resolve_conflict", { server_id: serverId, resolution: "mine", rebase_to: remote.revision });
+      await agent("cache_resolve_conflict", {
+        server_id: serverId,
+        resolution: "mine",
+        rebase_to: remote.revision,
+      });
       notifyLocalEdit();
     });
 
@@ -90,7 +94,8 @@ export function ConflictDialog({
 
   const keepBoth = () =>
     run("both", async () => {
-      if (!serverId || !conflict) throw new Error("This template was never on the server");
+      if (!serverId || !conflict)
+        throw new Error("This template was never on the server");
       const local = await agent("get_template", { id: conflict.id });
       const versions = await agent("list_versions", {
         template_id: conflict.id,
@@ -135,8 +140,9 @@ export function ConflictDialog({
         <DialogHeader>
           <DialogTitle>“{conflict?.name}” changed on another PC</DialogTitle>
           <DialogDescription>
-            Your edits and the server copy disagree. Take the server copy, keep pushing yours, or keep both.
-            Keeping yours is safe: the other PC's version stays in history.
+            Your edits and the server copy disagree. Take the server copy, keep
+            pushing yours, or keep both. Keeping yours is safe: the other PC's
+            version stays in history.
           </DialogDescription>
         </DialogHeader>
         {error && (

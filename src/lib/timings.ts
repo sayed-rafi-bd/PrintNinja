@@ -8,15 +8,24 @@ export const TIMING_STAGES = [
   { key: "render_ms", label: "Render", short: "Render" },
   { key: "send_ms", label: "Send", short: "Send" },
   { key: "history_ms", label: "History write", short: "History" },
-] as const satisfies ReadonlyArray<{ key: keyof StageTimings; label: string; short: string }>;
+] as const satisfies ReadonlyArray<{
+  key: keyof StageTimings;
+  label: string;
+  short: string;
+}>;
 
 /** Parse a job's stored `timings_json`; null when absent or malformed. */
-export function parseTimings(json: string | null | undefined): StageTimings | null {
+export function parseTimings(
+  json: string | null | undefined,
+): StageTimings | null {
   if (!json) return null;
   try {
-    const raw = JSON.parse(json) as Partial<Record<keyof StageTimings, unknown>>;
+    const raw = JSON.parse(json) as Partial<
+      Record<keyof StageTimings, unknown>
+    >;
     if (!raw || typeof raw !== "object") return null;
-    const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+    const num = (v: unknown) =>
+      typeof v === "number" && Number.isFinite(v) ? v : 0;
     return {
       fetch_ms: num(raw.fetch_ms),
       template_ms: num(raw.template_ms),

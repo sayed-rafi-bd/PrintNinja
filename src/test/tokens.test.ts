@@ -6,7 +6,11 @@ import path from "node:path";
 const css = readFileSync(path.resolve(__dirname, "../index.css"), "utf8");
 
 function token(name: string): [number, number, number] {
-  const m = css.match(new RegExp(`--${name}:\\s*(\\d+(?:\\.\\d+)?)\\s+(\\d+(?:\\.\\d+)?)%\\s+(\\d+(?:\\.\\d+)?)%`));
+  const m = css.match(
+    new RegExp(
+      `--${name}:\\s*(\\d+(?:\\.\\d+)?)\\s+(\\d+(?:\\.\\d+)?)%\\s+(\\d+(?:\\.\\d+)?)%`,
+    ),
+  );
   if (!m) throw new Error(`token --${name} not found`);
   return [Number(m[1]), Number(m[2]) / 100, Number(m[3]) / 100];
 }
@@ -21,7 +25,9 @@ function toRgb([h, s, l]: [number, number, number]): [number, number, number] {
 }
 
 function luminance(name: string): number {
-  const [r, g, b] = toRgb(token(name)).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  const [r, g, b] = toRgb(token(name)).map((c) =>
+    c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4,
+  );
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 

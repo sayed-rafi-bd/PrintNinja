@@ -7,20 +7,20 @@ import { fileURLToPath } from "node:url";
 // JSON file, not memory.
 
 export interface StackState {
-	apiUrl: string;
-	agentBundle: string;
-	pgContainerId?: string;
-	servicePid?: number;
+  apiUrl: string;
+  agentBundle: string;
+  pgContainerId?: string;
+  servicePid?: number;
 }
 
 const here = dirname(fileURLToPath(import.meta.url));
 const stateFile = join(here, ".stack.json");
 
 export function writeStackState(state: StackState): void {
-	writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
 }
 
 export function readStackState(): StackState {
-	const raw = readFileSync(stateFile, "utf8");
-	return JSON.parse(raw) as StackState;
+  const raw = readFileSync(stateFile, "utf8");
+  return JSON.parse(raw) as StackState;
 }

@@ -10,55 +10,52 @@ import { testids } from "../support/testids";
 // the agent settings path and the gate's rendering rather than the
 // socket. The "down" case is fully real: a dead port, a refused
 // connection, the unreachable screen.
-test("gate shows gate-unreachable when the API is down", async ({
-	page,
-}) => {
-	await installAgent(page, {
-		settings: {
-			onboarding_done: "true",
-			// Discard port: nothing listens, the fetch refuses.
-			share_service_url: "http://127.0.0.1:9",
-			share_session_token: null,
-		},
-	});
+test("gate shows gate-unreachable when the API is down", async ({ page }) => {
+  await installAgent(page, {
+    settings: {
+      onboarding_done: "true",
+      // Discard port: nothing listens, the fetch refuses.
+      share_service_url: "http://127.0.0.1:9",
+      share_session_token: null,
+    },
+  });
 
-	await page.goto("/");
-	await expect(page.getByTestId(testids.gateUnreachable)).toBeVisible({
-		timeout: 15_000,
-	});
+  await page.goto("/");
+  await expect(page.getByTestId(testids.gateUnreachable)).toBeVisible({
+    timeout: 15_000,
+  });
 });
 
 test("gate shows signin-form when the API is up", async ({ page }) => {
-	const { apiUrl } = readStackState();
-	await installAgent(page, {
-		settings: {
-			onboarding_done: "true",
-			share_service_url: apiUrl,
-			share_session_token: null,
-		},
-	});
-	await page.route("**/health", (route) =>
-		route.fulfill({
-			status: 200,
-			contentType: "application/json",
-			body: '"ok"',
-		}),
-	);
+  const { apiUrl } = readStackState();
+  await installAgent(page, {
+    settings: {
+      onboarding_done: "true",
+      share_service_url: apiUrl,
+      share_session_token: null,
+    },
+  });
+  await page.route("**/health", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: '"ok"',
+    }),
+  );
 
-	await page.goto("/");
-	await expect(page.getByTestId(testids.signinForm)).toBeVisible({
-		timeout: 15_000,
-	});
-	await expect(page.getByTestId(testids.authHandle)).toBeVisible();
-	await expect(page.getByTestId(testids.authPassword)).toBeVisible();
+  await page.goto("/");
+  await expect(page.getByTestId(testids.signinForm)).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByTestId(testids.authHandle)).toBeVisible();
+  await expect(page.getByTestId(testids.authPassword)).toBeVisible();
 
-	const seen = await page.evaluate(
-		() =>
-			(
-				window as unknown as {
-					__FAKE_AGENT_CALLS: { cmd: string }[];
-				}
-			).__FAKE_AGENT_CALLS.map((c) => c.cmd),
-	);
-	expect(seen).toContain("get_setting");
+  const seen = await page.evaluate(() =>
+    (
+      window as unknown as {
+        __FAKE_AGENT_CALLS: { cmd: string }[];
+      }
+    ).__FAKE_AGENT_CALLS.map((c) => c.cmd),
+  );
+  expect(seen).toContain("get_setting");
 });
