@@ -21,8 +21,12 @@ const share = vi.hoisted(() => ({
     published_at: string | null;
     updated_at: string;
   }) => !!t.remote_id && !!t.published_at && t.updated_at > t.published_at,
-  fetchRemoteTemplate: vi.fn(async (_id: string) => ({ id: _id })),
-  fetchCommunityTemplates: vi.fn(async () => []),
+  fetchRemoteTemplate: vi.fn(
+    async (_id: string): Promise<Record<string, unknown>> => ({ id: _id }),
+  ),
+  fetchCommunityTemplates: vi.fn(
+    async (): Promise<Array<Record<string, unknown>>> => [],
+  ),
   saveRemoteTemplate: vi.fn(async () => {}),
   unsaveRemoteTemplate: vi.fn(async () => {}),
   RemoteTemplateNotFoundError: class extends Error {},
