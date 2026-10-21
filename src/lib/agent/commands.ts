@@ -135,6 +135,7 @@ export interface AgentCommands {
   set_setting: [{ key: string; value: string }, null];
   get_trusted_sources: [{}, string[]];
   set_trusted_sources: [{ sources: string[] }, null];
+  refresh_background: [{}, null];
   // Printers
   list_printers: [{}, PrinterRow[]];
   add_printer: [{ req: AddPrinterReq }, PrinterRow];

@@ -27,6 +27,7 @@ import {
   Type,
   Archive,
   Activity,
+  AppWindow,
   Globe,
   Key,
   Shield,
@@ -105,6 +106,11 @@ export function SettingsPage() {
   const [allowedDomains, setAllowedDomains] = useState("");
   const [blockPrivate, setBlockPrivate] = useState(true);
 
+  const [launchAtStartup, setLaunchAtStartup] = useState(false);
+  const [startMinimized, setStartMinimized] = useState(false);
+  const [minimizeToTray, setMinimizeToTray] = useState(false);
+  const [closeToTray, setCloseToTray] = useState(true);
+
   const [trusted, setTrusted] = useState<string[]>([]);
   const [newTrusted, setNewTrusted] = useState("");
 
@@ -164,13 +170,28 @@ export function SettingsPage() {
   // Load persisted settings on mount.
   useEffect(() => {
     (async () => {
-      const [port, lan, days, max, domains, block] = await Promise.all([
+      const [
+        port,
+        lan,
+        days,
+        max,
+        domains,
+        block,
+        startup,
+        minimized,
+        minTray,
+        closeTray,
+      ] = await Promise.all([
         readSetting("api_port"),
         readSetting("api_lan_access"),
         readSetting("retention_days"),
         readSetting("max_records"),
         readSetting("allowed_domains"),
         readSetting("block_private_ips"),
+        readSetting("launch_at_startup"),
+        readSetting("start_minimized"),
+        readSetting("minimize_to_tray"),
+        readSetting("close_to_tray"),
       ]);
       if (port) setApiPort(port);
       if (lan) setLanAccess(lan === "true");
@@ -178,6 +199,14 @@ export function SettingsPage() {
       if (max) setMaxRecords(max);
       if (domains) setAllowedDomains(domains);
       if (block !== null) setBlockPrivate(block === "true");
+      if (startup !== null)
+        setLaunchAtStartup(startup === "true" || startup === "1");
+      if (minimized !== null)
+        setStartMinimized(minimized === "true" || minimized === "1");
+      if (minTray !== null)
+        setMinimizeToTray(minTray === "true" || minTray === "1");
+      if (closeTray !== null)
+        setCloseToTray(closeTray === "true" || closeTray === "1");
 
       try {
         if (isWebMode()) {
@@ -222,6 +251,24 @@ export function SettingsPage() {
     setErr("");
     await writeSetting(key, String(n));
     toast.success("Setting saved");
+  };
+
+  // One behavior for every background toggle: persist the key, ask the
+  // backend to re-apply autostart/tray without a restart, and say so.
+  const setBackgroundPref = async (
+    key: string,
+    value: boolean,
+    set: (v: boolean) => void,
+  ) => {
+    set(value);
+    await writeSetting(key, value ? "1" : "0");
+    try {
+      await agent("refresh_background", {});
+    } catch {
+      // Web preview or an old backend: the stored value still applies
+      // at the next launch.
+    }
+    toast.success("Background setting saved");
   };
 
   const startApi = async () => {
@@ -428,6 +475,13 @@ export function SettingsPage() {
             General
           </TabsTrigger>
           <TabsTrigger
+            value="background"
+            className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
+          >
+            <AppWindow className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Background
+          </TabsTrigger>
+          <TabsTrigger
             value="share"
             className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
           >
@@ -549,6 +603,92 @@ export function SettingsPage() {
                 {fontUploadError && (
                   <p role="alert" className="text-sm text-danger">
                     {fontUploadError}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="background" className="mt-0 space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">
+                  Run in the background
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Keep the print queue alive without a window in the way.
+                  Applies on desktop; on Android the notification controls this
+                  instead.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="launch-at-startup"
+                    data-testid="settings-launch-at-startup"
+                    checked={launchAtStartup}
+                    onCheckedChange={(v) =>
+                      setBackgroundPref(
+                        "launch_at_startup",
+                        v,
+                        setLaunchAtStartup,
+                      )
+                    }
+                  />
+                  <Label htmlFor="launch-at-startup">Launch at startup</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="start-minimized"
+                    data-testid="settings-start-minimized"
+                    checked={startMinimized}
+                    disabled={!launchAtStartup}
+                    onCheckedChange={(v) =>
+                      setBackgroundPref("start_minimized", v, setStartMinimized)
+                    }
+                  />
+                  <Label htmlFor="start-minimized">
+                    Start minimized in the notification area
+                  </Label>
+                </div>
+                {!launchAtStartup && (
+                  <p className="text-xs text-muted-foreground">
+                    Start minimized needs launch at startup.
+                  </p>
+                )}
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="minimize-to-tray"
+                    data-testid="settings-minimize-to-tray"
+                    checked={minimizeToTray}
+                    onCheckedChange={(v) =>
+                      setBackgroundPref(
+                        "minimize_to_tray",
+                        v,
+                        setMinimizeToTray,
+                      )
+                    }
+                  />
+                  <Label htmlFor="minimize-to-tray">
+                    Minimizing sends the app to the notification area
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="close-to-tray"
+                    data-testid="settings-close-to-tray"
+                    checked={closeToTray}
+                    onCheckedChange={(v) =>
+                      setBackgroundPref("close_to_tray", v, setCloseToTray)
+                    }
+                  />
+                  <Label htmlFor="close-to-tray">
+                    Closing keeps the app in the notification area
+                  </Label>
+                </div>
+                {!closeToTray && (
+                  <p className="text-xs text-warning">
+                    Closing will quit the app and stop the print queue.
                   </p>
                 )}
               </CardContent>

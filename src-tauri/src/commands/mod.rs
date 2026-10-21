@@ -1,4 +1,5 @@
 pub mod api;
+pub mod background;
 pub mod batch;
 pub mod cache;
 pub mod datasets;

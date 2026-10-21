@@ -60,6 +60,14 @@ export const testids = {
   settingsLogoUpload: "settings-logo-upload",
   /** Settings local API: port field (device-local, never syncs). */
   settingsApiPort: "settings-api-port",
+  /** Settings background: launch at startup toggle. */
+  settingsLaunchAtStartup: "settings-launch-at-startup",
+  /** Settings background: start minimized toggle. */
+  settingsStartMinimized: "settings-start-minimized",
+  /** Settings background: minimize-to-tray toggle. */
+  settingsMinimizeToTray: "settings-minimize-to-tray",
+  /** Settings background: close-to-tray toggle. */
+  settingsCloseToTray: "settings-close-to-tray",
   /** Settings fonts: upload button. */
   settingsFontUpload: "settings-font-upload",
   /** Settings retention: open the full-reset confirmation. */

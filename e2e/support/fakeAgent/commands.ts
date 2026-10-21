@@ -298,6 +298,7 @@ const acknowledgedStubs: string[] = [
   "get_api_status",
   "regenerate_api_key",
   "parse_deeplink",
+  "refresh_background",
 ];
 
 const commands: Record<string, Handler> = { ...implemented };

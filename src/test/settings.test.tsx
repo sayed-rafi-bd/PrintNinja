@@ -55,6 +55,7 @@ describe("Settings page", () => {
     expect(list).toHaveAttribute("aria-orientation", "vertical");
     for (const n of [
       "General",
+      "Background",
       "Share",
       "API and automation",
       "Data sources",
@@ -114,6 +115,28 @@ describe("Settings page", () => {
     expect(
       await screen.findByRole("button", { name: /Export Diagnostics/ }),
     ).toBeInTheDocument();
+  });
+
+  it("persists background toggles and asks the backend to re-apply them", async () => {
+    renderPage();
+    open("Background");
+    const closeToTray = await screen.findByTestId("settings-close-to-tray");
+    expect(closeToTray).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(closeToTray);
+    await waitFor(() =>
+      expect(localStorage.getItem("printninja-setting:close_to_tray")).toBe(
+        "0",
+      ),
+    );
+    expect(invoke.mock.calls.some((c) => c[0] === "refresh_background")).toBe(
+      true,
+    );
+
+    const startMinimized = screen.getByTestId("settings-start-minimized");
+    expect(startMinimized).toBeDisabled();
+    const launch = screen.getByTestId("settings-launch-at-startup");
+    fireEvent.click(launch);
+    await waitFor(() => expect(startMinimized).not.toBeDisabled());
   });
 });
 

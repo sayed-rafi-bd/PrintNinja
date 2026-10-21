@@ -64,6 +64,8 @@ fn print_request(printer: &str) -> PrintRequest {
         margin_bottom: None,
         margin_left: None,
         fit_mode: None,
+        page_range: None,
+        grayscale: None,
         template_id: None,
         template_version_id: None,
         data: None,

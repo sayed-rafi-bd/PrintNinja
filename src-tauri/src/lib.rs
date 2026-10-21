@@ -30,6 +30,62 @@ fn with_ipc_logging<R: tauri::Runtime>(
     }
 }
 
+/// System-tray icon with Show and Quit. Left-click toggles the main
+/// window. Desktop only: mobile uses the Android notification instead.
+#[cfg(desktop)]
+fn build_tray(app: &tauri::AppHandle) -> AppResult<()> {
+    use tauri::{
+        menu::{Menu, MenuItem},
+        tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+    };
+
+    let show = MenuItem::with_id(app, "show", "Show PrintNinja", true, None::<&str>)
+        .map_err(|e| AppError::Internal(format!("tray menu failed: {e}")))?;
+    let quit = MenuItem::with_id(app, "quit", "Quit PrintNinja", true, None::<&str>)
+        .map_err(|e| AppError::Internal(format!("tray menu failed: {e}")))?;
+    let menu = Menu::with_items(app, &[&show, &quit])
+        .map_err(|e| AppError::Internal(format!("tray menu failed: {e}")))?;
+
+    let mut tray = TrayIconBuilder::new()
+        .menu(&menu)
+        .tooltip("PrintNinja")
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                ..
+            } = event
+            {
+                let app = tray.app_handle();
+                if let Some(window) = app.get_webview_window("main") {
+                    if window.is_visible().unwrap_or(true) {
+                        let _ = window.hide();
+                    } else {
+                        let _ = window.unminimize();
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)
+        .map_err(|e| AppError::Internal(format!("tray build failed: {e}")))?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -39,7 +95,32 @@ pub fn run() {
         )
         .init();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // A second launch (or deeplink) focuses the running window instead of
+    // starting a second queue. Required once close-to-tray keeps the
+    // process alive after the window is gone.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(
+        |app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        },
+    ));
+
+    // Autostart registration itself (Windows Run key, Linux .desktop).
+    // Enabled/disabled from the settings DB, never by install default.
+    // The --minimized arg is honored below by hiding the first window.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_autostart::init(
+        tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+        Some(vec!["--minimized"]),
+    ));
+
+    builder
         .setup(|app| {
             let db_path = app.path().app_data_dir()?.join("printninja.db");
             if let Some(parent) = db_path.parent() {
@@ -81,10 +162,29 @@ pub fn run() {
             #[cfg(windows)]
             render::warm_up_edge(cache_dir.clone());
             worker::spawn(db_state, queue, cache_dir);
+
+            // Sync the OS autostart registration with the settings DB
+            // (opt-in; off on fresh installs) and build the tray icon.
+            #[cfg(desktop)]
+            {
+                let prefs = commands::background::read_prefs(app.handle());
+                let _ = commands::background::apply_autostart(app.handle(), prefs.launch_at_startup);
+                build_tray(app.handle())?;
+
+                // Launched by the OS at login with --minimized, or told
+                // to start minimized: stay in the tray instead of
+                // popping a window.
+                if std::env::args().any(|a| a == "--minimized") || prefs.start_minimized {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.hide();
+                    }
+                }
+            }
             Ok(())
         })
         .invoke_handler(with_ipc_logging(tauri::generate_handler![
             commands::ping,
+            commands::background::refresh_background,
             commands::printer::list_printers,
             commands::printer::add_printer,
             commands::printer::delete_printer,
@@ -174,13 +274,45 @@ pub fn run() {
         ]))
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app, event| {
+        .run(|app, event| {
             // The persistent headless Edge must not outlive the app.
             #[cfg(windows)]
-            if let tauri::RunEvent::Exit = event {
+            if matches!(event, tauri::RunEvent::Exit) {
                 render::shutdown_edge();
             }
-            #[cfg(not(windows))]
-            let _ = event;
+            // Desktop window behavior for tray mode. Close hides instead
+            // of quitting when close_to_tray is on (the default); a
+            // minimize hides when minimize_to_tray is on. There is no
+            // minimized window event, so a focus loss while minimized
+            // stands in for it.
+            #[cfg(desktop)]
+            if let tauri::RunEvent::WindowEvent { label, event, .. } = &event {
+                if label == "main" {
+                    match event {
+                        tauri::WindowEvent::CloseRequested { api, .. } => {
+                            let prefs = commands::background::read_prefs(app);
+                            if prefs.close_to_tray {
+                                api.prevent_close();
+                                if let Some(window) = app.get_webview_window("main") {
+                                    let _ = window.hide();
+                                }
+                            }
+                        }
+                        tauri::WindowEvent::Focused(false) => {
+                            let prefs = commands::background::read_prefs(app);
+                            if prefs.minimize_to_tray {
+                                if let Some(window) = app.get_webview_window("main") {
+                                    if window.is_minimized().unwrap_or(false) {
+                                        let _ = window.hide();
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            #[cfg(not(desktop))]
+            let _ = (app, event);
         });
 }
