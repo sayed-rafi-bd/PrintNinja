@@ -46,6 +46,8 @@ beforeEach(() => {
     error: "",
     copies: 1,
     timings: null,
+    pageRange: "",
+    grayscale: false,
   });
   invoke.mockImplementation(async (cmd: string) => {
     if (cmd === "list_versions")
@@ -145,6 +147,25 @@ describe("Print page", () => {
     expect(
       screen.getByRole("button", { name: "Try again" }),
     ).toBeInTheDocument();
+  });
+
+  it("sends page range and grayscale with the print request", async () => {
+    usePrintStore.setState({ pageRange: "1-3", grayscale: true });
+    renderPage();
+    const print = await screen.findByRole("button", { name: /^Print$/ });
+    await waitFor(() => expect(print).toBeEnabled());
+    fireEvent.click(print);
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "print_html",
+        expect.objectContaining({
+          req: expect.objectContaining({
+            page_range: "1-3",
+            grayscale: true,
+          }),
+        }),
+      ),
+    );
   });
 
   it("shows that the printer is ready before anything is printed", async () => {

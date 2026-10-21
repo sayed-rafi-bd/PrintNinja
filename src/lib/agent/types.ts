@@ -152,6 +152,8 @@ export interface PrintHtmlReq {
   margin_bottom?: number | null;
   margin_left?: number | null;
   fit_mode?: string | null;
+  page_range?: string | null;
+  grayscale?: boolean | null;
   template_id?: number | null;
   template_version_id?: number | null;
   data?: unknown;

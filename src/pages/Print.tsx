@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { agent } from "@/lib/agent/commands";
 import { useTranslation } from "react-i18next";
@@ -69,6 +69,11 @@ export function PrintPage() {
 
   const [previewHtml, setPreviewHtml] = useState<string>("");
   const [previewError, setPreviewError] = useState<string>("");
+  const [previewNotice, setPreviewNotice] = useState<string>("");
+  // Version ids already backfilled with compiled CSS this session, so the
+  // preview effect does not write a "Compiled Tailwind CSS" version on
+  // every render of the same template.
+  const cssBackfilled = useRef<Set<number>>(new Set());
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showBatches, setShowBatches] = useState(false);
 
@@ -104,7 +109,14 @@ export function PrintPage() {
     [templates, store.templateId],
   );
 
-  // The preview follows the selected template, so operators see what will print.
+  // The preview follows the selected template and data source, so
+  // operators see what will print. With test data it renders the bundled
+  // mock; otherwise it fetches the data URL (same GET/POST choice the
+  // pipeline uses) and falls back to the mock with a notice when the
+  // fetch fails.
+  const dataUrl = store.dataUrl;
+  const useTestData = store.useTestData;
+  const httpMethod = store.httpMethod;
   useEffect(() => {
     const template = selectedTemplate;
     if (!template) {
@@ -135,7 +147,8 @@ export function PrintPage() {
         // preview matches the Designer, and save the result so the actual
         // print job (which reads the stored stylesheet) is styled too.
         let compiledCss = latest.compiled_css ?? "";
-        if (!compiledCss.trim()) {
+        if (!compiledCss.trim() && !cssBackfilled.current.has(latest.id)) {
+          cssBackfilled.current.add(latest.id);
           const built = await compileTemplateCss(latest.html);
           compiledCss = built.css;
           if (built.css.trim() && !cancelled) {
@@ -156,16 +169,34 @@ export function PrintPage() {
           }
         }
 
+        let data: unknown = DEFAULT_MOCK_DATA;
+        let notice = "";
+        if (!useTestData && dataUrl.trim()) {
+          try {
+            const res = await fetch(
+              dataUrl.trim(),
+              httpMethod === "POST"
+                ? {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: "{}",
+                  }
+                : undefined,
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            data = await res.json();
+          } catch (e) {
+            notice = `Could not load data from the URL (${e}); showing sample data.`;
+            data = DEFAULT_MOCK_DATA;
+          }
+        }
+
         if (!cancelled) {
           setPreviewHtml(
-            renderTemplate(
-              latest.html,
-              latest.css,
-              DEFAULT_MOCK_DATA as any,
-              compiledCss,
-            ),
+            renderTemplate(latest.html, latest.css, data as any, compiledCss),
           );
           setPreviewError("");
+          setPreviewNotice(notice);
         }
       } catch (e) {
         if (!cancelled) {
@@ -177,7 +208,7 @@ export function PrintPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedTemplate]);
+  }, [selectedTemplate, dataUrl, useTestData, httpMethod]);
 
   const refreshBatches = async () => {
     try {
@@ -378,6 +409,8 @@ export function PrintPage() {
           margin_bottom: store.marginBottom,
           margin_left: store.marginLeft,
           fit_mode: store.fitMode,
+          page_range: store.pageRange.trim() || undefined,
+          grayscale: store.grayscale,
           test: store.useTestData,
           source: store.useTestData ? "test" : "ui",
           data: store.useTestData ? DEFAULT_MOCK_DATA : undefined,
@@ -430,7 +463,13 @@ export function PrintPage() {
     ? "Choose a printer to enable printing."
     : !store.templateId
       ? "Choose a template to enable printing."
-      : "";
+      : store.status === "printing"
+        ? "A print is already running."
+        : store.copies < 1
+          ? "Copies must be at least 1."
+          : loading
+            ? "Loading printers and templates…"
+            : "";
   const field = "space-y-1.5";
 
   return (
@@ -619,12 +658,19 @@ export function PrintPage() {
                   className="w-full"
                   onClick={handlePrint}
                   disabled={!canPrint}
+                  title={blocker || undefined}
+                  aria-describedby={blocker ? "print-blocker" : undefined}
                 >
                   <Printer className="h-5 w-5" aria-hidden="true" />
                   {store.status === "printing" ? "Printing…" : t("print.print")}
                 </Button>
                 {blocker && (
-                  <p className="text-xs text-muted-foreground">{blocker}</p>
+                  <p
+                    id="print-blocker"
+                    className="text-xs text-muted-foreground"
+                  >
+                    {blocker}
+                  </p>
                 )}
               </div>
             </CardContent>
@@ -810,12 +856,17 @@ export function PrintPage() {
                 <CardTitle>Preview</CardTitle>
                 <p className="text-xs text-muted-foreground">
                   {selectedTemplate
-                    ? `${selectedTemplate.name}, ${selectedTemplate.page_w_mm} × ${selectedTemplate.page_h_mm} mm, sample data`
+                    ? `${selectedTemplate.name}, ${selectedTemplate.page_w_mm} × ${selectedTemplate.page_h_mm} mm, ${useTestData || !dataUrl.trim() ? "sample data" : "live data URL"}`
                     : "Choose a template to see a preview."}
                 </p>
               </div>
             </CardHeader>
             <CardContent>
+              {previewNotice && !previewError ? (
+                <p className="mb-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning">
+                  {previewNotice}
+                </p>
+              ) : null}
               {previewError ? (
                 <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning">
                   {previewError}

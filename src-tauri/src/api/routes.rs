@@ -434,6 +434,13 @@ async fn print_job(
             .get("fit")
             .and_then(|f| f.as_str())
             .map(str::to_string),
+        page_range: settings
+            .get("page_range")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        grayscale: settings.get("grayscale").and_then(|v| v.as_bool()),
+        page_range: None,
+        grayscale: None,
         template_id,
         template_version_id: version_id,
         data: req.data.clone(),

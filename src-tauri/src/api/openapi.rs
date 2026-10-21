@@ -94,6 +94,8 @@ impl Default for OpenApiSpec {
                                                 "properties": {
                                                     "copies": { "type": "integer", "minimum": 1, "default": 1 },
                                                     "orientation": { "type": "string", "enum": ["portrait", "landscape"] },
+                                                    "page_range": { "type": "string", "description": "1-based pages, e.g. \"1-3\" or \"1,3,5-7\"; empty means all" },
+                                                    "grayscale": { "type": "boolean", "default": false },
                                                     "fit": { "type": "string", "enum": ["fit-width", "fit-page", "shrink", "fill"] }
                                                 }
                                             }

@@ -32,6 +32,18 @@ pub struct PrintRequest {
     #[serde(default)]
     pub fit_mode: Option<String>,
 
+    /// 1-based page selector, e.g. "1-3", "2,5-7". Empty means all pages.
+    /// Validated syntactically on intake; page slicing happens where the
+    /// transport supports it and the range is always recorded in
+    /// `settings_json` so History shows what was requested.
+    #[serde(default)]
+    pub page_range: Option<String>,
+
+    /// When true, render in grayscale (`filter: grayscale(1)` injected
+    /// with the layout CSS, honoured by the Chromium PDF path).
+    #[serde(default)]
+    pub grayscale: Option<bool>,
+
     /// When set, render this template from the DB instead of raw HTML.
     #[serde(default)]
     pub template_id: Option<i64>,
@@ -249,7 +261,12 @@ pub fn apply_layout(html: &str, css: &str, w_mm: f64, h_mm: f64, req: &PrintRequ
     // otherwise, which looks like "CSS not applied" (shaded headers, table
     // fills, badges vanish). Force them on for every element.
     let color_rule = "*{-webkit-print-color-adjust:exact;print-color-adjust:exact;}";
-    let styles = format!("{cleaned_css}\n{page_rule}\n{fit_rule}\n{color_rule}");
+    let gray_rule = if req.grayscale == Some(true) {
+        "html{filter:grayscale(1) !important;}"
+    } else {
+        ""
+    };
+    let styles = format!("{cleaned_css}\n{page_rule}\n{fit_rule}\n{color_rule}\n{gray_rule}");
 
     if let Some(idx) = html.find("</head>") {
         format!("{}<style>{}</style>{}", &html[..idx], styles, &html[idx..])
@@ -301,6 +318,39 @@ fn strip_at_page(css: &str) -> String {
     out
 }
 
+/// A page range is a comma-separated list of 1-based pages or spans:
+/// "3", "1-5", "1,3,5-7". Empty/blank means all pages.
+pub fn validate_page_range(raw: Option<&str>) -> AppResult<()> {
+    let Some(text) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(());
+    };
+    for part in text.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            return Err(AppError::Validation(format!(
+                "invalid page range {text:?}: empty section"
+            )));
+        }
+        if let Some((lo, hi)) = part.split_once('-') {
+            let (Ok(lo), Ok(hi)) = (lo.trim().parse::<u32>(), hi.trim().parse::<u32>()) else {
+                return Err(AppError::Validation(format!(
+                    "invalid page range {text:?}: expected pages like \"1-3\""
+                )));
+            };
+            if lo < 1 || hi < 1 || lo > hi {
+                return Err(AppError::Validation(format!(
+                    "invalid page range {text:?}: spans must satisfy 1 <= first <= last"
+                )));
+            }
+        } else if part.parse::<u32>().ok().filter(|n| *n >= 1).is_none() {
+            return Err(AppError::Validation(format!(
+                "invalid page range {text:?}: expected pages like \"1-3\""
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Tauri command wrapper around [`run_print`].
 #[tauri::command]
 pub async fn print_html(
@@ -345,6 +395,7 @@ pub async fn run_print_with(
     if req.printer_name.trim().is_empty() {
         return Err(AppError::Validation("Select a printer first".into()));
     }
+    validate_page_range(req.page_range.as_deref())?;
     let copies = req.copies.unwrap_or(1).max(1);
 
     // ── 1. Resolve content ───────────────────────────────────────────
@@ -990,6 +1041,8 @@ fn begin_job(
         "copies": copies,
         "fit": req.fit_mode,
         "orientation": req.orientation,
+        "page_range": req.page_range,
+        "grayscale": req.grayscale.unwrap_or(false),
         "margins": {
             "top": req.margin_top, "right": req.margin_right,
             "bottom": req.margin_bottom, "left": req.margin_left,
@@ -1236,6 +1289,11 @@ fn load_job_request(db: &DbState, job_id: i64) -> AppResult<(PrintRequest, Optio
             .get("fit")
             .and_then(|v| v.as_str())
             .map(String::from),
+        page_range: settings
+            .get("page_range")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        grayscale: settings.get("grayscale").and_then(|v| v.as_bool()),
         template_id,
         template_version_id,
         data,
@@ -1284,6 +1342,8 @@ pub async fn spike_test_print(
         margin_bottom: None,
         margin_left: None,
         fit_mode: None,
+        page_range: None,
+        grayscale: None,
         template_id: None,
         template_version_id: None,
         data: None,
@@ -1313,6 +1373,8 @@ mod tests {
             margin_bottom: Some(7.0),
             margin_left: Some(8.0),
             fit_mode: Some("fit-width".into()),
+            page_range: None,
+            grayscale: None,
             template_id: None,
             template_version_id: None,
             data: None,
@@ -1336,6 +1398,36 @@ mod tests {
         assert!(out.contains("margin: 5mm 6mm 7mm 8mm"), "{}", out);
     }
 
+    #[test]
+    fn layout_injects_grayscale_only_when_enabled() {
+        let out = apply_layout("<head></head>", "", 100.0, 200.0, &req());
+        assert!(!out.contains("grayscale(1)"), "{}", out);
+        let mut r = req();
+        r.grayscale = Some(true);
+        let out = apply_layout("<head></head>", "", 100.0, 200.0, &r);
+        assert!(out.contains("grayscale(1)"), "{}", out);
+    }
+
+    #[test]
+    fn page_range_accepts_pages_and_spans() {
+        for valid in ["", "  ", "3", "1-5", "1,3,5-7", " 2 , 4 - 6 "] {
+            assert!(
+                validate_page_range(Some(valid)).is_ok(),
+                "expected ok for {valid:?}"
+            );
+        }
+        assert!(validate_page_range(None).is_ok());
+    }
+
+    #[test]
+    fn page_range_rejects_garbage() {
+        for invalid in ["0", "1-0", "5-2", "a", "1-", "-3", "1,,2", "1.5", ","] {
+            assert!(
+                validate_page_range(Some(invalid)).is_err(),
+                "expected err for {invalid:?}"
+            );
+        }
+    }
     #[test]
     fn layout_swaps_dimensions_in_landscape() {
         let mut r = req();
