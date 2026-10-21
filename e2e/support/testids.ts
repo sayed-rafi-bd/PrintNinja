@@ -52,6 +52,12 @@ export const testids = {
   templateUnpublish: "template-unpublish",
   /** Designer version panel: list container. */
   versionList: "version-list",
+  /** Designer version row N diff viewer opener. */
+  versionDiff: (versionNo: number) => `version-diff-${versionNo}`,
+  /** Designer version row N restore button. */
+  versionRestore: (versionNo: number) => `version-restore-${versionNo}`,
+  /** Designer version row N delete button. */
+  versionDelete: (versionNo: number) => `version-delete-${versionNo}`,
   /** Save-version dialog: label input. */
   versionLabel: "version-label",
   /** Designer actions: open the save-version dialog. */

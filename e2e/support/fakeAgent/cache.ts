@@ -673,6 +673,53 @@ export function createFakeCache() {
       if (!row || row.sync_state === "deleted_pending") {
         throw new Error(`Template ${templateId} not found`);
       }
+      const html = String(req["html"] ?? "");
+      const css = String(req["css"] ?? "");
+      // Mirrors find_remote_refs in src-tauri/src/render/handlebars.rs:
+      // the same needles, lowercased, and the same error shape, so the
+      // Designer shows the backend's rejection.
+      const lowerHtml = html.toLowerCase();
+      const lowerCss = css.toLowerCase();
+      const issues: string[] = [];
+      for (const needle of [
+        'src="http',
+        "src='http",
+        'href="http',
+        "href='http",
+        'src="//',
+        'href="//',
+      ]) {
+        if (lowerHtml.includes(needle)) {
+          issues.push(
+            `Remote reference in HTML: ${needle.slice(0, 20)} — use data: URIs`,
+          );
+        }
+      }
+      for (const needle of [
+        'url("http',
+        "url('http",
+        "url(http",
+        'url("//',
+        "url('//",
+        "url(//",
+      ]) {
+        if (lowerHtml.includes(needle) || lowerCss.includes(needle)) {
+          issues.push(`Remote url() in CSS/HTML: ${needle} — use data: URIs`);
+        }
+      }
+      if (
+        lowerHtml.includes("@import") &&
+        (lowerHtml.includes("http://") ||
+          lowerHtml.includes("https://") ||
+          lowerHtml.includes("//"))
+      ) {
+        issues.push("@import with remote URL — use data: URIs");
+      }
+      if (issues.length > 0) {
+        throw new Error(
+          `Template contains remote references (${issues.join("; ")}). Use data: URIs instead.`,
+        );
+      }
       const maxNo = row.versions.reduce((m, v) => Math.max(m, v.version_no), 0);
       const version = {
         version_no: maxNo + 1,
