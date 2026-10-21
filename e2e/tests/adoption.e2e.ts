@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { apiMine, apiRegister } from "../support/api";
+import { apiMine, apiPutTemplate, apiRegister } from "../support/api";
 import { pc } from "../support/fixtures";
-import { readStackState } from "../support/stack-state";
 import { testids } from "../support/testids";
 
 // F14 (REFACTORING.md section 11): first sync of a migrated install.
@@ -13,39 +12,8 @@ import { testids } from "../support/testids";
 
 const PASSWORD = "password123";
 
-async function putTemplate(
-  apiUrl: string,
-  token: string,
-  id: string,
-  body: string,
-  ifRevision?: number,
-) {
-  const response = await fetch(`${apiUrl}/v2/templates/${id}`, {
-    method: "PUT",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      name: "Changed",
-      summary: "",
-      page_w_mm: 210,
-      page_h_mm: 297,
-      language: "html",
-      body,
-      css: "",
-      ...(ifRevision === undefined ? {} : { if_revision: ifRevision }),
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`PUT failed: ${response.status} ${await response.text()}`);
-  }
-  return (await response.json()) as { revision: number };
-}
-
 test("F14 first sync of a migrated install", async ({ browser }) => {
   test.setTimeout(240_000);
-  const { apiUrl } = readStackState();
   const auth = await apiRegister(
     `f14-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
     PASSWORD,
@@ -54,7 +22,10 @@ test("F14 first sync of a migrated install", async ({ browser }) => {
   // The server copy of a template this install tracked before the
   // cache existed; the local row carries a conflicting edit.
   const serverId = crypto.randomUUID();
-  await putTemplate(apiUrl, auth.token, serverId, "<p>server copy</p>");
+  await apiPutTemplate(auth.token, serverId, {
+    name: "Changed",
+    body: "<p>server copy</p>",
+  });
 
   const seeded = await pc(browser, {
     settings: { share_session_token: auth.token, install_migrated: "1" },
