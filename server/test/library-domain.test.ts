@@ -288,4 +288,29 @@ describe("account settings", () => {
       putSetting({ settings }, "owner-1", "brand_name", "é".repeat(40_000)),
     ).rejects.toThrow(/cap/i);
   });
+
+  it("reports 201 on create and 200 on overwrite", async () => {
+    const { createFakeAccountRepos } = await import("./fakes/account.js");
+    const { settings } = createFakeAccountRepos();
+    const { putSetting } = await import("../src/domain/settings.js");
+    const created = await putSetting(
+      { settings },
+      "owner-1",
+      "brand_name",
+      "Acme",
+    );
+    expect(created.status).toBe(201);
+    expect(created.view.value).toBe("Acme");
+    // The fake reuses the stored object, so snapshot the revision now.
+    const firstRevision = created.view.revision;
+    const overwritten = await putSetting(
+      { settings },
+      "owner-1",
+      "brand_name",
+      "Acme Co",
+    );
+    expect(overwritten.status).toBe(200);
+    expect(overwritten.view.value).toBe("Acme Co");
+    expect(overwritten.view.revision).toBe(firstRevision + 1);
+  });
 });

@@ -20,6 +20,12 @@ export const ALLOWED_SETTING_KEYS = [
 ] as const;
 export type AllowedSettingKey = (typeof ALLOWED_SETTING_KEYS)[number];
 
+export interface PutSettingResult {
+  view: SettingView;
+  /** 201 when created, 200 when overwritten. */
+  status: 201 | 200;
+}
+
 export function isAllowedSettingKey(key: string): key is AllowedSettingKey {
   return (ALLOWED_SETTING_KEYS as readonly string[]).includes(key);
 }
@@ -29,7 +35,7 @@ export async function putSetting(
   ownerId: string,
   key: string,
   value: string,
-): Promise<SettingView> {
+): Promise<PutSettingResult> {
   if (!isAllowedSettingKey(key)) {
     throw new ValidationError(`Unknown setting '${key}'`, [
       { path: "key", message: "Not an account preference" },
@@ -45,12 +51,17 @@ export async function putSetting(
   }
   const existing = await repos.settings.findByKey(ownerId, key);
   if (!existing) {
-    return repos.settings.create({ ownerId, key, value });
+    const view = await repos.settings.create({ ownerId, key, value });
+    return { view, status: 201 };
   }
   if (existing.ownerId !== ownerId) {
     throw new ForbiddenError();
   }
-  return repos.settings.update({ ownerId, key, value }, existing.revision);
+  const view = await repos.settings.update(
+    { ownerId, key, value },
+    existing.revision,
+  );
+  return { view, status: 200 };
 }
 
 export async function deleteSetting(

@@ -110,16 +110,13 @@ export async function accountRoutes(
       if (!request.authUser) {
         throw new UnauthorizedError();
       }
-      const before = await deps.settings
-        .findByKey(request.authUser.id, request.params.key)
-        .catch(() => null);
-      const view = await putSetting(
+      const { view, status } = await putSetting(
         { settings: deps.settings },
         request.authUser.id,
         request.params.key,
         request.body.value,
       );
-      return reply.status(before ? 200 : 201).send(toSetting(view));
+      return reply.status(status).send(toSetting(view));
     },
   );
 
