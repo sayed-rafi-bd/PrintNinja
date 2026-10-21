@@ -70,7 +70,7 @@ function wrapSelection(
 }
 
 export function ReadmeEditor({ value, onChange, templateName, onReset, scaffoldForName }: ReadmeEditorProps) {
-  const [mobileTab, setMobileTab] = useState<"edit" | "preview">("edit");
+  const [tab, setTab] = useState<"edit" | "preview">("edit");
   const [showResetDialog, setShowResetDialog] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -201,22 +201,18 @@ export function ReadmeEditor({ value, onChange, templateName, onReset, scaffoldF
 
   return (
     <>
-      {/* Mobile: tabbed, Desktop: split */}
-      <div className="lg:hidden">
-        <Tabs value={mobileTab} onValueChange={(v) => setMobileTab(v as typeof mobileTab)}>
+      {/* Edit and preview share one pane: the preview renders on demand
+        instead of live beside the editor. */}
+      <div>
+        <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="edit">Edit</TabsTrigger>
             <TabsTrigger value="preview">Preview</TabsTrigger>
           </TabsList>
           <div className="mt-4">
-            {mobileTab === "edit" ? editor : preview}
+            {tab === "edit" ? editor : preview}
           </div>
         </Tabs>
-      </div>
-
-      <div className="hidden lg:grid lg:grid-cols-2 gap-4">
-        <div>{editor}</div>
-        <div>{preview}</div>
       </div>
 
       <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>
