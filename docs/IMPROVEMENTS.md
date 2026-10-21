@@ -9,8 +9,10 @@
 > shared ETag matcher, restore nullish bodies, profile error details in
 > wire names, sync hasMore per-stream + batched head versions,
 > paged saved manifest under savedRoutes, daily use-count cap per
-> user and template (429 past 1000), unpublish normalized to 200 with
-> the template. Everything below that is still open.
+> user and template (429 past 1000), unpublish normalized to 200,
+> desktop tray + autostart + single-instance + Background settings
+> (slice A; toolchain-verified). Still open: Android foreground
+> service, Linux CI/packaging, Linux print pipeline, E2E specs.
 
 Audited from the working tree (develop). Each item names the file that proves it.
 Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt with user impact, **P2** = hardening/polish.
