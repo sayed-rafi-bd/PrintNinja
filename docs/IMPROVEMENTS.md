@@ -1,9 +1,11 @@
 # Improvements & E2E testing backlog
 
-> Status (feat/improvements-backlog): slices 1–3 are implemented —
+> Status (feat/improvements-backlog): slices 1–5 are implemented —
 > print page_range/grayscale end-to-end, server body limits + /v2/ready,
-> auth timing-oracle fix + session cap + Argon2 clamps. Everything below
-> that is not marked implemented is still open.
+> auth timing-oracle fix + session cap + Argon2 clamps, domain byte caps
+> + version label/note limits + dataset depth guard, tombstone→user
+> cascade (migration `20261021121340_tombstone_user_fk`). Everything
+> below that is not marked implemented is still open.
 
 Audited from the working tree (develop). Each item names the file that proves it.
 Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt with user impact, **P2** = hardening/polish.

@@ -27,6 +27,7 @@ model User {
   settings     UserSetting[]
   fonts        Font[]
   sync         UserSync?
+  tombstones   Tombstone[]
 
   @@map("users")
 }
@@ -60,6 +61,7 @@ model Tombstone {
   entity    String // template | dataset | profile | setting | font
   entityKey String   @map("entity_key") // the UUID, or the setting key
   deletedAt DateTime @default(now()) @map("deleted_at") @db.Timestamptz
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, seq])
   @@index([userId, deletedAt])
