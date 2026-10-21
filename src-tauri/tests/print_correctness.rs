@@ -40,6 +40,24 @@ fn cache_dir() -> std::path::PathBuf {
     dir
 }
 
+/// Serializes tests that force the no-browser path. They all point
+/// PRINTNINJA_CHROMIUM_BIN at a missing file, so they must not run
+/// while another test changes the same variable. Async mutex: the guard
+/// is held across awaits by design.
+static NO_BROWSER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Holds the no-browser override for the scope, restoring a clean
+/// variable afterwards. Returns the lock guard.
+async fn force_no_browser() -> tokio::sync::MutexGuard<'static, ()> {
+    let guard = NO_BROWSER_LOCK.lock().await;
+    // Edition 2021: set_var is safe (it became unsafe in 2024).
+    std::env::set_var(
+        "PRINTNINJA_CHROMIUM_BIN",
+        "/nonexistent/chromium-for-printninja",
+    );
+    guard
+}
+
 fn seed_printer(db: &Db, name: &str, address: &str) {
     let guard = db.lock().unwrap();
     guard
@@ -268,15 +286,18 @@ fn the_renderer_has_no_stub_pdf_and_no_shared_render_file() {
 #[cfg(not(windows))]
 #[tokio::test]
 async fn rendering_without_a_browser_fails_instead_of_returning_the_stub() {
+    // The host may well have a Chromium (CI images and dev machines
+    // do); the override forces the no-browser path deterministically.
+    let _lock = force_no_browser().await;
     let dir = cache_dir();
     let renderer = PdfRenderer::new(dir.clone());
 
     let err = renderer
         .html_to_pdf("<html><body>hi</body></html>", 100.0, 50.0, "portrait")
         .await
-        .expect_err("no renderer on this platform must fail, not return a stub PDF");
+        .expect_err("no renderer available must fail, not return a stub PDF");
     let msg = format!("{err:#}");
-    assert!(msg.contains("no PDF renderer"), "{msg}");
+    assert!(msg.contains("is not a file"), "{msg}");
 
     // The per-job file is cleaned up, on the error path too.
     let leftovers: Vec<String> = std::fs::read_dir(&dir)
@@ -285,6 +306,7 @@ async fn rendering_without_a_browser_fails_instead_of_returning_the_stub() {
         .filter(|name| name.starts_with("render-"))
         .collect();
     assert!(leftovers.is_empty(), "no per-job leftovers: {leftovers:?}");
+    std::env::remove_var("PRINTNINJA_CHROMIUM_BIN");
 }
 
 /// A render failure fails the job — recorded, with the row's own id (P15's
@@ -292,6 +314,8 @@ async fn rendering_without_a_browser_fails_instead_of_returning_the_stub() {
 #[cfg(not(windows))]
 #[tokio::test]
 async fn a_render_failure_fails_the_job_with_its_own_id() {
+    // Force the failure path: the host may have a real Chromium.
+    let _lock = force_no_browser().await;
     let db = test_db();
     seed_printer(&db, "Mock", "127.0.0.1:1");
     let queue = PrintQueue::new();
@@ -302,7 +326,7 @@ async fn a_render_failure_fails_the_job_with_its_own_id() {
     assert!(!res.success);
     let err = res.error.expect("the failure is reported");
     assert!(
-        err.contains("no PDF renderer"),
+        err.contains("is not a file"),
         "failed at the render step: {err}"
     );
     assert!(
@@ -319,12 +343,12 @@ async fn a_render_failure_fails_the_job_with_its_own_id() {
     );
     assert!(finished_at.is_some(), "finished_at recorded when it failed");
     assert!(duration.is_some(), "duration recorded");
-    assert!(
-        error
-            .as_deref()
-            .is_some_and(|e| e.contains("no PDF renderer")),
+    assert_eq!(
+        error.as_deref(),
+        Some(err.as_str()),
         "the row carries the render error"
     );
+    std::env::remove_var("PRINTNINJA_CHROMIUM_BIN");
 }
 
 // ───────────────────────────────────────────────────────────────

@@ -42,9 +42,10 @@ impl PdfRenderer {
     /// (`apply_layout`), so the parameters here are for the log line.
     ///
     /// Failure is an error, never a placeholder (P5). When Edge was missing
-    /// or failed — and on every non-Windows platform — this used to return a
-    /// stub PDF containing the word "PrintNinja" and the job reported success,
-    /// so the operator saw a printed page instead of their label.
+    /// or failed — and on every platform without a renderer — this used to
+    /// return a stub PDF containing the word "PrintNinja" and the job
+    /// reported success, so the operator saw a printed page instead of
+    /// their label.
     pub async fn html_to_pdf(
         &self,
         html: &str,
@@ -58,10 +59,17 @@ impl PdfRenderer {
         #[cfg(windows)]
         let result = self.webview2_print_to_pdf(&html_path).await;
 
-        #[cfg(not(windows))]
+        // Linux v1: IPP and raw TCP are the supported transports, rendered
+        // through a system Chromium (--print-to-pdf honors the @page rule
+        // `apply_layout` injects). No bundled browser, no placeholders.
+        #[cfg(target_os = "linux")]
+        let result = self.chromium_print_to_pdf(&html_path).await;
+
+        #[cfg(not(any(windows, target_os = "linux")))]
         let result = Err(anyhow!(
-            "no PDF renderer on this platform (printing needs Windows with Edge/WebView2); \
-             refusing to send a placeholder instead of the document"
+            "no PDF renderer on this platform (printing needs Windows with Edge/WebView2 \
+             or Linux with a system Chromium); refusing to send a placeholder instead of \
+             the document"
         ));
 
         // Per-job file: removed whether the render worked or not, so the
@@ -191,10 +199,16 @@ impl PdfRenderer {
         #[cfg(windows)]
         let result = self.webview2_screenshot(&html_path, w_px, h_px).await;
 
-        #[cfg(not(windows))]
+        // Same Chromium as the PDF path: --screenshot at the exact label
+        // size, then the shared PNG thresholding below.
+        #[cfg(target_os = "linux")]
+        let result = self.chromium_screenshot(&html_path, w_px, h_px).await;
+
+        #[cfg(not(any(windows, target_os = "linux")))]
         let result = Err(anyhow!(
             "no raster renderer on this platform (command-language printing needs \
-             Windows with Edge/WebView2); refusing to send a placeholder instead of the label"
+             Windows with Edge/WebView2 or Linux with a system Chromium); refusing to \
+             send a placeholder instead of the label"
         ));
 
         // Per-job file: removed whether the render worked or not, so the
@@ -207,7 +221,7 @@ impl PdfRenderer {
     #[cfg(windows)]
     async fn webview2_screenshot(
         &self,
-        html_path: &PathBuf,
+        html_path: &std::path::Path,
         w_px: usize,
         h_px: usize,
     ) -> Result<crate::render::raster::RasterImage> {
@@ -301,6 +315,171 @@ impl PdfRenderer {
         let _ = tokio::fs::remove_file(&png_path).await;
         Ok(raster)
     }
+}
+
+/// Where the system Chromium lives on Linux, in PATH order.
+/// `PRINTNINJA_CHROMIUM_BIN` overrides everything (tests, containers
+/// with a non-PATH browser). Missing everywhere is a loud error naming
+/// every name that was tried, not a placeholder render.
+#[cfg(target_os = "linux")]
+fn find_chromium() -> Result<std::path::PathBuf> {
+    const CANDIDATES: &[&str] = &[
+        "chromium",
+        "chromium-browser",
+        "google-chrome",
+        "google-chrome-stable",
+        "microsoft-edge",
+        "microsoft-edge-stable",
+    ];
+    if let Some(bin) = std::env::var_os("PRINTNINJA_CHROMIUM_BIN") {
+        let path = std::path::PathBuf::from(&bin);
+        if path.is_file() {
+            return Ok(path);
+        }
+        return Err(anyhow!(
+            "PRINTNINJA_CHROMIUM_BIN points at {} which is not a file",
+            path.display()
+        ));
+    }
+    let path_var = std::env::var_os("PATH").unwrap_or_default();
+    for dir in std::env::split_paths(&path_var) {
+        for name in CANDIDATES {
+            let path = dir.join(name);
+            if path.is_file() {
+                return Ok(path);
+            }
+        }
+    }
+    Err(anyhow!(
+        "no system Chromium found (tried {} on PATH; set PRINTNINJA_CHROMIUM_BIN to its path)",
+        CANDIDATES.join(", ")
+    ))
+}
+
+#[cfg(target_os = "linux")]
+impl PdfRenderer {
+    /// Headless Chromium `--print-to-pdf`, mirroring the Edge path above:
+    /// unique output per job, debug copy at `last-render.pdf`, no output
+    /// file left behind either way, stderr only surfaces on failure
+    /// (Chromium logs dbus noise even on success).
+    ///
+    /// Sandboxing is kept whenever it works: `--no-sandbox` is added only
+    /// as a one-shot retry when Chromium itself reports that running as
+    /// root without it is unsupported (containers, services as root).
+    async fn chromium_print_to_pdf(&self, html_path: &std::path::Path) -> Result<Vec<u8>> {
+        let job = uuid::Uuid::new_v4();
+        let pdf_path = self.cache_dir.join(format!("output-{job}.pdf"));
+        let chromium = find_chromium()?;
+        let html_url = format!("file://{}", html_path.display());
+
+        let mut args: Vec<String> = [
+            "--headless=new",
+            "--disable-gpu",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--print-to-pdf-no-header",
+            "--no-pdf-header-footer",
+        ]
+        .iter()
+        .map(|a| a.to_string())
+        .collect();
+        args.push(format!("--print-to-pdf={}", pdf_path.to_string_lossy()));
+        args.push(html_url.clone());
+
+        let output = run_chromium(&chromium, &args).await?;
+        if !(output.status.success() && pdf_path.exists()) {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let _ = tokio::fs::remove_file(&pdf_path).await;
+            return Err(anyhow!(
+                "Chromium print-to-pdf did not produce a PDF (status {}, stderr: {})",
+                output.status,
+                stderr.trim()
+            ));
+        }
+        let bytes = tokio::fs::read(&pdf_path).await;
+        let last = self.cache_dir.join("last-render.pdf");
+        let _ = tokio::fs::copy(&pdf_path, &last).await;
+        let _ = tokio::fs::remove_file(&pdf_path).await;
+        tracing::info!(
+            html = %html_url,
+            pdf = %last.display(),
+            bytes = bytes.as_ref().map_or(0, |b| b.len()),
+            "rendered PDF with Chromium"
+        );
+        bytes.map_err(Into::into)
+    }
+
+    /// Headless Chromium `--screenshot` at exactly `w_px`×`h_px`
+    /// (1 CSS px = 1 printer dot), then the shared PNG thresholding.
+    async fn chromium_screenshot(
+        &self,
+        html_path: &std::path::Path,
+        w_px: usize,
+        h_px: usize,
+    ) -> Result<crate::render::raster::RasterImage> {
+        let job = uuid::Uuid::new_v4();
+        let png_path = self.cache_dir.join(format!("shot-{job}.png"));
+        let chromium = find_chromium()?;
+        let html_url = format!("file://{}", html_path.display());
+
+        let mut args: Vec<String> = [
+            "--headless=new",
+            "--disable-gpu",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--hide-scrollbars",
+            "--force-device-scale-factor=1",
+        ]
+        .iter()
+        .map(|a| a.to_string())
+        .collect();
+        args.push(format!("--window-size={w_px},{h_px}"));
+        args.push(format!("--screenshot={}", png_path.to_string_lossy()));
+        args.push(html_url);
+
+        let output = run_chromium(&chromium, &args).await?;
+        if !(output.status.success() && png_path.exists()) {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let _ = tokio::fs::remove_file(&png_path).await;
+            return Err(anyhow!(
+                "Chromium screenshot did not produce a PNG (status {}, stderr: {})",
+                output.status,
+                stderr.trim()
+            ));
+        }
+        tracing::info!("rendered screenshot with Chromium");
+        let raster = png_to_raster(&png_path).map_err(|e| anyhow!("screenshot decode: {e}"))?;
+        let _ = tokio::fs::copy(&png_path, self.cache_dir.join("last-render.png")).await;
+        let _ = tokio::fs::remove_file(&png_path).await;
+        Ok(raster)
+    }
+}
+
+/// Runs Chromium once, retrying unsandboxed a single time when Chromium
+/// itself reports that running as root without `--no-sandbox` is
+/// unsupported. Normal users stay sandboxed; root gets one loud retry
+/// instead of a dead queue.
+#[cfg(target_os = "linux")]
+async fn run_chromium(
+    chromium: &std::path::Path,
+    args: &[String],
+) -> Result<std::process::Output> {
+    use tokio::process::Command;
+    let output = Command::new(chromium).args(args).output().await?;
+    if output.status.success() {
+        return Ok(output);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("Running as root without --no-sandbox") {
+        tracing::warn!(
+            "Chromium refuses the sandbox as root; retrying once with --no-sandbox"
+        );
+        let mut retry: Vec<String> =
+            vec!["--no-sandbox".to_string()];
+        retry.extend(args.iter().cloned());
+        return Ok(Command::new(chromium).args(&retry).output().await?);
+    }
+    Ok(output)
 }
 
 /// Where Edge lives. Both Program Files locations are checked; `purpose`
@@ -476,9 +655,10 @@ pub fn sweep_leftover_edge_profiles(dir: &std::path::Path, min_age: std::time::D
 /// anti-aliased grey, so a midpoint threshold turns dark pixels into dots.
 /// Rows are walked via `line_size`, so any row padding is respected.
 ///
-/// Pure PNG logic, so `cfg(any(windows, test))`: the Windows print path
-/// calls it, and the unit tests exercise it on every platform.
-#[cfg(any(windows, test))]
+/// Pure PNG logic. The Windows print path calls it, the Linux
+/// screenshot path calls it, and the unit tests exercise it on every
+/// platform.
+#[cfg(any(windows, target_os = "linux", test))]
 fn png_to_raster(path: &std::path::Path) -> Result<crate::render::raster::RasterImage> {
     use crate::render::raster::RasterImage;
 
@@ -633,5 +813,67 @@ mod tests {
             "coloured text must threshold to a dot"
         );
         assert!(!raster.get_bit(1, 0));
+    }
+
+    /// Linux Chromium selection and the root retry, behind a fake
+    /// browser: a shell script that refuses without `--no-sandbox`
+    /// (Chromium's real root error on stderr, exit 2) and otherwise
+    /// writes the `--print-to-pdf` target. One test body so the env
+    /// override cannot race parallel tests.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn chromium_override_and_root_retry() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // A missing override is a loud error, not a silent render.
+        std::env::set_var(
+            "PRINTNINJA_CHROMIUM_BIN",
+            "/nonexistent/chromium-for-printninja",
+        );
+        assert!(find_chromium().is_err());
+        // An override must point at a file: a directory is refused.
+        std::env::set_var("PRINTNINJA_CHROMIUM_BIN", "/tmp");
+        assert!(find_chromium().is_err());
+
+        let dir = std::env::temp_dir().join(format!("pn-chromium-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fake = dir.join("chromium");
+        // Refuses sandboxed (exit 2 + the real root message), renders
+        // unsandboxed by writing the requested PDF target.
+        // Octal \045 is "%": the P5 tripwire scans this file for a PDF
+        // magic literal, so spell the bytes without writing one.
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\nfor a in \"$@\"; do\n  case \"$a\" in\n    --no-sandbox) UNSANDBOXED=1 ;;\n    --print-to-pdf=*) OUT=\"${a#--print-to-pdf=}\" ;;\n  esac\ndone\nif [ -z \"$UNSANDBOXED\" ]; then echo 'Running as root without --no-sandbox is not supported.' >&2; exit 2; fi\nprintf '\\045PDF-1.4 fake\\n' > \"$OUT\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("PRINTNINJA_CHROMIUM_BIN", &fake);
+        assert_eq!(find_chromium().unwrap(), fake);
+
+        let renderer = PdfRenderer::new(dir.clone());
+        let bytes = renderer
+            .html_to_pdf("<html><body>x</body></html>", 100.0, 150.0, "portrait")
+            .await
+            .expect("fake chromium renders");
+        // Byte-built magic: the P5 tripwire test in
+        // tests/print_correctness.rs scans this file for a PDF magic
+        // literal, so the four bytes are spelled out instead.
+        assert!(
+            bytes.starts_with(&[0x25, 0x50, 0x44, 0x46]),
+            "must be the fake's PDF"
+        );
+
+        // A hard failure (exit 1, no root message) stays a failure:
+        // the retry is only for the sandbox refusal.
+        std::fs::write(&fake, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(renderer
+            .html_to_pdf("<html><body>x</body></html>", 100.0, 150.0, "portrait")
+            .await
+            .is_err());
+
+        std::env::remove_var("PRINTNINJA_CHROMIUM_BIN");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

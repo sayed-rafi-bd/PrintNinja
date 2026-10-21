@@ -87,3 +87,29 @@ that holds `last-render.pdf`:
 | ZPL/TSPL model, connection | |
 | Network/system printer | |
 | Pass / failures (issue links) | |
+
+## Appendix L. Linux (deb + AppImage, §5 of IMPROVEMENTS.md)
+
+Run on a clean Debian/Ubuntu machine (VM is fine) before publishing.
+Linux v1 serves **IPP + raw TCP** printers rendered by a **system
+Chromium**; USB and the system spooler stay Windows-only and must fail
+with the platform message, never silently.
+
+- [ ] `.deb` installs (`dpkg -i`); the app opens from the launcher icon
+- [ ] `dpkg -s print-ninja` shows the `libayatana-appindicator3`
+      dependency; tray icon appears (KDE: always; stock GNOME: only
+      with an AppIndicator extension — record which shell was tested)
+- [ ] Tray menu: Show focuses the window, left-click toggles, Quit exits
+- [ ] Close hides to the tray; minimize hides when enabled; Quit from the
+      tray ends the process (no orphan `printninja`)
+- [ ] Fresh install does **not** autostart; enabling it writes
+      `~/.config/autostart/` and the next login opens minimized when set
+- [ ] An IPP printer prints a PDF job; `@page` size matches the template
+      (measure the label, not the screen)
+- [ ] With no Chromium installed, a print fails loudly naming the missing
+      browser (`PRINTNINJA_CHROMIUM_BIN` documented); installing
+      `chromium` makes the same job print
+- [ ] A raw TCP printer prints; a switched-off printer ends `failed`
+      with the reason, never `success`
+- [ ] USB/system printer setup is refused with the platform message
+- [ ] AppImage runs from a download folder with no install (`chmod +x`)
