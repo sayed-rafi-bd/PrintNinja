@@ -65,7 +65,11 @@ cache dir — `%LOCALAPPDATA%\com.printninja.desktop` on Windows, the folder
 that holds `last-render.pdf`:
 
 - [ ] No `edge-profile-*` directories remain
-- [ ] No `.pem` or other certificate file appears next to `last-render.*`
+- [ ] At most one Edge profile remains: `edge-warm-profile`, the reusable one
+      that prints run on (`src-tauri/src/render/edge.rs`). Edge's own files,
+      certificate and trust material included, live inside it and stay there
+- [ ] No `.pem` or other certificate file appears **next to** `last-render.*`
+      (directly in the cache dir, outside `edge-warm-profile`)
 
 ## Result
 

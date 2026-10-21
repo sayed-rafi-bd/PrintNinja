@@ -493,6 +493,11 @@ fn resolve_content(db: &DbState, req: &PrintRequest) -> AppResult<ResolvedConten
     })
 }
 
+/// Whole milliseconds since `since`, for the per-stage timing log.
+fn ms(since: Instant) -> u64 {
+    since.elapsed().as_millis() as u64
+}
+
 /// Everything after the job row exists: fetch, template render, layout,
 /// PDF, the per-printer permit, the send and the history write.
 async fn run_stages(
@@ -519,6 +524,7 @@ async fn run_stages(
     let copies = req.copies.unwrap_or(1).max(1);
 
     // Fetch live data when a URL is supplied and test mode is off.
+    let t_fetch = Instant::now();
     let mut fetched: Option<serde_json::Value> = req.data.clone();
     if !req.test.unwrap_or(false) {
         if let Some(url) = &req.data_url {
@@ -552,7 +558,10 @@ async fn run_stages(
         }
     }
 
+    let fetch_ms = ms(t_fetch);
+
     // ── 2. Template render ──────────────────────────────────────────
+    let t_template = Instant::now();
     // P14: always run the engine — with the job's data, or an empty context
     // when it has none, exactly like the preview (handlebars.js). It used to
     // be skipped without data and to swallow errors with `unwrap_or(html)`,
@@ -585,8 +594,12 @@ async fn run_stages(
         };
     }
 
+    let template_ms = ms(t_template);
+
     // ── 3. Layout ───────────────────────────────────────────────────
+    let t_layout = Instant::now();
     let final_html = apply_layout(&html, &css, w_mm, h_mm, &req);
+    let layout_ms = ms(t_layout);
 
     // ── 4. Render ────────────────────────────────────────────────────
     // What the printer takes is a property of its stored row: a PDF printer
@@ -612,6 +625,7 @@ async fn run_stages(
         .unwrap_or(203)
         .clamp(1, 1200) as u32;
 
+    let t_render = Instant::now();
     let rendered: anyhow::Result<(Vec<u8>, &'static str)> = match language {
         crate::transport::PrinterLanguage::Pdf => renderer
             .render(
@@ -638,10 +652,21 @@ async fn run_stages(
                 })
         }
     };
+    let render_ms = ms(t_render);
     let (payload, mime_type) = match rendered {
         Ok(v) => v,
         Err(e) => {
             let msg = e.to_string();
+            tracing::warn!(
+                job_id,
+                printer = %req.printer_name,
+                fetch_ms,
+                template_ms,
+                layout_ms,
+                render_ms,
+                total_ms = ms(start),
+                "print render failed"
+            );
             finish_job(
                 db,
                 job_id,
@@ -681,6 +706,7 @@ async fn run_stages(
     // same physical printer must never overlap, or their bytes interleave
     // and the label comes out garbled. Jobs for *different* printers are
     // unaffected — the semaphore is keyed per printer id.
+    let t_send = Instant::now();
     let result = queue
         .with_permit(&req.printer_name, async {
             // `copies` used to be ignored entirely: exactly one copy reached
@@ -710,6 +736,8 @@ async fn run_stages(
             Ok(())
         })
         .await;
+    // Includes any wait for this printer's turn, not just the transport.
+    let send_ms = ms(t_send);
 
     let duration = start.elapsed().as_millis();
     let (status, err) = match result {
@@ -721,6 +749,7 @@ async fn run_stages(
     };
 
     // ── 6. History ──────────────────────────────────────────────────
+    let t_history = Instant::now();
     finish_job(
         db,
         job_id,
@@ -730,6 +759,26 @@ async fn run_stages(
         &req,
         duration as i64,
     )?;
+    let history_ms = ms(t_history);
+
+    // One line per job with where the time went, so a slow print can be
+    // read off the log instead of guessed at. `render_ms` is the Edge render
+    // (the `rendered PDF with Edge` line next to it splits it further);
+    // `send_ms` is the hand-off to the printer, queue wait included.
+    tracing::info!(
+        job_id,
+        printer = %req.printer_name,
+        status,
+        copies,
+        fetch_ms,
+        template_ms,
+        layout_ms,
+        render_ms,
+        send_ms,
+        history_ms,
+        total_ms = ms(start),
+        "print job timing"
+    );
 
     Ok(PrintResponse {
         success: status == "success",
