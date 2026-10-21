@@ -46,7 +46,10 @@ async function putTemplate(
 test("F14 first sync of a migrated install", async ({ browser }) => {
   test.setTimeout(240_000);
   const { apiUrl } = readStackState();
-  const auth = await apiRegister(`f14-${Date.now().toString(36)}`, PASSWORD);
+  const auth = await apiRegister(
+    `f14-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    PASSWORD,
+  );
 
   // The server copy of a template this install tracked before the
   // cache existed; the local row carries a conflicting edit.

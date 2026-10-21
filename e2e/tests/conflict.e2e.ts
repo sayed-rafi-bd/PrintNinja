@@ -100,7 +100,7 @@ async function setupConflict(
   test.setTimeout(150_000);
   const { apiUrl } = readStackState();
   const auth = await apiRegister(
-    `${stem}-${Date.now().toString(36)}`,
+    `${stem}-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
     PASSWORD,
   );
   const pcA = await pc(browser, {

@@ -56,7 +56,7 @@ async function localPrinterId(page: Page, name: string): Promise<number> {
 
 /** A PC with a pushed template: A creates, reloads, the engine pushes. */
 async function pcWithTemplate(browser: Browser, stem: string) {
-  const handle = `${stem}-${Date.now().toString(36)}`;
+  const handle = `${stem}-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const auth = await apiRegister(handle, "password123");
   const pcA = await pc(browser, {
     settings: { share_session_token: auth.token },

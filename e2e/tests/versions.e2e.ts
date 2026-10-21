@@ -11,7 +11,7 @@ import { testids } from "../support/testids";
 test("F8 version history on the server", async ({ browser }) => {
   test.setTimeout(300_000);
   const auth = await apiRegister(
-    `f8-${Date.now().toString(36)}`,
+    `f8-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
     "password123",
   );
   const pcA = await pc(browser, {

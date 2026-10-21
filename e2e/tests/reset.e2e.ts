@@ -14,7 +14,7 @@ test("reset wipes the PC, keeps the server copy, and re-pulls on sign-in", async
   browser,
 }) => {
   test.setTimeout(180_000);
-  const handle = `reset-${Date.now().toString(36)}`;
+  const handle = `reset-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const password = "password123";
   const auth = await apiRegister(handle, password);
 

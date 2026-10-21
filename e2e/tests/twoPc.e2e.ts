@@ -37,7 +37,7 @@ async function createTemplate(
 
 test("F3 create on PC A appears on PC B", async ({ browser }) => {
   test.setTimeout(90_000);
-  const handle = `f3-${Date.now().toString(36)}`;
+  const handle = `f3-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const password = "password123";
   const auth = await apiRegister(handle, password);
 
@@ -117,7 +117,7 @@ async function setupSharedTemplate(
 }> {
   const { apiRegister } = await import("../support/api");
   const { pc } = await import("../support/fixtures");
-  const handle = `${stem}-${Date.now().toString(36)}`;
+  const handle = `${stem}-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const password = "password123";
   const auth = await apiRegister(handle, password);
   const pcA = await pc(browser, {
