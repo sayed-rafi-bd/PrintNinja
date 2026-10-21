@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import {
+  listManifest,
   listSaved,
   saveTemplate,
   unsaveTemplate,
@@ -12,9 +13,10 @@ import type {
   SavedRepository,
   TemplateRepository,
 } from "../../domain/templatePorts.js";
-import { toTemplateSummary } from "../mappers.js";
+import { toManifestItem, toTemplateSummary } from "../mappers.js";
 import { requireAuth } from "../plugins/auth.js";
 import { errorBody } from "../schemas/error.js";
+import { manifestResponse } from "../schemas/sync.js";
 import {
   pageQuery,
   templateIdParams,
@@ -117,6 +119,37 @@ export async function savedRoutes(
         request.params.id,
       );
       return reply.status(204).send(null);
+    },
+  );
+
+  typed.get(
+    "/v2/saved/manifest",
+    {
+      preHandler: [requireAuth(deps)],
+      schema: {
+        description:
+          "Revision and state of saved templates, including withdrawn and deleted. Paged like every other list.",
+        querystring: pageQuery,
+        response: {
+          200: manifestResponse,
+          400: errorBody,
+          401: errorBody,
+        },
+      },
+    },
+    async (request) => {
+      if (!request.authUser) {
+        throw new UnauthorizedError();
+      }
+      const page = await listManifest(
+        { saved: deps.saved },
+        request.authUser.id,
+        {
+          page: request.query.page,
+          pageSize: request.query.page_size,
+        },
+      );
+      return { ...page, items: page.items.map(toManifestItem) };
     },
   );
 }
