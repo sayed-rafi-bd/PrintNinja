@@ -260,7 +260,7 @@ describe("ControlsAccordion", () => {
     handleDeleteVersion: vi.fn(),
   });
 
-  const ALL_OPEN = ["templates", "page", "sample-data", "versions", "helpers"];
+  const ALL_OPEN = ["templates", "page", "versions", "helpers"];
 
   it("opens only Page Setup at first, and opens and closes sections on click", () => {
     render(<ControlsAccordion {...props()} />);
@@ -299,19 +299,8 @@ describe("ControlsAccordion", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows the sample data and helpers sections when given them", () => {
-    render(
-      <ControlsAccordion
-        {...props()}
-        defaultOpen={ALL_OPEN}
-        sampleData={<p>datasets here</p>}
-      />,
-    );
-    expect(screen.getByRole("button", { name: "Sample data" })).toHaveAttribute(
-      "aria-expanded",
-      "true",
-    );
-    expect(screen.getByText("datasets here")).toBeInTheDocument();
+  it("shows the helpers section when asked", () => {
+    render(<ControlsAccordion {...props()} defaultOpen={ALL_OPEN} />);
     expect(screen.getByText("Available helpers:")).toBeInTheDocument();
   });
 
@@ -360,20 +349,13 @@ describe("ControlsAccordion", () => {
   });
 
   it("renders each section header as an h2, so heading order stays under the page h1", () => {
-    render(
-      <ControlsAccordion
-        {...props()}
-        defaultOpen={ALL_OPEN}
-        sampleData={<p>x</p>}
-      />,
-    );
+    render(<ControlsAccordion {...props()} defaultOpen={ALL_OPEN} />);
     const headings = screen
       .getAllByRole("heading", { level: 2 })
       .map((h) => h.textContent);
     expect(headings).toEqual([
       "Templates",
       "Page Setup",
-      "Sample data",
       "Versions",
       "Helpers",
     ]);
@@ -386,13 +368,7 @@ describe("ControlsAccordion", () => {
   });
 
   it("has no Properties, Visual or Preview section, since those were removed", () => {
-    render(
-      <ControlsAccordion
-        {...props()}
-        defaultOpen={ALL_OPEN}
-        sampleData={<p>x</p>}
-      />,
-    );
+    render(<ControlsAccordion {...props()} defaultOpen={ALL_OPEN} />);
     for (const name of [
       "Properties",
       "Visual",
@@ -696,12 +672,32 @@ describe("EditorPane", () => {
     expect(p.onSaveReadme).toHaveBeenCalled();
   });
 
-  it("shows notices under the HTML and CSS tabs, but not the README", () => {
-    render(<EditorPane {...props()} notices={<p>watch out</p>} />);
+  it("shows a Sample data tab after README when given sample content", () => {
+    render(<EditorPane {...props()} samplePanel={<p>datasets here</p>} />);
+    const names = screen.getAllByRole("tab").map((t) => t.textContent);
+    expect(names).toEqual(["HTML", "CSS", "README", "Sample data"]);
+    openTab("Sample data");
+    expect(screen.getByRole("tab", { name: "Sample data" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByText("datasets here")).toBeVisible();
+  });
+
+  it("shows notices under the HTML and CSS tabs, but not README or Sample data", () => {
+    render(
+      <EditorPane
+        {...props()}
+        notices={<p>watch out</p>}
+        samplePanel={<p>datasets here</p>}
+      />,
+    );
     expect(screen.getByText("watch out")).toBeInTheDocument();
     openTab("CSS");
     expect(screen.getByText("watch out")).toBeInTheDocument();
     openTab("README");
+    expect(screen.queryByText("watch out")).not.toBeInTheDocument();
+    openTab("Sample data");
     expect(screen.queryByText("watch out")).not.toBeInTheDocument();
   });
 
@@ -941,7 +937,7 @@ describe("ControlsRail", () => {
     expect(onOpenSection).toHaveBeenCalledWith("helpers");
     fireEvent.click(screen.getByRole("button", { name: "Expand controls" }));
     expect(onExpand).toHaveBeenCalled();
-    expect(screen.getAllByRole("button")).toHaveLength(6);
+    expect(screen.getAllByRole("button")).toHaveLength(5);
   });
 });
 
