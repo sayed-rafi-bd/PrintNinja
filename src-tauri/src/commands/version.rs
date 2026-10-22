@@ -47,7 +47,7 @@ fn map_version(row: &rusqlite::Row) -> rusqlite::Result<TemplateVersion> {
 ///
 /// Designer hydration needs every row's current content but must not do
 /// one `list_versions` per template (N+1). One call, one round trip.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn list_latest_versions(
     db: State<DbState>,
     template_ids: Vec<i64>,
@@ -220,7 +220,7 @@ pub fn create_version_conn(
 /// compilation existed. That must not create a new version every time
 /// someone looks at an old template — this updates the row in place,
 /// bumps nothing user-visible, and leaves sync_state alone.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn set_version_compiled(
     db: State<DbState>,
     id: i64,
