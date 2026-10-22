@@ -333,6 +333,20 @@ pub fn apply_font_upsert(
     data: &FontDataIn,
     report: &mut crate::commands::cache::ApplyReport,
 ) -> AppResult<()> {
+    // Server bytes cross the same bar as uploads: a known format and a
+    // sane size. Rejects the page before anything is written.
+    if !VALID_FORMATS.contains(&data.format.as_str()) {
+        return Err(AppError::Validation(format!(
+            "sync font has an unsupported format '{}'",
+            data.format
+        )));
+    }
+    if data.size_bytes < 0 || data.size_bytes as u64 > MAX_FONT_BYTES as u64 {
+        return Err(AppError::Validation(format!(
+            "sync font has an invalid size {}",
+            data.size_bytes
+        )));
+    }
     let existing: Option<(i64, String, String)> = tx
         .query_row(
             "SELECT id, sync_state, sha256 FROM fonts WHERE server_id = ?1",

@@ -817,6 +817,40 @@ fn apply_one(
     apply_changes(conn, &fonts_dir, &changes, "MQ==").unwrap()
 }
 
+#[test]
+fn sync_rejects_templates_with_bad_dimensions_atomically() {
+    let conn = Connection::open_in_memory().expect("memory db");
+    printninja_lib::db::init(&conn).expect("schema");
+    let fonts_dir =
+        std::env::temp_dir().join(format!("pn-cache-fonts-{}", uuid::Uuid::new_v4()));
+    // One good row followed by a bad one: the page must fail whole,
+    // leaving neither row behind.
+    let changes: Vec<printninja_lib::commands::cache::SyncChangeIn> =
+        serde_json::from_value(serde_json::json!([
+            { "seq": 1, "entity": "template", "op": "upsert",
+              "data": server_data("srv-ok", "<p>ok</p>", 1) },
+            { "seq": 2, "entity": "template", "op": "upsert",
+              "data": { "id": "srv-bad", "name": "Bad", "summary": "",
+                        "page_w_mm": -80.0, "page_h_mm": 297.0,
+                        "body": "<p>bad</p>", "css": "", "readme": "",
+                        "revision": 1, "published_at": null,
+                        "updated_at": "2026-10-21T00:00:00Z" } },
+        ]))
+        .unwrap();
+    let err = printninja_lib::commands::cache::apply_changes(
+        &conn, &fonts_dir, &changes, "MQ==",
+    )
+    .unwrap_err();
+    assert!(
+        format!("{err:?}").contains("page_w_mm"),
+        "bad dims must fail loudly: {err:?}"
+    );
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM templates", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 0, "the good row must roll back with the page");
+}
+
 fn server_data(id: &str, body: &str, revision: i64) -> serde_json::Value {
     serde_json::json!({
         "id": id, "name": "M", "summary": "", "page_w_mm": 210.0, "page_h_mm": 297.0,

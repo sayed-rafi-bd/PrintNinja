@@ -75,6 +75,17 @@ impl Default for OpenApiSpec {
                         }
                     }
                 },
+                "/v1/metrics/prometheus": {
+                    "get": {
+                        "summary": "Prometheus exposition",
+                        "description": "Same counters as /v1/metrics in text format 0.0.4.",
+                        "responses": {
+                            "200": { "description": "Metrics in Prometheus text format" },
+                            "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
+                        }
+                    }
+                },
                 "/v1/print": {
                     "post": {
                         "summary": "Render a template and print it",

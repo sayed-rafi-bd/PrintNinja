@@ -57,6 +57,7 @@ pub fn router_with_state(state: ApiState, lan_access: bool) -> Router {
         .route("/v1/jobs/{id}", get(get_job).delete(cancel_job))
         .route("/v1/jobs/{id}/retry", post(retry_job))
         .route("/v1/metrics", get(metrics))
+        .route("/v1/metrics/prometheus", get(metrics_prometheus))
         .route("/v1/openapi.json", get(openapi))
         .with_state(state.clone())
         // Per-request spans (method, path, status, latency): the only way
@@ -769,8 +770,11 @@ async fn cancel_job(
 /// Operational counters for dashboards and smoke checks: jobs by
 /// status, active batches, and printers the queue currently serialises.
 /// One GROUP BY plus two cheap counts — no per-row work.
-async fn metrics(State(state): State<ApiState>) -> Result<Json<Value>, ApiRejection> {
-    let (by_status, batches_active) = {
+/// Shared by the JSON and Prometheus renderings: job counts per
+/// status plus the number of batches still printing.
+fn read_metric_counts(
+    state: &ApiState,
+) -> Result<(std::collections::HashMap<String, i64>, i64), ApiRejection> {
         let guard = state.db.lock().map_err(ApiRejection::from)?;
         let conn = guard.connection();
 
@@ -803,14 +807,48 @@ async fn metrics(State(state): State<ApiState>) -> Result<Json<Value>, ApiReject
                 |r| r.get(0),
             )
             .map_err(ApiRejection::from)?;
-        (by_status, batches_active)
-    };
+        Ok((by_status, batches_active))
+}
+
+/// Operational counters for dashboards and smoke checks: jobs by
+/// status, active batches, and printers the queue currently serialises.
+/// One GROUP BY plus two cheap counts — no per-row work.
+async fn metrics(State(state): State<ApiState>) -> Result<Json<Value>, ApiRejection> {
+    let (by_status, batches_active) = read_metric_counts(&state)?;
 
     Ok(Json(json!({
         "jobs": by_status,
         "batches": { "active": batches_active },
         "printers": { "tracked": state.queue.tracked_printers().await },
     })))
+}
+
+/// Prometheus text exposition (no client library: the shape is three
+/// gauges and the label set is a fixed enum, so rendering is trivial).
+/// Same numbers as `/v1/metrics`, scrapable by any collector.
+async fn metrics_prometheus(State(state): State<ApiState>) -> impl IntoResponse {
+    let (by_status, batches_active) = read_metric_counts(&state)?;
+    let tracked = state.queue.tracked_printers().await;
+    let mut out = String::from(
+        "# HELP printninja_jobs Print jobs by status.\n# TYPE printninja_jobs gauge\n",
+    );
+    let mut statuses: Vec<(&String, &i64)> = by_status.iter().collect();
+    statuses.sort_by(|a, b| a.0.cmp(b.0));
+    for (status, count) in statuses {
+        out.push_str(&format!("printninja_jobs{{status=\"{status}\"}} {count}\n"));
+    }
+    out.push_str(
+        "# HELP printninja_batches_active Batches still printing.\n# TYPE printninja_batches_active gauge\n",
+    );
+    out.push_str(&format!("printninja_batches_active {batches_active}\n"));
+    out.push_str(
+        "# HELP printninja_printers_tracked Printers the queue currently serialises.\n# TYPE printninja_printers_tracked gauge\n",
+    );
+    out.push_str(&format!("printninja_printers_tracked {tracked}\n"));
+    Ok::<_, ApiRejection>((
+        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        out,
+    ))
 }
 
 async fn openapi() -> Json<Value> {

@@ -224,12 +224,31 @@ fn adopt_or_conflict(
     Ok(())
 }
 
+/// Server rows cross the same bar as local writes: a non-empty name and
+/// finite positive page sizes. Rejects the page before anything is
+/// written (the apply is atomic, so a bad record fails loudly instead
+/// of tripping a schema CHECK halfway through).
+fn validate_template_data(data: &TemplateDataIn) -> AppResult<()> {
+    if data.name.trim().is_empty() {
+        return Err(AppError::Validation("sync template has an empty name".into()));
+    }
+    for (label, v) in [("page_w_mm", data.page_w_mm), ("page_h_mm", data.page_h_mm)] {
+        if !v.is_finite() || v <= 0.0 || v > 10_000.0 {
+            return Err(AppError::Validation(format!(
+                "sync template has an invalid {label}: {v}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn apply_upsert_synced(
     tx: &rusqlite::Transaction,
     id: i64,
     data: &TemplateDataIn,
     report: &mut ApplyReport,
 ) -> AppResult<()> {
+    validate_template_data(data)?;
     let page_w = data.page_w_mm.round() as i64;
     let page_h = data.page_h_mm.round() as i64;
     let orientation = if page_w > page_h {
@@ -281,6 +300,7 @@ fn apply_upsert_new(
     data: &TemplateDataIn,
     report: &mut ApplyReport,
 ) -> AppResult<()> {
+    validate_template_data(data)?;
     let page_w = data.page_w_mm.round() as i64;
     let page_h = data.page_h_mm.round() as i64;
     let orientation = if page_w > page_h {

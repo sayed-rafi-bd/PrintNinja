@@ -176,6 +176,50 @@ async fn metrics_reports_counters() {
 }
 
 #[tokio::test]
+async fn metrics_prometheus_renders_gauges() {
+    let (db, key) = setup();
+    {
+        let guard = db.lock().unwrap();
+        guard
+            .connection()
+            .execute(
+                "INSERT INTO print_jobs (status, source, copies, is_test) VALUES ('failed', 'api', 1, 0)",
+                [],
+            )
+            .unwrap();
+    }
+    let app = router(&db);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/metrics/prometheus")
+                .header("authorization", format!("Bearer {key}"))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(res
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .starts_with("text/plain"));
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(
+        text.contains("printninja_jobs{status=\"failed\"} 1\n"),
+        "failed gauge must render: {text}"
+    );
+    assert!(text.contains("printninja_batches_active 0\n"), "{text}");
+    assert!(text.contains("# TYPE printninja_jobs gauge"), "{text}");
+}
+
+#[tokio::test]
 async fn printers_requires_authorization() {
     let (db, _key) = setup();
     let app = router(&db);

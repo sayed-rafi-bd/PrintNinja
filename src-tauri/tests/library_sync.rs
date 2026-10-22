@@ -590,6 +590,47 @@ fn font_upload_refuses_the_wrong_content() {
 }
 
 #[test]
+fn sync_rejects_fonts_with_bad_format_or_size() {
+    use printninja_lib::commands::font::{apply_font_upsert, FontDataIn};
+    use printninja_lib::commands::cache::ApplyReport;
+    let conn = db();
+    let bad_format = FontDataIn {
+        id: "srv-x".into(),
+        name: "X".into(),
+        format: "exe".into(),
+        size_bytes: 10,
+        sha256: "0".repeat(64),
+        revision: 1,
+    };
+    let mut report = ApplyReport {
+        applied_upserts: 0,
+        applied_deletes: 0,
+        skipped_dirty: 0,
+    };
+    // No commit: the transaction rolls back on drop, like a failed page.
+    let tx = conn.unchecked_transaction().unwrap();
+    let err = apply_font_upsert(&tx, &bad_format, &mut report).unwrap_err();
+    assert!(
+        format!("{err:?}").contains("format"),
+        "bad format must fail loudly: {err:?}"
+    );
+    let bad_size = FontDataIn {
+        size_bytes: -5,
+        format: "ttf".into(),
+        ..bad_format
+    };
+    let err = apply_font_upsert(&tx, &bad_size, &mut report).unwrap_err();
+    assert!(
+        format!("{err:?}").contains("size"),
+        "bad size must fail loudly: {err:?}"
+    );
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM fonts", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 0, "rejected rows must not be stored");
+}
+
+#[test]
 fn font_upload_refuses_oversize_files() {    let mut huge = vec![0x00, 0x01, 0x00, 0x00];
     huge.resize(font::MAX_FONT_BYTES + 1, 0xAA);
     let err = font::check_upload_bytes("huge.ttf", &huge).unwrap_err();

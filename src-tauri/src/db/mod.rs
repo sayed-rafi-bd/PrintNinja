@@ -65,7 +65,8 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(include_str!("schema.sql"))?;
     ensure_v2_schema(conn)?;
     ensure_sync_schema(conn)?;
-    ensure_library_schema(conn)
+    ensure_library_schema(conn)?;
+    ensure_p2_checks(conn)
 }
 
 /// Check whether a column exists via `PRAGMA table_info` (V2.md §5.1).
@@ -524,5 +525,283 @@ pub fn ensure_library_schema(conn: &Connection) -> rusqlite::Result<()> {
             rusqlite::params![uuid::Uuid::new_v4().to_string(), id],
         )?;
     }
+    Ok(())
+}
+
+/// P2 CHECK backfill for databases created before `schema.sql` carried
+/// them. Fresh installs already satisfy every rule below; this brings
+/// old files to the same constraints.
+///
+/// Two phases, both idempotent. First, sanitizing UPDATEs rewrite rows
+/// that would violate the new CHECKs into documented safe values — the
+/// fallbacks only fire on rows no current write path can produce
+/// (uploads, edits, batches and sync all validate first), and they exist
+/// so a legacy or hand-edited row can never wedge the upgrade. Then each
+/// table missing its marker is rebuilt with the constraints.
+///
+/// Rebuilds copy every column explicitly (migrations added columns
+/// after v1), recreate the table's indexes, and run with foreign keys
+/// off and back on, like `ensure_created_by_allows_sync`.
+fn ensure_p2_checks(conn: &Connection) -> rusqlite::Result<()> {
+    // Sanitise first: every UPDATE is a no-op on a clean database.
+    // Names fall back to a visible placeholder (never silently dropped);
+    // numerics clamp to the nearest valid value; counters keep the
+    // worker's invariant failed <= done <= total; rows that cannot be
+    // made valid (empty setting keys, unusable API hashes) are deleted.
+    conn.execute_batch(
+        "UPDATE printers SET name = '(unnamed)' WHERE trim(name) = '';
+         UPDATE printers SET address = '(unknown)' WHERE trim(address) = '';
+         UPDATE printers SET dpi = 203 WHERE dpi IS NOT NULL AND dpi <= 0;
+         UPDATE printers SET paper_width_mm = NULL
+             WHERE paper_width_mm IS NOT NULL AND paper_width_mm <= 0;
+         UPDATE templates SET name = '(unnamed)' WHERE trim(name) = '';
+         UPDATE templates SET page_w_mm = 210 WHERE page_w_mm <= 0;
+         UPDATE templates SET page_h_mm = 297 WHERE page_h_mm <= 0;
+         UPDATE template_versions SET version_no = 1 WHERE version_no < 1;
+         UPDATE fonts SET family = '(unnamed)' WHERE trim(family) = '';
+         UPDATE fonts SET format = 'ttf'
+             WHERE format NOT IN ('ttf', 'otf', 'woff', 'woff2');
+         UPDATE fonts SET size_bytes = 0 WHERE size_bytes < 0;
+         UPDATE batches SET total = 0 WHERE total < 0;
+         UPDATE batches SET done = 0 WHERE done < 0;
+         UPDATE batches SET failed = 0 WHERE failed < 0;
+         UPDATE batches SET done = total WHERE done > total;
+         UPDATE batches SET failed = done WHERE failed > done;
+         UPDATE print_jobs SET copies = 1 WHERE copies < 1;
+         UPDATE print_jobs SET is_test = 0 WHERE is_test NOT IN (0, 1);
+         UPDATE print_jobs SET duration_ms = NULL
+             WHERE duration_ms IS NOT NULL AND duration_ms < 0;
+         UPDATE print_jobs SET record_index = NULL
+             WHERE record_index IS NOT NULL AND record_index < 0;
+         DELETE FROM settings WHERE key = '';
+         DELETE FROM api_clients WHERE key_hash = '';
+         UPDATE api_clients SET name = '(unnamed ' || id || ')'
+             WHERE trim(name) = '';",
+    )?;
+
+    rebuild_p2(
+        conn,
+        "printers",
+        "length(address) > 0",
+        "CREATE TABLE printers_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL CHECK(length(name) > 0),
+            type TEXT NOT NULL CHECK(type IN ('ipp', 'raw_tcp', 'usb', 'bluetooth', 'system')),
+            address TEXT NOT NULL CHECK(length(address) > 0),
+            language TEXT NOT NULL DEFAULT 'pdf' CHECK(language IN ('pdf', 'escpos', 'tspl', 'zpl', 'cpcl', 'raster')),
+            paper_width_mm INTEGER CHECK(paper_width_mm IS NULL OR paper_width_mm > 0),
+            dpi INTEGER DEFAULT 203 CHECK(dpi IS NULL OR dpi > 0),
+            default_settings_json TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );",
+        "id, name, type, address, language, paper_width_mm, dpi, default_settings_json, created_at, updated_at",
+        &[],
+    )?;
+    rebuild_p2(
+        conn,
+        "templates",
+        "page_w_mm > 0",
+        "CREATE TABLE templates_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL CHECK(length(name) > 0),
+            current_version_id INTEGER,
+            page_w_mm INTEGER NOT NULL DEFAULT 210 CHECK(page_w_mm > 0),
+            page_h_mm INTEGER NOT NULL DEFAULT 297 CHECK(page_h_mm > 0),
+            orientation TEXT NOT NULL DEFAULT 'portrait' CHECK(orientation IN ('portrait', 'landscape')),
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            readme TEXT NOT NULL DEFAULT '',
+            summary TEXT NOT NULL DEFAULT '',
+            remote_id TEXT,
+            published_at TEXT,
+            origin TEXT NOT NULL DEFAULT 'own' CHECK(origin IN ('own','saved')),
+            origin_owner TEXT,
+            withdrawn INTEGER NOT NULL DEFAULT 0,
+            server_id TEXT,
+            server_revision INTEGER,
+            base_revision INTEGER,
+            sync_state TEXT NOT NULL DEFAULT 'synced' CHECK(sync_state IN ('synced', 'dirty', 'deleted_pending', 'conflict')),
+            kind TEXT NOT NULL DEFAULT 'own' CHECK(kind IN ('own', 'saved')),
+            owner_handle TEXT,
+            synced_at TEXT
+        );",
+        "id, name, current_version_id, page_w_mm, page_h_mm, orientation, created_at, updated_at, readme, summary, remote_id, published_at, origin, origin_owner, withdrawn, server_id, server_revision, base_revision, sync_state, kind, owner_handle, synced_at",
+        &[
+            "CREATE INDEX IF NOT EXISTS idx_templates_remote ON templates(remote_id);",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_templates_server_id ON templates(server_id);",
+        ],
+    )?;
+    rebuild_p2(
+        conn,
+        "template_versions",
+        "version_no >= 1",
+        "CREATE TABLE template_versions_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            template_id INTEGER NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
+            version_no INTEGER NOT NULL CHECK(version_no >= 1),
+            html TEXT NOT NULL,
+            css TEXT NOT NULL DEFAULT '',
+            label TEXT,
+            note TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            created_by TEXT NOT NULL DEFAULT 'manual' CHECK(created_by IN ('manual', 'autosave', 'restore', 'sync')),
+            compiled_css TEXT NOT NULL DEFAULT '',
+            compiled_key TEXT NOT NULL DEFAULT ''
+        );",
+        "id, template_id, version_no, html, css, label, note, created_at, created_by, compiled_css, compiled_key",
+        &["CREATE INDEX IF NOT EXISTS idx_versions_template ON template_versions(template_id);"],
+    )?;
+    rebuild_p2(
+        conn,
+        "fonts",
+        "length(family) > 0",
+        "CREATE TABLE fonts_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            family TEXT NOT NULL CHECK(length(family) > 0),
+            style TEXT NOT NULL DEFAULT 'normal',
+            weight TEXT NOT NULL DEFAULT '400',
+            file_path TEXT NOT NULL,
+            format TEXT NOT NULL CHECK(format IN ('ttf', 'otf', 'woff', 'woff2')),
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            server_id TEXT,
+            server_revision INTEGER,
+            base_revision INTEGER,
+            sync_state TEXT NOT NULL DEFAULT 'synced' CHECK(sync_state IN ('synced', 'dirty', 'deleted_pending', 'conflict')),
+            synced_at TEXT,
+            sha256 TEXT NOT NULL DEFAULT '',
+            size_bytes INTEGER NOT NULL DEFAULT 0 CHECK(size_bytes >= 0)
+        );",
+        "id, family, style, weight, file_path, format, created_at, server_id, server_revision, base_revision, sync_state, synced_at, sha256, size_bytes",
+        &["CREATE UNIQUE INDEX IF NOT EXISTS idx_fonts_server_id ON fonts(server_id);"],
+    )?;
+    rebuild_p2(
+        conn,
+        "batches",
+        "failed <= done",
+        "CREATE TABLE batches_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            template_id INTEGER REFERENCES templates(id) ON DELETE SET NULL,
+            printer_id INTEGER REFERENCES printers(id) ON DELETE SET NULL,
+            total INTEGER NOT NULL DEFAULT 0 CHECK(total >= 0),
+            done INTEGER NOT NULL DEFAULT 0 CHECK(done >= 0),
+            failed INTEGER NOT NULL DEFAULT 0 CHECK(failed >= 0),
+            mode TEXT NOT NULL DEFAULT 'single_job' CHECK(mode IN ('single_job', 'per_record')),
+            status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'printing', 'success', 'failed', 'cancelled')),
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            CHECK(failed <= done AND done <= total)
+        );",
+        "id, template_id, printer_id, total, done, failed, mode, status, created_at",
+        &[],
+    )?;
+    rebuild_p2(
+        conn,
+        "print_jobs",
+        "copies >= 1",
+        "CREATE TABLE print_jobs_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id INTEGER REFERENCES batches(id) ON DELETE SET NULL,
+            record_index INTEGER CHECK(record_index IS NULL OR record_index >= 0),
+            template_id INTEGER REFERENCES templates(id) ON DELETE SET NULL,
+            template_version_id INTEGER REFERENCES template_versions(id) ON DELETE SET NULL,
+            printer_id INTEGER REFERENCES printers(id) ON DELETE SET NULL,
+            source TEXT NOT NULL DEFAULT 'ui' CHECK(source IN ('ui', 'api', 'deeplink', 'batch', 'test')),
+            source_url TEXT,
+            status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'printing', 'success', 'failed', 'cancelled')),
+            error TEXT,
+            copies INTEGER NOT NULL DEFAULT 1 CHECK(copies >= 1),
+            settings_json TEXT,
+            rendered_html TEXT,
+            data_json TEXT,
+            idempotency_key TEXT,
+            is_test INTEGER NOT NULL DEFAULT 0 CHECK(is_test IN (0, 1)),
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            started_at TEXT,
+            finished_at TEXT,
+            duration_ms INTEGER CHECK(duration_ms IS NULL OR duration_ms >= 0),
+            timings_json TEXT
+        );",
+        "id, batch_id, record_index, template_id, template_version_id, printer_id, source, source_url, status, error, copies, settings_json, rendered_html, data_json, idempotency_key, is_test, created_at, started_at, finished_at, duration_ms, timings_json",
+        &[
+            "CREATE INDEX IF NOT EXISTS idx_jobs_status ON print_jobs(status);",
+            "CREATE INDEX IF NOT EXISTS idx_jobs_printer ON print_jobs(printer_id);",
+            "CREATE INDEX IF NOT EXISTS idx_jobs_template ON print_jobs(template_id);",
+            "CREATE INDEX IF NOT EXISTS idx_jobs_batch ON print_jobs(batch_id);",
+            "CREATE INDEX IF NOT EXISTS idx_jobs_created ON print_jobs(created_at);",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_print_jobs_idempotency ON print_jobs(idempotency_key);",
+        ],
+    )?;
+    rebuild_p2(
+        conn,
+        "settings",
+        "length(key) > 0",
+        "CREATE TABLE settings_new (
+            key TEXT PRIMARY KEY CHECK(length(key) > 0),
+            value TEXT NOT NULL,
+            sync_state TEXT NOT NULL DEFAULT 'synced' CHECK(sync_state IN ('synced', 'dirty', 'deleted_pending')),
+            synced_at TEXT
+        );",
+        "key, value, sync_state, synced_at",
+        &[],
+    )?;
+    rebuild_p2(
+        conn,
+        "api_clients",
+        "length(key_hash) > 0",
+        "CREATE TABLE api_clients_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL CHECK(length(name) > 0),
+            key_hash TEXT NOT NULL CHECK(length(key_hash) > 0),
+            scopes TEXT NOT NULL DEFAULT 'print',
+            allowed_ips TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            last_used_at TEXT
+        );",
+        "id, name, key_hash, scopes, allowed_ips, created_at, last_used_at",
+        &["CREATE UNIQUE INDEX IF NOT EXISTS idx_api_clients_name ON api_clients(name);"],
+    )?;
+    Ok(())
+}
+
+/// Rebuilds one table with new CHECKs when its marker is absent from the
+/// stored DDL. Copies every column explicitly, recreates the table's
+/// indexes, and runs atomically with foreign keys off and restored —
+/// the same shape as `ensure_created_by_allows_sync`.
+fn rebuild_p2(
+    conn: &Connection,
+    table: &str,
+    marker: &str,
+    create_new: &str,
+    columns: &str,
+    indexes: &[&str],
+) -> rusqlite::Result<()> {
+    let sql: Option<String> = conn.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [table],
+        |r| r.get(0),
+    )?;
+    if sql.is_some_and(|s| s.contains(marker)) {
+        return Ok(());
+    }
+    let fk_before: i64 = conn.query_row("PRAGMA foreign_keys", [], |r| r.get(0))?;
+    conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+
+    let mut script = format!(
+        "BEGIN;
+         {create_new}
+         INSERT INTO {table}_new ({columns}) SELECT {columns} FROM {table};
+         DROP TABLE {table};
+         ALTER TABLE {table}_new RENAME TO {table};"
+    );
+    for index in indexes {
+        script.push_str(index);
+    }
+    script.push_str("COMMIT;");
+    let result = conn.execute_batch(&script);
+    if fk_before != 0 {
+        // Best effort, as in `ensure_created_by_allows_sync`.
+        let _ = conn.execute_batch("PRAGMA foreign_keys = ON;");
+    }
+    result?;
     Ok(())
 }
