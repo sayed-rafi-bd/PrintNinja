@@ -115,7 +115,7 @@ Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt 
 - Fix: per-route `bodyLimit` matching each domain cap + tests for 300KiB dataset / 6MiB font.
 
 ### API — P0: health lies
-- `src/http/routes/health.ts:9` returns `{status,version}` without a DB probe; `Dockerfile:66 HEALTHCHECK` + `docker-compose.yml:25` report healthy with dead Postgres.
+- `src/http/routes/health.ts:9` returns `{status,version}` without a DB probe; `Dockerfile:66 HEALTHCHECK` + `docker-compose.yml:25` report healthy with a dead database.
 - Fix: keep `/v2/health` cheap, add `/v2/ready` doing `SELECT 1`.
 
 ### API — P1: shadowing, status, fan-out
@@ -139,9 +139,9 @@ Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt 
 ### DB — P0/P1
 - `Tombstone` has no user relation (`prisma/schema.prisma:57-67`); user delete cascades everything except tombstones → stale floor → `reset:true` storms. Add `user @relation(onDelete:Cascade)`.
 - Missing `CHECK`s (`pageWMm>0`, `revision>=1`, `useCount>=0`, font format enum). Add in next migration.
-- `FontFile.bytes BYTEA` (`schema.prisma:136-143`) stores ≤5MiB inline (TOAST bloat, full-Buffer loads in `src/infra/prisma/fonts.ts:76,147`). Move blobs to object storage, keep PG metadata.
-- `bumpSeq` copy-pasted in 5 repos (`templates.ts:328-337`, `fonts.ts:40`, …), off-by-one (`create nextSeq:2n`). Extract `src/infra/prisma/seq.ts`, use `1n` + `increment`.
-- `package.json:17` `db:migrate` = `prisma migrate dev` (creates migrations). Add `db:deploy` for prod; `client.ts:10` needs pool/statement timeouts.
+- `FontFile.bytes` BLOB (`schema.prisma`) stores ≤5MiB inline (full-Buffer loads in `src/infra/db/fonts.ts`). Move blobs to object storage, keep DB metadata.
+- `bumpSeq` copy-pasted in 5 repos (`templates.ts:328-337`, `fonts.ts:40`, …), off-by-one (`create nextSeq:2n`). Extract `src/infra/db/seq.ts`, use `1n` + `increment`.
+- `package.json` `db:migrate` = `prisma migrate dev` (creates migrations), `db:apply` applies them everywhere including Turso (done); `client.ts` needs pool/statement timeouts for the remote case.
 
 ### Observability / config / security — P1
 - No metrics/tracing, 2xx not logged (`errorHandler.ts:84,100,112`), cleanup `setInterval` without `unref`/leader-election (`server.ts:68`), abrupt shutdown (`:82-93`, no drain timeout). Add `prom-client` counters, `unref()`, `Promise.race(10s)` + `prisma.$disconnect`.
@@ -161,7 +161,7 @@ Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt 
 ## 4. E2E testing to add — DONE (2026-10-21, `feat/improvements-backlog`)
 
 23 specs → 40 across 22 files, all listed by Playwright and
-typechecked; full runs need CI (Testcontainers PG + browsers), same
+typechecked; full runs need CI (local SQLite files + browsers), same
 as the pre-existing suite. What each item became:
 
 - print-submit / print-path: UI request shape (`printSubmit.e2e.ts`),

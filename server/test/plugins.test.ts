@@ -63,7 +63,7 @@ describe("error envelope", () => {
   it("hides internals behind internal_error for unexpected throws", async () => {
     app = await buildApp({ config: testConfig(), deps: fakeDeps() });
     app.get("/v2/__boom", async () => {
-      throw new Error("connection string: postgresql://secret");
+      throw new Error("connection string: libsql://secret");
     });
     await app.ready();
 

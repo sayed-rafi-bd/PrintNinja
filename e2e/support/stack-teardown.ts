@@ -1,16 +1,16 @@
-import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readStackState, type StackState } from "./stack-state.js";
 
-// Stops what support/stack.ts started: the API process and the
-// PostgreSQL container. The bundle and the stack file are build
+// Stops what support/stack.ts started: the API processes and the virtual
+// printer. The database files, the bundle and the stack files are build
 // artifacts of the run, removed with it.
 
 export default async function globalTeardown(): Promise<void> {
   const here = dirname(fileURLToPath(import.meta.url));
   const pids = new Set<number>();
+  const dbDirs = new Set<string>();
   for (const entry of readdirSync(here)) {
     if (!/^\.stack(-\d+)?\.json$/.test(entry)) continue;
     try {
@@ -24,6 +24,7 @@ export default async function globalTeardown(): Promise<void> {
       ]) {
         if (pid !== undefined) pids.add(pid);
       }
+      if (state.dbDir !== undefined) dbDirs.add(state.dbDir);
     } catch {
       // Unreadable state: nothing to reap from it.
     }
@@ -35,20 +36,14 @@ export default async function globalTeardown(): Promise<void> {
       // Already gone.
     }
   }
-  let pgContainerId: string | undefined;
   try {
-    pgContainerId = readStackState().pgContainerId;
+    const state = readStackState();
+    if (state.dbDir !== undefined) dbDirs.add(state.dbDir);
   } catch {
-    pgContainerId = undefined;
+    // No shared state: nothing to clean.
   }
-  if (pgContainerId !== undefined) {
-    try {
-      execFileSync("docker", ["stop", pgContainerId], { stdio: "pipe" });
-      execFileSync("docker", ["rm", pgContainerId], { stdio: "pipe" });
-    } catch {
-      // Already gone; Testcontainers' ryuk reaps the rest. A missing
-      // docker binary (Podman/rootless hosts) lands here too.
-    }
+  for (const dir of dbDirs) {
+    rmSync(dir, { recursive: true, force: true });
   }
 
   for (const entry of readdirSync(here)) {

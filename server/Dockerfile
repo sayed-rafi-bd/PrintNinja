@@ -25,7 +25,7 @@ WORKDIR /app/server
 # variable to exist — the dummy value is never connected to.
 # inject-workspace-packages satisfies pnpm v10's deploy guard; the
 # --legacy deploy mis-resolves the pinned zod (3.25 instead of 4.6.7).
-RUN DATABASE_URL=postgresql://localhost:5432/printninja_build_dummy \
+RUN DATABASE_URL=file:/tmp/printninja_build_dummy.db \
     pnpm db:generate && pnpm build \
     && npm_config_inject_workspace_packages=true pnpm --filter server --prod deploy /deploy
 

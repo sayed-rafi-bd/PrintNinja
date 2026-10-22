@@ -152,7 +152,8 @@ Open the draft release on GitHub. If you sign locally, replace the unsigned file
 ## 7. Deploy the share service (`server/`)
 
 The share service (accounts, publish, browse, save, sync for every PC) is the
-TypeScript service in `server/` plus PostgreSQL 16. It is **not** part of the
+TypeScript service in `server/` backed by Turso Cloud (libSQL) in production
+and a local SQLite file everywhere else. It is **not** part of the
 tag release and no workflow deploys it; CI builds, tests and drift-checks it
 on every PR, and you deploy it by hand.
 
@@ -171,22 +172,27 @@ fixture), compare template counts on both sides, then point the app at the new
 address (Settings → Share, or the sign-in screen's server field). Keep the old
 server stopped but intact until the rollback window passes.
 
+(The same import path also covers the retired PostgreSQL service: the import
+reads rows through the repository interfaces, so only the connection setup
+changed.)
+
 ### Deploy with Docker (recommended)
 From `server/` (the stack lives next to the service):
 
 ```bash
 cd server
-cp env.example .env   # usable defaults; edit POSTGRES_PASSWORD for anything shared
+cp env.example .env   # usable defaults; add Turso credentials for production (below)
 docker compose up -d --build
 ```
 
 What this sets up:
-- `db`: postgres:16 on the named volume `printninja-pgdata`. The volume
-  survives rebuilds and restarts, so accounts and everything they own are
-  kept. Do not run `docker compose down -v` unless you want to delete them.
-- `server`: the multi-stage image (node:22, non-root), which runs
-  `prisma migrate deploy` on boot — the schema travels with the image, so a
-  first-ever `up` lands healthy with no manual step.
+- `server`: the multi-stage image (node:22, non-root), which applies pending
+  migrations on boot — the schema travels with the image, so a first-ever
+  `up` lands healthy with no manual step.
+- The default database is a file in the named volume `printninja-data`.
+  The volume survives rebuilds and restarts, so accounts and everything
+  they own are kept. Do not run `docker compose down -v` unless you want
+  to delete them.
 - The service port publishes on `${SERVER_PORT:-3001}` (default 3001). Put
   your HTTPS reverse proxy in front: the app sends session tokens as Bearer
   headers, so plain HTTP must not be used outside a trusted network. The proxy
@@ -195,41 +201,51 @@ What this sets up:
 
 Check it:
 ```bash
-docker compose ps                    # db and server should be "healthy"
+docker compose ps                    # server should be "healthy"
 curl http://127.0.0.1:3001/v2/health # 200
 docker compose logs -f server
 ```
 
 Then continue with "Verify" below (the app part is the same).
 
-### Using an external PostgreSQL
-To point the container at your own database instead of the bundled `db`:
+### Production database: Turso Cloud
+Create the database once and point the container at it:
 
 ```bash
-cd server
-cp env.example .env   # then set DATABASE_URL in .env, e.g.
-                      # DATABASE_URL=postgresql://printninja:secret%40pw@db.example.com:5432/printninja
-docker compose up -d --build --no-deps server
+turso db create printninja-prod
+turso db tokens create printninja-prod   #least-privilege token for the service
+turso db show --url printninja-prod      # libsql://...
 ```
 
-`--no-deps server` is what skips the bundled `db` container — a plain
-`docker compose up` would still boot it. `POSTGRES_PASSWORD` is unused in
-this mode. The database must exist and be empty, the role needs DDL rights
-(the image runs `prisma migrate deploy` on boot, same as bundled), and the
-host must be reachable from inside the container (`localhost` there means
-the container itself). URL-encode special characters in the password
-(`@` → `%40`, `:` → `%3A`, `/` → `%2F`, `#` → `%23`). PostgreSQL 16 is
-what the schema targets; a managed instance of the same major version is
-the safe choice. Backups are then your database provider's job, not the
-`Back up` section below.
+Set both values in `server/.env`:
+
+```bash
+DATABASE_URL=libsql://printninja-prod-<user>.turso.io
+DATABASE_AUTH_TOKEN=eyJhbGciOi...
+docker compose up -d --build
+```
+
+The named volume is then unused. Migrations still apply on boot through
+the same runner (it executes the committed `migration.sql` files over the
+libSQL client), and `RUN_MIGRATIONS=false` skips that step on all but one
+replica. Backups are Turso's snapshots plus a periodic `.dump` you keep
+yourself — see `Back up` below.
 
 ### Back up
-PostgreSQL holds all accounts and everything they own. Dump it while the
-service is running:
+The database holds all accounts and everything they own.
 
-```bash
-docker compose exec db pg_dump -U printninja printninja > printninja-$(date +%F).sql
-```
+- **Turso:** keep platform snapshots on, and periodically store your own
+  dump off-site:
+  ```bash
+  turso db shell printninja-prod ".dump" > printninja-$(date +%F).sql
+  ```
+- **Bundled file:** stop the service so the file is quiescent, copy it out,
+  start again:
+  ```bash
+  docker compose stop server
+  docker cp printninja-server-1:/data/printninja.db printninja-$(date +%F).db
+  docker compose start server
+  ```
 Test a restore at least once (into a scratch database, not over the live one).
 
 ### Update and roll back
@@ -241,27 +257,22 @@ Migrations run forward on boot and are not undone by rolling back the image:
 to roll back, check out the previous commit and rebuild, restoring the database
 backup first if the schema changed between the two.
 
-Do not change `POSTGRES_PASSWORD` on an existing volume: PostgreSQL sets the
-password only at first init, so the server fails to log in (`P1000` in the
-server log) while `db` stays healthy. To rotate the password, dump the
-database, `docker compose down -v`, set the new password, boot, and restore
-the dump.
-
 ### Without Docker: build and run
-Prerequisites: Node 22, pnpm 10, and a reachable PostgreSQL 16.
+Prerequisites: Node 22, pnpm 10, and a database — Turso Cloud
+(`libsql://…` + token) or a local file.
 
 ```bash
 pnpm install --frozen-lockfile
-DATABASE_URL=postgresql://USER:PASS@HOST:5432/printninja \
-  pnpm --filter server exec prisma migrate deploy
+DATABASE_URL=libsql://YOUR-DB.turso.io DATABASE_AUTH_TOKEN=TOKEN \
+  pnpm --filter server db:apply
 pnpm --filter server build
-DATABASE_URL=postgresql://USER:PASS@HOST:5432/printninja \
+DATABASE_URL=libsql://YOUR-DB.turso.io DATABASE_AUTH_TOKEN=TOKEN \
   HOST=127.0.0.1 PORT=3001 node server/dist/server.js
 ```
 Run it under a service manager so it restarts on failure. The service reads
 environment variables only (see `env.example`); it loads no `.env` file by
-itself. Put persistent storage under PostgreSQL (on an ephemeral disk, use a
-managed database — every account is lost with the disk), and put a TLS reverse
+itself. Put persistent storage under the database (on an ephemeral disk, use
+Turso Cloud — every account is lost with the disk), and put a TLS reverse
 proxy in front that sets `X-Forwarded-For`.
 
 ### Verify
@@ -273,18 +284,15 @@ Then in the app open **Settings, Share**, enter the service address (for example
 in the **Templates, Community** tab.
 
 ### Back up (without Docker)
-PostgreSQL holds all accounts and everything they own. Dump it while the
-service is running:
-
-```bash
-pg_dump "postgresql://printninja:PASS@HOST:5432/printninja" > /backups/printninja-$(date +%F).sql
-```
-Test a restore at least once (into a scratch database, not over the live one).
+Same two cases as `Back up` above: for Turso, a `.dump` through the CLI
+plus platform snapshots; for a local file, stop the service and copy the
+file, then start again. Test a restore at least once (into a scratch
+database, not over the live one).
 
 ### Update and roll back (without Docker)
 1. Pull, rebuild (`pnpm --filter server build`), and run
-   `prisma migrate deploy` against the live database (back it up first) —
-   migrations are forward-only and never run twice.
+   `pnpm --filter server db:apply` against the live database (back it up
+   first) — migrations are forward-only and never run twice.
 2. Restart the service and run the checks above.
 3. Rollback: check out the previous release and rebuild, restoring the
    database backup first if the schema changed between the two.

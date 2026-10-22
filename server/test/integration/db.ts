@@ -1,26 +1,21 @@
-import { execFileSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { PostgreSqlContainer } from "@testcontainers/postgresql";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AppDeps } from "../../src/domain/ports.js";
-import {
-  createDbClient,
-  type DbClient,
-} from "../../src/infra/prisma/client.js";
-import { createSavedRepository } from "../../src/infra/prisma/saved.js";
-import { createSessionRepository } from "../../src/infra/prisma/sessions.js";
-import { createSyncRepository } from "../../src/infra/prisma/sync.js";
-import { createTemplateRepository } from "../../src/infra/prisma/templates.js";
-import { createDatasetRepository } from "../../src/infra/prisma/datasets.js";
-import { createSettingRepository } from "../../src/infra/prisma/settings.js";
-import { createFontRepository } from "../../src/infra/prisma/fonts.js";
-import { createProfileRepository } from "../../src/infra/prisma/profiles.js";
-import { createUserRepository } from "../../src/infra/prisma/users.js";
+import { createDbClient, type DbClient } from "../../src/infra/db/client.js";
+import { applyMigrations } from "../../src/infra/db/migrate.js";
+import { createSavedRepository } from "../../src/infra/db/saved.js";
+import { createSessionRepository } from "../../src/infra/db/sessions.js";
+import { createSyncRepository } from "../../src/infra/db/sync.js";
+import { createTemplateRepository } from "../../src/infra/db/templates.js";
+import { createDatasetRepository } from "../../src/infra/db/datasets.js";
+import { createSettingRepository } from "../../src/infra/db/settings.js";
+import { createFontRepository } from "../../src/infra/db/fonts.js";
+import { createProfileRepository } from "../../src/infra/db/profiles.js";
+import { createUserRepository } from "../../src/infra/db/users.js";
 import { createPasswordHasher } from "../../src/infra/security/passwordHasher.js";
 import { createTokenService } from "../../src/infra/security/tokens.js";
 import { testConfig } from "../helpers.js";
-
-const serverDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 export interface TestStack {
   db: DbClient;
@@ -28,33 +23,49 @@ export interface TestStack {
 }
 
 /**
- * One PostgreSQL per test file (Testcontainers, postgres:16 — the image
- * CI and developers already have). Migrations run through
- * `prisma migrate deploy`, so integration always exercises the
- * committed migration files, never a hand-built schema.
+ * One local SQLite file per test file (no containers, no network), migrated
+ * with the same runner production boots with — so integration always
+ * exercises the committed migration files, never a hand-built schema.
  */
 export async function startTestDatabase(): Promise<TestStack> {
-  const container = await new PostgreSqlContainer("postgres:16").start();
-  const url = container.getConnectionUri();
-  execFileSync("pnpm", ["exec", "prisma", "migrate", "deploy"], {
-    env: { ...process.env, DATABASE_URL: url },
-    stdio: "pipe",
-    cwd: serverDir,
-    timeout: 120_000,
-  });
+  const dir = mkdtempSync(join(tmpdir(), "printninja-test-"));
+  const url = `file:${join(dir, "test.db")}`;
+  await applyMigrations({ url });
   const db = createDbClient(url);
   return {
     db,
     stop: async () => {
       await db.$disconnect();
-      await container.stop();
+      rmSync(dir, { recursive: true, force: true });
     },
   };
 }
 
-/** Wipes every table; sessions and user_sync cascade from users. */
+/** Wipes every table; sessions and user_sync cascade from users. Foreign
+ * keys are off for the wipe only, so child rows never block their parent. */
 export async function truncateAll(db: DbClient): Promise<void> {
-  await db.$executeRawUnsafe('TRUNCATE "users", "tombstones" CASCADE');
+  await db.$executeRawUnsafe("PRAGMA foreign_keys = OFF");
+  try {
+    for (const table of [
+      "template_use_daily",
+      "saved_templates",
+      "template_versions",
+      "templates",
+      "font_files",
+      "fonts",
+      "user_settings",
+      "printer_profiles",
+      "sample_datasets",
+      "tombstones",
+      "user_sync",
+      "sessions",
+      "users",
+    ]) {
+      await db.$executeRawUnsafe(`DELETE FROM "${table}"`);
+    }
+  } finally {
+    await db.$executeRawUnsafe("PRAGMA foreign_keys = ON");
+  }
 }
 
 /** Production-shaped deps over the test database. Argon2 uses the

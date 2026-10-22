@@ -4,7 +4,7 @@
 # Usage: sh server/scripts/e2e-stack.sh [--no-build] (run from anywhere;
 # the stack lives in server/ next to this script).
 #
-# `docker compose down -v` drops the Postgres volume, so the next boot
+# `docker compose down -v` drops the data volume, so the next boot
 # migrates an empty database (see server/docker-entrypoint.sh) — every
 # run starts from the same state no matter what a previous run left
 # behind. The server then seeds the schema itself; the suites create
@@ -17,7 +17,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT/server"
 
 if [ ! -f .env ]; then
-  printf 'POSTGRES_PASSWORD=printninja-dev-password\nCORS_ORIGINS=http://localhost:1420\n' > .env
+  printf 'CORS_ORIGINS=http://localhost:1420\n' > .env
   echo "e2e-stack: wrote server/.env with dev defaults (not committed)"
 fi
 

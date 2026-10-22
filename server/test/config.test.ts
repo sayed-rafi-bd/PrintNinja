@@ -3,7 +3,7 @@ import { loadConfig } from "../src/config.js";
 
 const required = {
   CORS_ORIGINS: "http://localhost:1420",
-  DATABASE_URL: "postgresql://user:pass@localhost:5432/printninja",
+  DATABASE_URL: "file:./dev.db",
 };
 
 describe("loadConfig", () => {
@@ -38,6 +38,18 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...required, CORS_ORIGINS: "   " })).toThrow(
       "CORS_ORIGINS",
     );
+  });
+
+  it("requires DATABASE_AUTH_TOKEN for a libsql:// DATABASE_URL", () => {
+    expect(() =>
+      loadConfig({ ...required, DATABASE_URL: "libsql://db.turso.io" }),
+    ).toThrow("DATABASE_AUTH_TOKEN");
+    const config = loadConfig({
+      ...required,
+      DATABASE_URL: "libsql://db.turso.io",
+      DATABASE_AUTH_TOKEN: "secret",
+    });
+    expect(config.databaseAuthToken).toBe("secret");
   });
 
   it("coerces numeric strings and rejects out-of-range values", () => {

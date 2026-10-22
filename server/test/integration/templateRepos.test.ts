@@ -8,8 +8,8 @@ import type {
   SavedRepository,
   TemplateRepository,
 } from "../../src/domain/templatePorts.js";
-import { createSavedRepository } from "../../src/infra/prisma/saved.js";
-import { createTemplateRepository } from "../../src/infra/prisma/templates.js";
+import { createSavedRepository } from "../../src/infra/db/saved.js";
+import { createTemplateRepository } from "../../src/infra/db/templates.js";
 import { createFakeUsers } from "../fakes/index.js";
 import { createFakeTemplateRepos } from "../fakes/templates.js";
 import {
@@ -21,7 +21,7 @@ import {
 
 // Repository contract suite (REFACTORING.md section 11): the same
 // behaviors run twice, once against the in-memory fakes and once against
-// PostgreSQL. If a fake ever disagrees with the database, a test fails,
+// a real database. If a fake ever disagrees with the database, a test fails,
 // so the domain unit tests cannot pass on behaviour the real store does
 // not have. Ordering ties are exercised through the name sort (two rows
 // with one name); updated_at ties share the same id-asc tail.

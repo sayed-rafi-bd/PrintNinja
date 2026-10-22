@@ -55,11 +55,12 @@ export interface SignedInPc extends Pc {
   userId: string;
 }
 
-/** A PC whose agent already holds a live session token. The handle
- * is a random UUID: Date.now() collides across parallel workers. */
+/** A PC whose agent already holds a live session token. The handle is a
+ * short random suffix: a full UUID does not fit HANDLE_MAX_LENGTH (32),
+ * and Date.now() collides across parallel workers. */
 export async function signedInPc(
   browser: Browser,
-  handle = `e2e-${crypto.randomUUID()}`,
+  handle = `e2e-${crypto.randomUUID().slice(0, 8)}`,
   password = "password123",
 ): Promise<SignedInPc> {
   const auth = await apiRegister(handle, password);

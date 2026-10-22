@@ -12,7 +12,7 @@ import type {
 
 // In-memory ports for domain unit tests (REFACTORING.md section 5).
 // Behaviour matches the contracts in domain/ports.ts, including the
-// duplicate-handle race mapping. Anything slower or more real (Postgres,
+// duplicate-handle race mapping. Anything slower or more real (a file database,
 // argon2) belongs in test/integration/.
 
 export function createFakeUsers(): UserRepository & {

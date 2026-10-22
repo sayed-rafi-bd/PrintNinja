@@ -1,15 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { createSyncRepository } from "../../src/infra/prisma/sync.js";
+import { createSyncRepository } from "../../src/infra/db/sync.js";
 import type { SyncRepository } from "../../src/domain/syncPorts.js";
 import type { TemplateRepository } from "../../src/domain/templatePorts.js";
-import { createTemplateRepository } from "../../src/infra/prisma/templates.js";
+import { createTemplateRepository } from "../../src/infra/db/templates.js";
 import { createFakeUsers } from "../fakes/index.js";
 import { createFakeTemplateRepos } from "../fakes/templates.js";
 import { startTestDatabase, truncateAll, type TestStack } from "./db.js";
 
 // Sync repository contract (REFACTORING.md section 7): the same
-// behaviors run twice, against the in-memory fakes and PostgreSQL. The
+// behaviors run twice, against the in-memory fakes and a real database. The
 // per-user row lock is what makes cursors gap-free; the concurrency
 // test below is the small durable version of the Phase 1 spike proof.
 

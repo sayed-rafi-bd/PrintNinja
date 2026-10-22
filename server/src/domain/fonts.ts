@@ -13,7 +13,7 @@ import type { FontRepository, FontView, UploadedFont } from "./libraryPorts.js";
 /**
  * Fonts (REFACTORING.md question 21, answered): private to the owner,
  * never in published templates, 5 MiB and 50 per user, bytes in
- * PostgreSQL. The format comes from magic bytes, never the extension.
+ * the database. The format comes from magic bytes, never the extension.
  */
 export const FONT_MAX_BYTES = 5 * 1024 * 1024;
 export const FONTS_PER_USER_MAX = 50;
