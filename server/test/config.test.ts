@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "../src/config.js";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadConfig, loadEnvFile } from "../src/config.js";
 
 const required = {
   CORS_ORIGINS: "http://localhost:1420",
@@ -106,5 +109,67 @@ describe("loadConfig", () => {
     expect(() =>
       loadConfig({ ...required, CORS_ORIGINS: "not a url" }),
     ).toThrow("CORS_ORIGINS");
+  });
+});
+
+describe("loadEnvFile", () => {
+  const KEY = "PRINTNINJA_TEST_LOAD_ENV_FILE";
+  let saved: string | undefined;
+
+  const setup = () => {
+    saved = process.env[KEY];
+    delete process.env[KEY];
+  };
+  const teardown = () => {
+    if (saved === undefined) delete process.env[KEY];
+    else process.env[KEY] = saved;
+  };
+
+  it("loads variables from the given directory's .env file", () => {
+    setup();
+    try {
+      const dir = mkdtempSync(join(tmpdir(), "printninja-env-"));
+      try {
+        writeFileSync(join(dir, ".env"), `${KEY}=from-file\n`);
+        loadEnvFile(dir);
+        expect(process.env[KEY]).toBe("from-file");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    } finally {
+      teardown();
+    }
+  });
+
+  it("never overrides explicitly-set variables", () => {
+    setup();
+    try {
+      const dir = mkdtempSync(join(tmpdir(), "printninja-env-"));
+      try {
+        process.env[KEY] = "explicit";
+        writeFileSync(join(dir, ".env"), `${KEY}=from-file\n`);
+        loadEnvFile(dir);
+        expect(process.env[KEY]).toBe("explicit");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    } finally {
+      teardown();
+    }
+  });
+
+  it("is a no-op when no .env file exists", () => {
+    setup();
+    try {
+      const dir = mkdtempSync(join(tmpdir(), "printninja-env-"));
+      try {
+        loadEnvFile(dir);
+        expect(process.env[KEY]).toBeUndefined();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    } finally {
+      teardown();
+    }
   });
 });

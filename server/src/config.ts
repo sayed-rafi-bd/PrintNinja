@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { config as dotenvConfig } from "dotenv";
+import { resolve } from "node:path";
 
 const booleanFromString = z
   .enum(["true", "false"])
@@ -14,6 +16,20 @@ const port = z.coerce
   .int()
   .min(1)
   .max(65535);
+
+/**
+ * Loads the `.env` file next to the stack (default: `./.env` under the
+ * given directory, i.e. `server/.env` when run from `server/`) into
+ * `process.env` for CLI scripts (`db:apply`, `db:import`,
+ * `openapi:generate`). Explicitly-set variables always win: dotenv
+ * never overrides. Safe to call when no file exists (no-op), so Docker
+ * (environment only) and CI (explicit env) are unaffected. The service
+ * itself (`server.ts`) intentionally does not call this: it fails fast
+ * unless the environment is real.
+ */
+export function loadEnvFile(dir: string = process.cwd()): void {
+  dotenvConfig({ path: resolve(dir, ".env"), quiet: true });
+}
 
 const originList = z.string().transform((value, ctx) => {
   const origins = value

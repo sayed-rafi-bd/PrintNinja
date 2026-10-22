@@ -1,4 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { DbClient } from "../src/infra/db/client.js";
 import { createSavedRepository } from "../src/infra/db/saved.js";
 import { createSessionRepository } from "../src/infra/db/sessions.js";
@@ -192,8 +194,11 @@ function parseDate(raw: string): Date {
 }
 
 // CLI: pnpm import:v1 --source <sqlite-file> [--dry-run]. DATABASE_URL
-// comes from the environment (the service's own variable).
+// comes from the environment (the service's own variable) or server/.env.
 if (import.meta.url === `file://${process.argv[1]}`) {
+	const here = dirname(fileURLToPath(import.meta.url));
+	const { loadEnvFile } = await import("../src/config.js");
+	loadEnvFile(resolve(here, ".."));
 	const source = process.argv.includes("--source") ? process.argv[process.argv.indexOf("--source") + 1] : undefined;
 	const dryRun = process.argv.includes("--dry-run");
 	if (!source) {
