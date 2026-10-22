@@ -53,7 +53,12 @@ fn cap_test_send_buffer(stream: TcpStream) -> TcpStream {
     let Ok(std_stream) = stream.into_std() else {
         panic!("PRINTNINJA_TEST_SNDBUF is set but the socket cannot leave async mode");
     };
-    let _ = socket2::SockRef::from(&std_stream).set_send_buffer_size(size);
+    let sock = socket2::SockRef::from(&std_stream);
+    let set_result = sock.set_send_buffer_size(size);
+    // Read back: the test verdict depends on this cap actually holding.
+    // stdout is only shown for failed tests, so this is free diagnosis.
+    let actual = sock.send_buffer_size().map(|n| n.to_string());
+    eprintln!("[cap_test_send_buffer] requested={size} set={set_result:?} actual={actual:?}");
     TcpStream::from_std(std_stream)
         .expect("PRINTNINJA_TEST_SNDBUF is set but the socket cannot re-enter async mode")
 }
