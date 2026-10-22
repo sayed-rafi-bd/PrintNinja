@@ -591,8 +591,8 @@ fn font_upload_refuses_the_wrong_content() {
 
 #[test]
 fn sync_rejects_fonts_with_bad_format_or_size() {
-    use printninja_lib::commands::font::{apply_font_upsert, FontDataIn};
     use printninja_lib::commands::cache::ApplyReport;
+    use printninja_lib::commands::font::{apply_font_upsert, FontDataIn};
     let conn = db();
     let bad_format = FontDataIn {
         id: "srv-x".into(),
@@ -631,7 +631,8 @@ fn sync_rejects_fonts_with_bad_format_or_size() {
 }
 
 #[test]
-fn font_upload_refuses_oversize_files() {    let mut huge = vec![0x00, 0x01, 0x00, 0x00];
+fn font_upload_refuses_oversize_files() {
+    let mut huge = vec![0x00, 0x01, 0x00, 0x00];
     huge.resize(font::MAX_FONT_BYTES + 1, 0xAA);
     let err = font::check_upload_bytes("huge.ttf", &huge).unwrap_err();
     assert!(
@@ -654,7 +655,10 @@ fn font_sweep_removes_only_unreferenced_files() {
     std::fs::write(dir.join("orphan.woff"), b"drop").unwrap();
     std::fs::create_dir_all(dir.join("sub")).unwrap();
     for (name, path) in [
-        ("Abs", dir.join("keep-abs.ttf").to_string_lossy().to_string()),
+        (
+            "Abs",
+            dir.join("keep-abs.ttf").to_string_lossy().to_string(),
+        ),
         ("Rel", "keep-rel.otf".to_string()),
     ] {
         conn.execute(

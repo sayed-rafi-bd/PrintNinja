@@ -124,18 +124,12 @@ fn magic_for(format: &str) -> Option<&'static [u8]> {
 /// Deletes font files with no DB row. Uploads use UUID names and
 /// re-downloads overwrite in place, but crashed deletes and failed
 /// overwrites leak files — the disk fills while the DB looks small.
-pub fn sweep_orphan_font_files(
-    conn: &Connection,
-    fonts_dir: &Path,
-) -> AppResult<usize> {
+pub fn sweep_orphan_font_files(conn: &Connection, fonts_dir: &Path) -> AppResult<usize> {
     let mut stmt = conn.prepare("SELECT file_path FROM fonts WHERE file_path <> ''")?;
     let known: std::collections::HashSet<std::ffi::OsString> = stmt
         .query_map([], |r| {
             let p: String = r.get(0)?;
-            Ok(Path::new(&p)
-                .file_name()
-                .unwrap_or_default()
-                .to_os_string())
+            Ok(Path::new(&p).file_name().unwrap_or_default().to_os_string())
         })?
         .collect::<Result<_, _>>()?;
     let entries = match std::fs::read_dir(fonts_dir) {
@@ -160,9 +154,7 @@ pub fn sweep_orphan_font_files(
 /// (pre-relative storage); this takes the basename so they survive a
 /// profile move or restore instead of pointing at a dead location.
 pub fn resolve_font_path(fonts_dir: &Path, stored: &str) -> PathBuf {
-    let base = Path::new(stored)
-        .file_name()
-        .unwrap_or_default();
+    let base = Path::new(stored).file_name().unwrap_or_default();
     fonts_dir.join(base)
 }
 
@@ -540,11 +532,7 @@ pub fn forget_font(conn: &Connection, fonts_dir: &Path, server_id: &str) -> AppR
 
 /// The stored bytes for the engine's file push. Missing file is a
 /// caller bug (a dirty font always has bytes), reported as not found.
-pub fn read_font_file(
-    conn: &Connection,
-    fonts_dir: &Path,
-    server_id: &str,
-) -> AppResult<Vec<u8>> {
+pub fn read_font_file(conn: &Connection, fonts_dir: &Path, server_id: &str) -> AppResult<Vec<u8>> {
     let stored: String = conn
         .query_row(
             "SELECT file_path FROM fonts WHERE server_id = ?1",
@@ -785,11 +773,7 @@ pub fn cache_list_synced_fonts(db: State<DbState>) -> AppResult<Vec<String>> {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn cache_forget_font(
-    app: AppHandle,
-    db: State<DbState>,
-    server_id: String,
-) -> AppResult<bool> {
+pub fn cache_forget_font(app: AppHandle, db: State<DbState>, server_id: String) -> AppResult<bool> {
     let fonts_dir = app.path().app_data_dir()?.join("fonts");
     let guard = db
         .lock()

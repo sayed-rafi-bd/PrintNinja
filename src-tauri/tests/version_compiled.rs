@@ -29,8 +29,7 @@ fn test_db() -> (Connection, i64) {
 #[test]
 fn backfill_updates_the_row_without_new_versions() {
     let (conn, vid) = test_db();
-    let out = set_version_compiled_conn(&conn, vid, ".a{color:red}", "k1")
-        .expect("backfill works");
+    let out = set_version_compiled_conn(&conn, vid, ".a{color:red}", "k1").expect("backfill works");
     assert_eq!(out.compiled_css, ".a{color:red}");
     assert_eq!(out.compiled_key, "k1");
     // Same row, same version number — no new version minted.

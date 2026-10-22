@@ -459,7 +459,10 @@ async fn print_job(
             .and_then(|v| v.as_str())
             .map(str::to_string),
         grayscale: settings.get("grayscale").and_then(|v| v.as_bool()),
-        http_method: settings.get("http_method").and_then(|v| v.as_str()).map(str::to_string),
+        http_method: settings
+            .get("http_method")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
         template_id,
         template_version_id: version_id,
         data: req.data.clone(),
@@ -776,39 +779,39 @@ async fn cancel_job(
 fn read_metric_counts(
     state: &ApiState,
 ) -> Result<(std::collections::HashMap<String, i64>, i64), ApiRejection> {
-        let guard = state.db.lock().map_err(ApiRejection::from)?;
-        let conn = guard.connection();
+    let guard = state.db.lock().map_err(ApiRejection::from)?;
+    let conn = guard.connection();
 
-        let mut by_status: std::collections::HashMap<String, i64> = [
-            ("queued", 0),
-            ("printing", 0),
-            ("success", 0),
-            ("failed", 0),
-            ("cancelled", 0),
-        ]
-        .iter()
-        .map(|(k, v)| (k.to_string(), *v))
-        .collect();
-        let mut stmt = conn
-            .prepare("SELECT status, COUNT(*) FROM print_jobs GROUP BY status")
-            .map_err(ApiRejection::from)?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .map_err(ApiRejection::from)?;
-        for row in rows {
-            let (status, count) = row.map_err(ApiRejection::from)?;
-            by_status.insert(status, count);
-        }
-        let batches_active: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM batches WHERE status IN ('queued', 'printing')",
-                [],
-                |r| r.get(0),
-            )
-            .map_err(ApiRejection::from)?;
-        Ok((by_status, batches_active))
+    let mut by_status: std::collections::HashMap<String, i64> = [
+        ("queued", 0),
+        ("printing", 0),
+        ("success", 0),
+        ("failed", 0),
+        ("cancelled", 0),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), *v))
+    .collect();
+    let mut stmt = conn
+        .prepare("SELECT status, COUNT(*) FROM print_jobs GROUP BY status")
+        .map_err(ApiRejection::from)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map_err(ApiRejection::from)?;
+    for row in rows {
+        let (status, count) = row.map_err(ApiRejection::from)?;
+        by_status.insert(status, count);
+    }
+    let batches_active: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM batches WHERE status IN ('queued', 'printing')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(ApiRejection::from)?;
+    Ok((by_status, batches_active))
 }
 
 /// Operational counters for dashboards and smoke checks: jobs by
@@ -837,10 +840,12 @@ async fn metrics_prometheus(State(state): State<ApiState>) -> impl IntoResponse 
     let (by_status, batches_active) = read_metric_counts(&state)?;
     let tracked = state.queue.tracked_printers().await;
     let finished = crate::metrics::finished_counts();
-    let out =
-        crate::metrics::render_prometheus(&by_status, batches_active, tracked, finished);
+    let out = crate::metrics::render_prometheus(&by_status, batches_active, tracked, finished);
     Ok::<_, ApiRejection>((
-        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
         out,
     ))
 }

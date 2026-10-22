@@ -230,7 +230,9 @@ fn adopt_or_conflict(
 /// of tripping a schema CHECK halfway through).
 fn validate_template_data(data: &TemplateDataIn) -> AppResult<()> {
     if data.name.trim().is_empty() {
-        return Err(AppError::Validation("sync template has an empty name".into()));
+        return Err(AppError::Validation(
+            "sync template has an empty name".into(),
+        ));
     }
     for (label, v) in [("page_w_mm", data.page_w_mm), ("page_h_mm", data.page_h_mm)] {
         if !v.is_finite() || v <= 0.0 || v > 10_000.0 {
@@ -694,10 +696,7 @@ pub fn clear_account(conn: &Connection, fonts_dir: &Path) -> AppResult<usize> {
          UPDATE settings SET sync_state = 'synced', synced_at = NULL;",
     )?;
     for stored in font_paths {
-        let _ = std::fs::remove_file(crate::commands::font::resolve_font_path(
-            fonts_dir,
-            &stored,
-        ));
+        let _ = std::fs::remove_file(crate::commands::font::resolve_font_path(fonts_dir, &stored));
     }
     Ok(templates as usize)
 }
@@ -791,10 +790,7 @@ pub fn cache_list_queued_uses(db: State<'_, DbState>) -> AppResult<Vec<QueuedUse
 }
 
 #[tauri::command]
-pub fn cache_clear_account(
-    app: AppHandle,
-    db: State<'_, DbState>,
-) -> AppResult<usize> {
+pub fn cache_clear_account(app: AppHandle, db: State<'_, DbState>) -> AppResult<usize> {
     let fonts_dir = app.path().app_data_dir()?.join("fonts");
     let guard = db
         .lock()

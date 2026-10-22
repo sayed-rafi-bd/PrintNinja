@@ -219,9 +219,11 @@ impl PrinterTransport for CupsPrinter {
     }
 
     async fn test(&self) -> Result<(), String> {
-        let body =
-            post_ipp("/", IppPrinter::build_get_printer_attributes(&ipp_uri(&self.uri)))
-                .await?;
+        let body = post_ipp(
+            "/",
+            IppPrinter::build_get_printer_attributes(&ipp_uri(&self.uri)),
+        )
+        .await?;
         let status = parse_status_code(&body)?;
         if status == 0 {
             Ok(())
@@ -290,7 +292,9 @@ mod tests {
     fn request_encodes_cups_get_printers() {
         let body = build_cups_get_printers();
         assert_eq!(&body[..8], &[0x01, 0x01, 0x40, 0x02, 0, 0, 0, 1]);
-        assert!(body.windows(b"attributes-charset".len()).any(|w| w == b"attributes-charset"));
+        assert!(body
+            .windows(b"attributes-charset".len())
+            .any(|w| w == b"attributes-charset"));
         assert_eq!(*body.last().unwrap(), 0x03);
     }
 

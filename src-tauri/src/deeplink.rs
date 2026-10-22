@@ -187,9 +187,8 @@ mod tests {
         assert!(!defaults.test);
         assert!(defaults.confirm);
         assert_eq!(defaults.callback, None);
-        let explicit = print(
-            "printninja://print?callback=https%3A%2F%2Fexample.com%2Fdone&confirm=0",
-        );
+        let explicit =
+            print("printninja://print?callback=https%3A%2F%2Fexample.com%2Fdone&confirm=0");
         assert!(!explicit.confirm);
         assert_eq!(
             explicit.callback.as_deref(),

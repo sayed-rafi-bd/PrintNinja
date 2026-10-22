@@ -143,11 +143,16 @@ fn p2_checks_sanitize_then_rebuild() {
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .unwrap();
-    assert_eq!((name.as_str(), address.as_str(), dpi, paper), ("(unnamed)", "(unknown)", 203, None));
+    assert_eq!(
+        (name.as_str(), address.as_str(), dpi, paper),
+        ("(unnamed)", "(unknown)", 203, None)
+    );
     let (tname, w, h): (String, i64, i64) = conn
-        .query_row("SELECT name, page_w_mm, page_h_mm FROM templates", [], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-        })
+        .query_row(
+            "SELECT name, page_w_mm, page_h_mm FROM templates",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
         .unwrap();
     assert_eq!((tname.as_str(), w, h), ("(unnamed)", 210, 297));
     let version_no: i64 = conn
@@ -159,7 +164,10 @@ fn p2_checks_sanitize_then_rebuild() {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?))
         })
         .unwrap();
-    assert_eq!((family.as_str(), format.as_str(), size), ("(unnamed)", "ttf", 0));
+    assert_eq!(
+        (family.as_str(), format.as_str(), size),
+        ("(unnamed)", "ttf", 0)
+    );
     let (total, done, failed): (i64, i64, i64) = conn
         .query_row("SELECT total, done, failed FROM batches", [], |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?))
@@ -175,8 +183,11 @@ fn p2_checks_sanitize_then_rebuild() {
         .unwrap();
     assert_eq!((copies, is_test, duration, record), (1, 0, None, None));
     assert_eq!(
-        conn.query_row("SELECT COUNT(*) FROM settings", [], |r: &rusqlite::Row| r.get::<_, i64>(0))
-            .unwrap(),
+        conn.query_row("SELECT COUNT(*) FROM settings", [], |r: &rusqlite::Row| r
+            .get::<_, i64>(
+            0
+        ))
+        .unwrap(),
         0,
         "empty setting keys are dropped"
     );
@@ -187,18 +198,27 @@ fn p2_checks_sanitize_then_rebuild() {
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    assert_eq!(names, vec!["(unnamed 2)"],
-        "empty-hash clients are dropped; empty names stay unique");
+    assert_eq!(
+        names,
+        vec!["(unnamed 2)"],
+        "empty-hash clients are dropped; empty names stay unique"
+    );
 
     // And the CHECKs are live now.
     assert!(conn
-        .execute("INSERT INTO printers (name, type, address, language) VALUES ('', 'ipp', 'x', 'pdf')", [])
+        .execute(
+            "INSERT INTO printers (name, type, address, language) VALUES ('', 'ipp', 'x', 'pdf')",
+            []
+        )
         .is_err());
     assert!(conn
         .execute("INSERT INTO print_jobs (copies) VALUES (0)", [])
         .is_err());
     assert!(conn
-        .execute("INSERT INTO fonts (family, file_path, format) VALUES ('F', 'f.ttf', 'exe')", [])
+        .execute(
+            "INSERT INTO fonts (family, file_path, format) VALUES ('F', 'f.ttf', 'exe')",
+            []
+        )
         .is_err());
 
     // Idempotent: a second init changes nothing.

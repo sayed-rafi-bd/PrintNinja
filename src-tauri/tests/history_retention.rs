@@ -16,11 +16,7 @@ fn test_db() -> Db {
     ))
 }
 
-fn seed_job(
-    db: &Db,
-    status: &str,
-    created_at: &str,
-) -> i64 {
+fn seed_job(db: &Db, status: &str, created_at: &str) -> i64 {
     let guard = db.lock().unwrap();
     guard
         .connection()
@@ -80,12 +76,17 @@ fn purges_by_age_but_never_touches_live_rows() {
 fn caps_total_rows_oldest_first() {
     let db = test_db();
     let mut ids = Vec::new();
-    for day in ["2020-01-01 00:00:00", "2020-01-02 00:00:00", "2020-01-03 00:00:00"] {
+    for day in [
+        "2020-01-01 00:00:00",
+        "2020-01-02 00:00:00",
+        "2020-01-03 00:00:00",
+    ] {
         ids.push(seed_job(&db, "success", day));
     }
     // Nothing is older than the horizon here; only the cap bites.
-    let (by_age, by_cap) =
-        with_conn(&db, |conn| purge_old_jobs(conn, 3650, 2).expect("purge works"));
+    let (by_age, by_cap) = with_conn(&db, |conn| {
+        purge_old_jobs(conn, 3650, 2).expect("purge works")
+    });
     assert_eq!((by_age, by_cap), (0, 1));
 
     let kept: Vec<i64> = remaining(&db).iter().map(|(id, _)| *id).collect();

@@ -223,7 +223,9 @@ async fn metrics_prometheus_renders_gauges() {
     );
     for outcome in ["success", "failed", "cancelled"] {
         assert!(
-            text.contains(&format!("printninja_jobs_completed_total{{outcome=\"{outcome}\"}} ")),
+            text.contains(&format!(
+                "printninja_jobs_completed_total{{outcome=\"{outcome}\"}} "
+            )),
             "outcome {outcome} rendered: {text}"
         );
     }

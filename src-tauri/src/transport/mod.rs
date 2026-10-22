@@ -438,13 +438,10 @@ mod tests {
     async fn system_transport_probes_cups_without_printing() {
         // Read-only probe: absent daemon and unknown queue both fail
         // without submitting anything.
-        let err = TransportRegistry::test_printer(
-            &PrinterType::System,
-            "no-such-queue-printninja",
-            "",
-        )
-        .await
-        .unwrap_err();
+        let err =
+            TransportRegistry::test_printer(&PrinterType::System, "no-such-queue-printninja", "")
+                .await
+                .unwrap_err();
         assert!(err.contains("CUPS"), "{err}");
     }
 

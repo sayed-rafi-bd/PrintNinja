@@ -196,8 +196,5 @@ fn cups_test_probe_needs_no_print() {
     ));
     std::env::remove_var("PRINTNINJA_CUPS_URL");
     let err = result.unwrap_err();
-    assert!(
-        err.contains("CUPS"),
-        "probe failure names CUPS: {err}"
-    );
+    assert!(err.contains("CUPS"), "probe failure names CUPS: {err}");
 }

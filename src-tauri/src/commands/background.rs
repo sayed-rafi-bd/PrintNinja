@@ -104,10 +104,8 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     fn test_db() -> DbState {
-        let path = std::env::temp_dir().join(format!(
-            "printninja_background_{}.db",
-            uuid::Uuid::new_v4()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("printninja_background_{}.db", uuid::Uuid::new_v4()));
         Arc::new(Mutex::new(
             Database::open(&format!("sqlite:{}", path.display())).expect("open db"),
         ))

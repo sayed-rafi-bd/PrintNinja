@@ -460,10 +460,7 @@ impl PdfRenderer {
 /// unsupported. Normal users stay sandboxed; root gets one loud retry
 /// instead of a dead queue.
 #[cfg(target_os = "linux")]
-async fn run_chromium(
-    chromium: &std::path::Path,
-    args: &[String],
-) -> Result<std::process::Output> {
+async fn run_chromium(chromium: &std::path::Path, args: &[String]) -> Result<std::process::Output> {
     use tokio::process::Command;
     let output = Command::new(chromium).args(args).output().await?;
     if output.status.success() {
@@ -471,11 +468,8 @@ async fn run_chromium(
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
     if stderr.contains("Running as root without --no-sandbox") {
-        tracing::warn!(
-            "Chromium refuses the sandbox as root; retrying once with --no-sandbox"
-        );
-        let mut retry: Vec<String> =
-            vec!["--no-sandbox".to_string()];
+        tracing::warn!("Chromium refuses the sandbox as root; retrying once with --no-sandbox");
+        let mut retry: Vec<String> = vec!["--no-sandbox".to_string()];
         retry.extend(args.iter().cloned());
         return Ok(Command::new(chromium).args(&retry).output().await?);
     }

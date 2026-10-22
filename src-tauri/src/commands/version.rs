@@ -88,7 +88,10 @@ pub fn list_latest_versions_conn(
         let mut stmt = conn.prepare(&sql)?;
         let params: Vec<&dyn rusqlite::ToSql> =
             chunk.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
-        out.extend(stmt.query_map(params.as_slice(), map_version)?.collect::<Result<Vec<_>, _>>()?);
+        out.extend(
+            stmt.query_map(params.as_slice(), map_version)?
+                .collect::<Result<Vec<_>, _>>()?,
+        );
     }
     Ok(out)
 }

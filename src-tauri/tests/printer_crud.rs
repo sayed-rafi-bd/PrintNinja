@@ -83,7 +83,9 @@ fn update_rejects_duplicates_case_insensitively_but_keeps_own_name() {
     );
 
     // Keeping the row's own name (even re-cased) is fine.
-    let kept = with_conn(&db, |conn| update_printer_conn(conn, id, &req("dock zebra")));
+    let kept = with_conn(&db, |conn| {
+        update_printer_conn(conn, id, &req("dock zebra"))
+    });
     assert!(kept.is_ok(), "own name must not count as a duplicate");
 }
 

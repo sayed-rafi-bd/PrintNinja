@@ -105,15 +105,13 @@ pub fn run() {
     // starting a second queue. Required once close-to-tray keeps the
     // process alive after the window is gone.
     #[cfg(desktop)]
-    let builder = builder.plugin(tauri_plugin_single_instance::init(
-        |app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-        },
-    ));
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }));
 
     // Autostart registration itself (Windows Run key, Linux .desktop).
     // Enabled/disabled from the settings DB, never by install default.
@@ -146,13 +144,10 @@ pub fn run() {
             {
                 let fonts_dir = app.path().app_data_dir().map(|d| d.join("fonts"));
                 if let Ok(dir) = fonts_dir {
-                    let guard = db_state.lock().map_err(|_| {
-                        error::AppError::Internal("DB lock poisoned".into())
-                    })?;
-                    match commands::font::sweep_orphan_font_files(
-                        guard.connection(),
-                        &dir,
-                    ) {
+                    let guard = db_state
+                        .lock()
+                        .map_err(|_| error::AppError::Internal("DB lock poisoned".into()))?;
+                    match commands::font::sweep_orphan_font_files(guard.connection(), &dir) {
                         Ok(0) => {}
                         Ok(n) => tracing::info!(n, "removed orphan font files at startup"),
                         Err(e) => tracing::warn!(error = %e, "font orphan sweep failed"),
@@ -232,7 +227,8 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 let prefs = commands::background::read_prefs(app.handle());
-                let _ = commands::background::apply_autostart(app.handle(), prefs.launch_at_startup);
+                let _ =
+                    commands::background::apply_autostart(app.handle(), prefs.launch_at_startup);
                 build_tray(app.handle())?;
 
                 // Launched by the OS at login with --minimized, or told
