@@ -141,7 +141,7 @@ describe("E4 withdrawal", () => {
 
     expect(
       (await request("POST", `/v2/templates/${id}/unpublish`, owner)).status,
-    ).toBe(204);
+    ).toBe(200);
     const saved = await request("GET", "/v2/saved?page_size=100", reader);
     expect(
       (saved.json as { items: { id: string }[] }).items.map((t) => t.id),

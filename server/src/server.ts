@@ -43,6 +43,7 @@ const deps: AppDeps = {
   fonts: createFontRepository(db),
   saved: createSavedRepository(db),
   sync: createSyncRepository(db),
+  ping: () => db.$queryRaw`SELECT 1`.then(() => undefined),
 };
 
 const app = await buildApp({ config, deps });
@@ -66,15 +67,34 @@ app.log.info(
   "purged at startup",
 );
 const cleanupTimer = setInterval(() => {
-  purgeExpiredSessions(deps).then(
-    (purged) => app.log.info({ purged }, "purged expired sessions"),
-    (error: unknown) => app.log.error({ err: error }, "session purge failed"),
-  );
-  purgeOldTombstones(deps, new Date(), config.syncTombstoneDays).then(
-    (purged) => app.log.info({ purged }, "purged old tombstones"),
-    (error: unknown) => app.log.error({ err: error }, "tombstone purge failed"),
-  );
+  void runCleanup();
 }, config.sessionCleanupMinutes * 60_000);
+// The listener socket owns the process lifetime, not this timer: a
+// wedged event loop should not be held open by cleanup alone, and a
+// slow purge must not overlap the next tick.
+cleanupTimer.unref?.();
+let cleanupRunning = false;
+async function runCleanup(): Promise<void> {
+  if (cleanupRunning) {
+    app.log.warn("cleanup still running; skipping this tick");
+    return;
+  }
+  cleanupRunning = true;
+  try {
+    const [purgedSessions, purgedTombstones] = await Promise.all([
+      purgeExpiredSessions(deps),
+      purgeOldTombstones(deps, new Date(), config.syncTombstoneDays),
+    ]);
+    app.log.info(
+      { purgedSessions, purgedTombstones },
+      "periodic cleanup finished",
+    );
+  } catch (error: unknown) {
+    app.log.error({ err: error }, "periodic cleanup failed");
+  } finally {
+    cleanupRunning = false;
+  }
+}
 app.addHook("onClose", async () => {
   clearInterval(cleanupTimer);
 });

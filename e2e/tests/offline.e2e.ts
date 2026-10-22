@@ -25,7 +25,7 @@ function blockApi(
 
 test("F12 offline start, pending edits, and recovery", async ({ browser }) => {
   const { apiUrl } = readStackState();
-  const runId = Date.now().toString(36);
+  const runId = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
   const handle = `f12-${runId}`;
   const auth = await apiRegister(handle, PASSWORD);
 
@@ -105,7 +105,7 @@ test("F12 without a cache the unreachable screen stays and Retry works", async (
 }) => {
   const { apiUrl } = readStackState();
   const auth = await apiRegister(
-    `f12-nocache-${Date.now().toString(36)}`,
+    `f12-nocache-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
     PASSWORD,
   );
   const seeded = await pc(browser, {

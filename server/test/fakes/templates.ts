@@ -53,6 +53,8 @@ export interface FakeTemplateStore {
     deletedAt: Date;
   }[];
   saved: Map<string, SavedRow[]>;
+  /** Per-user, per-template, per-day use counts, keyed user/template/day. */
+  useDaily: Map<string, number>;
   tick: number;
 }
 
@@ -71,8 +73,12 @@ export function createFakeTemplateRepos(users: {
     seqs: new Map(),
     tombstones: [],
     saved: new Map(),
+    useDaily: new Map(),
     tick: 0,
   };
+
+  const useDailyKey = (userId: string, templateId: string, day: Date): string =>
+    `${userId}\n${templateId}\n${day.toISOString()}`;
 
   const now = () => new Date(BASE_MS + store.tick++ * 1000);
   // Mirrors user_sync.next_seq (@default(1)) with bump-then-hand: the
@@ -368,6 +374,17 @@ export function createFakeTemplateRepos(users: {
       stored.useCount += by;
       return true;
     },
+
+    async getDailyUse(userId, templateId, day) {
+      return store.useDaily.get(useDailyKey(userId, templateId, day)) ?? 0;
+    },
+
+    async addDailyUse(userId, templateId, day, by) {
+      const key = useDailyKey(userId, templateId, day);
+      const total = (store.useDaily.get(key) ?? 0) + by;
+      store.useDaily.set(key, total);
+      return total;
+    },
   };
 
   const saved: SavedRepository = {
@@ -465,30 +482,46 @@ export function createFakeTemplateRepos(users: {
             entity: SyncEntity;
             entityKey: string;
           };
-      const candidates: Candidate[] = [];
+      // Per-stream overflow, mirroring the real repository: each stream
+      // is capped at limit+1, so a stream longer than limit has more
+      // rows beyond this page. Judging the merged list instead reported
+      // hasMore whenever short streams added up past the limit.
+      const templateRows: StoredTemplate[] = [];
       if (query.types.includes("template")) {
         for (const t of store.templates.values()) {
           if (t.ownerId === userId && t.changeSeq > query.cursor) {
-            candidates.push({ seq: t.changeSeq, kind: "upsert", template: t });
+            templateRows.push(t);
           }
         }
       }
-      for (const t of store.tombstones) {
-        if (
+      templateRows.sort((a, b) =>
+        a.changeSeq < b.changeSeq ? -1 : a.changeSeq > b.changeSeq ? 1 : 0,
+      );
+      const tombRows = store.tombstones.filter(
+        (t) =>
           t.userId === userId &&
           t.seq > query.cursor &&
-          query.types.includes(t.entity as SyncEntity)
-        ) {
-          candidates.push({
-            seq: t.seq,
-            kind: "delete",
-            entity: t.entity as SyncEntity,
-            entityKey: t.entityKey,
-          });
-        }
-      }
+          query.types.includes(t.entity as SyncEntity),
+      );
+      tombRows.sort((a, b) => (a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0));
+      const streamHasMore =
+        templateRows.length > query.limit || tombRows.length > query.limit;
+      const keptTemplates = templateRows.slice(0, query.limit);
+      const keptTombs = tombRows.slice(0, query.limit);
+      const candidates: Candidate[] = [
+        ...keptTemplates.map((t) => ({
+          seq: t.changeSeq,
+          kind: "upsert" as const,
+          template: t,
+        })),
+        ...keptTombs.map((t) => ({
+          seq: t.seq,
+          kind: "delete" as const,
+          entity: t.entity as SyncEntity,
+          entityKey: t.entityKey,
+        })),
+      ];
       candidates.sort((a, b) => (a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0));
-      const hasMoreProbe = candidates.length > query.limit;
       const page = candidates.slice(0, query.limit);
       let used = 0;
       let kept = page.length;
@@ -517,7 +550,7 @@ export function createFakeTemplateRepos(users: {
         ),
         nextCursor:
           trimmed.length > 0 ? trimmed[trimmed.length - 1].seq : query.cursor,
-        hasMore: hasMoreProbe || kept < page.length,
+        hasMore: streamHasMore || kept < page.length,
       };
     },
     async purgeTombstones(olderThan) {

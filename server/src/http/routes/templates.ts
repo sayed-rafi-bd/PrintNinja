@@ -17,6 +17,7 @@ import type {
   TemplateRepository,
 } from "../../domain/templatePorts.js";
 import { toTemplate, toTemplateSummary } from "../mappers.js";
+import { etagMatches } from "../etag.js";
 import { optionalAuth, requireAuth } from "../plugins/auth.js";
 import { errorBody } from "../schemas/error.js";
 import {
@@ -32,6 +33,13 @@ export interface TemplateRouteOptions {
   deps: AuthDeps & { templates: TemplateRepository; saved: SavedRepository };
 }
 
+/** Start of the current UTC day: the use-count budget resets at midnight. */
+function utcDay(now = new Date()): Date {
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+}
+
 /**
  * Endpoints 5-10 and 12: create/update, read, delete, publish,
  * unpublish, own list and use counter.
@@ -39,8 +47,9 @@ export interface TemplateRouteOptions {
  * Visibility travels only through publish/unpublish: creates are always
  * private, and PUT never changes published_at. Updates need if_revision
  * (428 without, 409 on stale); a stale revision with identical content
- * replays the stored row (200, no write). The PUT body cap is 1 MiB per
- * the plan; everything else keeps the 16 KiB service default.
+ * replays the stored row (200, no write). The PUT body cap covers the
+ * 512 + 256 + 64 KiB domain caps plus JSON overhead with headroom;
+ * everything else keeps the 16 KiB service default.
  */
 export async function templateRoutes(
   app: FastifyInstance,
@@ -53,7 +62,7 @@ export async function templateRoutes(
     "/v2/templates/:id",
     {
       preHandler: [requireAuth(deps)],
-      bodyLimit: 1024 * 1024,
+      bodyLimit: 1280 * 1024,
       schema: {
         description: "Create or update a template by client UUID.",
         params: templateIdParams,
@@ -125,7 +134,9 @@ export async function templateRoutes(
         request.params.id,
         request.authUser?.id ?? null,
       );
-      if (ifNoneMatch(request.headers["if-none-match"], template.revision)) {
+      if (
+        etagMatches(request.headers["if-none-match"], String(template.revision))
+      ) {
         return reply.status(304).send();
       }
       reply.header("etag", `"${template.revision}"`);
@@ -195,26 +206,27 @@ export async function templateRoutes(
     {
       preHandler: [requireAuth(deps)],
       schema: {
-        description: "Make a template private.",
+        description:
+          "Make a template private. Answers the updated template, like publish.",
         params: templateIdParams,
         response: {
-          204: z.null(),
+          200: templateSchema,
           401: errorBody,
           403: errorBody,
           404: errorBody,
         },
       },
     },
-    async (request, reply) => {
+    async (request) => {
       if (!request.authUser) {
         throw new UnauthorizedError();
       }
-      await unpublishTemplate(
+      const template = await unpublishTemplate(
         { templates: deps.templates },
         request.params.id,
         request.authUser.id,
       );
-      return reply.status(204).send(null);
+      return toTemplate(template);
     },
   );
 
@@ -273,27 +285,11 @@ export async function templateRoutes(
       await recordUse(
         { templates: deps.templates },
         request.params.id,
+        request.authUser.id,
         request.body?.count ?? 1,
+        utcDay(),
       );
       return reply.status(204).send(null);
     },
   );
-}
-
-/** Matches If-None-Match against the revision, tolerating lists,
- * weak validators and bare numbers. */
-function ifNoneMatch(
-  header: string | string[] | undefined,
-  revision: number,
-): boolean {
-  if (!header) {
-    return false;
-  }
-  const targets = (Array.isArray(header) ? header.join(",") : header).split(
-    ",",
-  );
-  return targets.some((entry) => {
-    const tag = entry.trim().replace(/^W\//, "").replace(/^"|"$/g, "");
-    return tag === String(revision);
-  });
 }

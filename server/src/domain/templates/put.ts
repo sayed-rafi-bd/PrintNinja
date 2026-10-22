@@ -10,7 +10,9 @@ import type {
   VersionWrite,
 } from "../templatePorts.js";
 import {
+  assertNameCaps,
   assertSizeCaps,
+  assertVersionCaps,
   findRemoteRefs,
   type RemoteRefIssue,
 } from "./shared.js";
@@ -58,6 +60,8 @@ export async function putTemplate(
   const summary = (input.summary ?? "").trim();
   const css = input.css ?? null;
   const readme = input.readme ?? null;
+  assertNameCaps(input.name.trim(), summary);
+  assertVersionCaps(input.version?.label, input.version?.note);
   assertSizeCaps(input.body, css ?? "", readme ?? "");
 
   const refs: RemoteRefIssue[] = findRemoteRefs(input.body, css ?? "");

@@ -87,3 +87,54 @@ that holds `last-render.pdf`:
 | ZPL/TSPL model, connection | |
 | Network/system printer | |
 | Pass / failures (issue links) | |
+
+## Appendix L. Linux (deb + AppImage, §5 of IMPROVEMENTS.md)
+
+Run on a clean Debian/Ubuntu machine (VM is fine) before publishing.
+Linux v1 serves **IPP + raw TCP + CUPS queues** rendered by a **system
+Chromium**; USB and Bluetooth stay Windows-only and must fail
+with the platform message, never silently.
+
+- [ ] `.deb` installs (`dpkg -i`); the app opens from the launcher icon
+- [ ] `dpkg -s print-ninja` shows the `libayatana-appindicator3`
+      dependency; tray icon appears (KDE: always; stock GNOME: only
+      with an AppIndicator extension — record which shell was tested)
+- [ ] Tray menu: Show focuses the window, left-click toggles, Quit exits
+- [ ] Close hides to the tray; minimize hides when enabled; Quit from the
+      tray ends the process (no orphan `printninja`)
+- [ ] Fresh install does **not** autostart; enabling it writes
+      `~/.config/autostart/` and the next login opens minimized when set
+- [ ] An IPP printer prints a PDF job; `@page` size matches the template
+      (measure the label, not the screen)
+- [ ] With no Chromium installed, a print fails loudly naming the missing
+      browser (`PRINTNINJA_CHROMIUM_BIN` documented); installing
+      `chromium` makes the same job print
+- [ ] A raw TCP printer prints; a switched-off printer ends `failed`
+      with the reason, never `success`
+- [ ] USB/Bluetooth printer setup is refused with the platform message
+- [ ] A CUPS queue appears in Add → discovered printers; adding it
+      stores the queue; a test page prints through the queue
+- [ ] With cupsd stopped, the discovered list is empty and Setup
+      still loads (no hang, no error toast)
+- [ ] No udev rules, `dialout`/`lp` groups, or permission tweaks are
+      needed: USB is unsupported-by-design on Linux v1 (not a
+      permissions problem), so there is nothing to grant
+- [ ] AppImage runs from a download folder with no install (`chmod +x`)
+
+## Appendix M. Android foreground service (manual — no emulator in CI)
+
+On a physical device with a debug APK (`android-build` CI artifact):
+- [ ] Launching the app shows the persistent notification "PrintNinja
+      print service is running"; tapping it reopens the app
+- [ ] Notification has a working Stop action; stopping removes the
+      notification without crashing the app
+- [ ] Print a job, swipe the app away mid-queue, confirm the job still
+      completes (foreground service survived the swipe)
+- [ ] Reboot the phone: service is stopped (no autostart — by design);
+      launching the app starts it again
+- [ ] Settings → Background shows the service status and the battery
+      exemption row (desktop tray toggles are hidden on Android);
+      "Request exemption" opens the system screen, and granting it
+      flips the status to allowed
+- [ ] With Battery Saver on and no exemption, a queued print still
+      completes (may be deferred by Doze — record the delay)

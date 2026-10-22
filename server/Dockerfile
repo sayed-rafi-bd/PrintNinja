@@ -62,9 +62,10 @@ USER node
 
 EXPOSE 3001
 
-# No curl in the slim image; node itself probes the liveness endpoint.
+# No curl in the slim image; node itself probes readiness (liveness plus a
+# database round-trip), so an unhealthy database fails the check.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=15s \
-    CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || '3001') + '/v2/health').then((r) => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"
+    CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || '3001') + '/v2/ready').then((r) => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["node", "dist/server.js"]

@@ -2,6 +2,7 @@
 
 export type SettingsSection =
   | "general"
+  | "background"
   | "share"
   | "api"
   | "data"
@@ -124,6 +125,7 @@ export function summarize(items: ChecklistItem[]) {
 const SECTIONS: SettingsSection[] = [
   "setup",
   "general",
+  "background",
   "share",
   "api",
   "data",

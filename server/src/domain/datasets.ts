@@ -11,6 +11,33 @@ import type { DatasetRepository, DatasetView } from "./libraryPorts.js";
 /** Sample-dataset bodies are capped like CSS (unchecked UTF-16 length
  * would let multi-byte text past the budget — see P10). */
 export const DATASET_JSON_MAX_BYTES = 262_144;
+export const DATASET_NAME_MAX_BYTES = 200;
+/** Nesting budget: a 256 KiB deeply-nested array would blow the sync
+ * estimator's recursion and each reader's stack. 32 is far beyond any
+ * real template context shape. */
+export const DATASET_JSON_MAX_DEPTH = 32;
+
+/** Iterative depth of a parsed JSON value (scalars count 0). */
+export function jsonDepth(value: unknown): number {
+  let max = 0;
+  const stack: Array<{ node: unknown; depth: number }> = [
+    { node: value, depth: 0 },
+  ];
+  while (stack.length > 0) {
+    const { node, depth } = stack.pop() as {
+      node: unknown;
+      depth: number;
+    };
+    if (depth > max) max = depth;
+    if (Array.isArray(node)) {
+      for (const item of node) stack.push({ node: item, depth: depth + 1 });
+    } else if (node !== null && typeof node === "object") {
+      for (const item of Object.values(node))
+        stack.push({ node: item, depth: depth + 1 });
+    }
+  }
+  return max;
+}
 
 export interface PutDatasetInput {
   id: string;
@@ -38,6 +65,14 @@ function checkWrite(input: PutDatasetInput): {
       { path: "name", message: "Required" },
     ]);
   }
+  if (Buffer.byteLength(name, "utf8") > DATASET_NAME_MAX_BYTES) {
+    throw new PayloadTooLargeError([
+      {
+        path: "name",
+        message: `Over the ${DATASET_NAME_MAX_BYTES} byte cap`,
+      },
+    ]);
+  }
   const dataJson = input.dataJson ?? "{}";
   if (Buffer.byteLength(dataJson, "utf8") > DATASET_JSON_MAX_BYTES) {
     throw new PayloadTooLargeError([
@@ -47,11 +82,20 @@ function checkWrite(input: PutDatasetInput): {
       },
     ]);
   }
+  let parsed: unknown;
   try {
-    JSON.parse(dataJson);
+    parsed = JSON.parse(dataJson);
   } catch {
     throw new ValidationError("data_json is not valid JSON", [
       { path: "dataJson", message: "Must be valid JSON" },
+    ]);
+  }
+  if (jsonDepth(parsed) > DATASET_JSON_MAX_DEPTH) {
+    throw new ValidationError("data_json is nested too deeply", [
+      {
+        path: "dataJson",
+        message: `Must nest at most ${DATASET_JSON_MAX_DEPTH} levels`,
+      },
     ]);
   }
   return { name, dataJson };

@@ -43,6 +43,59 @@ fn map_version(row: &rusqlite::Row) -> rusqlite::Result<TemplateVersion> {
     })
 }
 
+/// Latest version per template, in a single query.
+///
+/// Designer hydration needs every row's current content but must not do
+/// one `list_versions` per template (N+1). One call, one round trip.
+#[tauri::command(rename_all = "snake_case")]
+pub fn list_latest_versions(
+    db: State<DbState>,
+    template_ids: Vec<i64>,
+) -> AppResult<Vec<TemplateVersion>> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    list_latest_versions_conn(guard.connection(), &template_ids)
+}
+
+/// Body of `list_latest_versions`, taking the shared connection so tests
+/// can drive it without a Tauri `State`.
+pub fn list_latest_versions_conn(
+    conn: &Connection,
+    template_ids: &[i64],
+) -> AppResult<Vec<TemplateVersion>> {
+    if template_ids.is_empty() {
+        return Ok(vec![]);
+    }
+    // One placeholder per id; templates are user-count, far below the
+    // SQLite variable limit, but chunk anyway to stay correct.
+    let mut out = Vec::new();
+    for chunk in template_ids.chunks(500) {
+        let placeholders = chunk
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT {VERSION_COLUMNS} FROM template_versions
+             WHERE template_id IN ({placeholders})
+               AND version_no = (
+                 SELECT MAX(version_no) FROM template_versions AS inner_v
+                 WHERE inner_v.template_id = template_versions.template_id
+               )"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::ToSql> =
+            chunk.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+        out.extend(
+            stmt.query_map(params.as_slice(), map_version)?
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+    }
+    Ok(out)
+}
+
 /// `sync` marks the version a Refresh from the server produced, so history
 /// shows which copy came from where.
 const VALID_CREATED_BY: &[&str] = &["manual", "autosave", "restore", "sync"];
@@ -162,6 +215,48 @@ pub fn create_version_conn(
     )?;
 
     Ok(version)
+}
+
+/// Backfill the compiled stylesheet onto an existing version row.
+///
+/// Previews compile on demand for versions saved before per-template
+/// compilation existed. That must not create a new version every time
+/// someone looks at an old template — this updates the row in place,
+/// bumps nothing user-visible, and leaves sync_state alone.
+#[tauri::command(rename_all = "snake_case")]
+pub fn set_version_compiled(
+    db: State<DbState>,
+    id: i64,
+    compiled_css: String,
+    compiled_key: String,
+) -> AppResult<TemplateVersion> {
+    let guard = db
+        .lock()
+        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
+    set_version_compiled_conn(guard.connection(), id, &compiled_css, &compiled_key)
+}
+
+/// Body of `set_version_compiled`, taking the shared connection so tests
+/// can drive it without a Tauri `State`.
+pub fn set_version_compiled_conn(
+    conn: &Connection,
+    id: i64,
+    compiled_css: &str,
+    compiled_key: &str,
+) -> AppResult<TemplateVersion> {
+    let affected = conn.execute(
+        "UPDATE template_versions SET compiled_css = ?1, compiled_key = ?2 WHERE id = ?3",
+        rusqlite::params![compiled_css, compiled_key, id],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("Version {} not found", id)));
+    }
+    conn.query_row(
+        &format!("SELECT {VERSION_COLUMNS} FROM template_versions WHERE id = ?1"),
+        [id],
+        map_version,
+    )
+    .map_err(|_| AppError::NotFound(format!("Version {} not found", id)))
 }
 
 /// Restore must never overwrite history (PLANNING.md 7.3):

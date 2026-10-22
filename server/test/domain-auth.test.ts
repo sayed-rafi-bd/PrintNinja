@@ -8,10 +8,13 @@ import {
   createFakeUsers,
 } from "./fakes/index.js";
 import {
+  changePassword,
   loginUser,
   logoutUser,
+  MAX_SESSIONS_PER_USER,
   purgeExpiredSessions,
   registerUser,
+  revokeOtherSessions,
   validateSession,
 } from "../src/domain/auth/index.js";
 import {
@@ -133,6 +136,47 @@ describe("loginUser", () => {
     await expect(unknownHandle).rejects.toThrow("Invalid handle or password");
   });
 
+  it("still verifies a password for an unknown handle (no timing oracle)", async () => {
+    const d = deps();
+    await registered(d, "bob");
+    let verifications = 0;
+    const inner = d.hasher.verify.bind(d.hasher);
+    d.hasher = {
+      ...d.hasher,
+      verify: async (storedHash, password) => {
+        verifications += 1;
+        return inner(storedHash, password);
+      },
+    };
+
+    await expect(
+      loginUser(d, { handle: "nobody", password: PASSWORD }),
+    ).rejects.toBeInstanceOf(InvalidCredentialsError);
+    expect(verifications).toBe(1);
+  });
+
+  it("caps sessions per user, keeping the newest", async () => {
+    const d = deps();
+    const first = await registered(d, "carol");
+    expect(first.token).toBe("token-1");
+
+    let last = "";
+    for (let i = 0; i < 25; i++) {
+      last = (await loginUser(d, { handle: "carol", password: PASSWORD }))
+        .token;
+    }
+
+    // 1 register + 25 logins, capped at MAX_SESSIONS_PER_USER.
+    const survivors: string[] = [];
+    for (let i = 1; i <= 26; i++) {
+      const session = await validateSession(d, `token-${i}`).catch(() => null);
+      if (session) survivors.push(`token-${i}`);
+    }
+    expect(survivors).toHaveLength(MAX_SESSIONS_PER_USER);
+    expect(survivors).toContain(last);
+    expect(survivors).not.toContain("token-1");
+  });
+
   it("rehashes a legacy scrypt password to the current algorithm on login", async () => {
     const d = deps();
     const legacy = "$scrypt$ln=17,r=8,p=1$c2FsdA$bWFzaA";
@@ -175,6 +219,69 @@ describe("logoutUser and validateSession", () => {
 
   it("logout is idempotent: an unknown token still succeeds", async () => {
     await expect(logoutUser(deps(), "nope")).resolves.toBeUndefined();
+  });
+
+  it("revokeOtherSessions keeps the caller and kills the rest", async () => {
+    const d = deps();
+    const first = await registered(d);
+    const second = await loginUser(d, { handle: "Alice", password: PASSWORD });
+    expect(second.token).not.toBe(first.token);
+
+    const revoked = await revokeOtherSessions(d, first.user.id, first.token);
+    expect(revoked).toBe(1);
+
+    // The caller still validates; the other session is gone.
+    await expect(validateSession(d, first.token)).resolves.toMatchObject({
+      user: { handle: "Alice" },
+    });
+    await expect(validateSession(d, second.token)).rejects.toBeInstanceOf(
+      UnauthorizedError,
+    );
+
+    // Nothing left to revoke is not an error.
+    await expect(
+      revokeOtherSessions(d, first.user.id, first.token),
+    ).resolves.toBe(0);
+  });
+
+  it("changePassword needs the current password and revokes the rest", async () => {
+    const d = deps();
+    const first = await registered(d);
+    const second = await loginUser(d, { handle: "Alice", password: PASSWORD });
+
+    // A wrong current password fails like a bad login, changing nothing.
+    await expect(
+      changePassword(
+        d,
+        first.user,
+        "not-the-password",
+        "new-password-1",
+        first.token,
+      ),
+    ).rejects.toBeInstanceOf(InvalidCredentialsError);
+    await expect(validateSession(d, first.token)).resolves.toBeTruthy();
+
+    const { revoked } = await changePassword(
+      d,
+      first.user,
+      PASSWORD,
+      "new-password-1",
+      first.token,
+    );
+    expect(revoked).toBe(1);
+
+    // The new password logs in; the old one does not; the other
+    // session died with the change.
+    await expect(
+      loginUser(d, { handle: "Alice", password: "new-password-1" }),
+    ).resolves.toMatchObject({ user: { handle: "Alice" } });
+    await expect(
+      loginUser(d, { handle: "Alice", password: PASSWORD }),
+    ).rejects.toBeInstanceOf(InvalidCredentialsError);
+    await expect(validateSession(d, second.token)).rejects.toBeInstanceOf(
+      UnauthorizedError,
+    );
+    await expect(validateSession(d, first.token)).resolves.toBeTruthy();
   });
 
   it("rejects missing, malformed, unknown and expired tokens alike", async () => {

@@ -72,6 +72,13 @@ export function TemplatesPage() {
   const [communityLoading, setCommunityLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("updated");
+  // Debounced for the community query: every keystroke used to fire
+  // fetchCommunityTemplates. The input stays live; the network waits.
+  const [debouncedSearch, setDebouncedSearch] = useState(search);
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedSearch(search), 250);
+    return () => clearTimeout(id);
+  }, [search]);
   const [mine, setMine] = useState<TemplateRow[]>([]);
   const [saved, setSaved] = useState<TemplateRow[]>([]);
   const [saving, setSaving] = useState<Set<string>>(new Set());
@@ -82,6 +89,19 @@ export function TemplatesPage() {
   /** Rows the server refused with 409. The dialog resolves them. */
   const [conflicts, setConflicts] = useState<ConflictedRow[]>([]);
   const [conflictOpen, setConflictOpen] = useState(false);
+  // Position in the conflict queue: resolving one advances to the next
+  // instead of dropping the rest (the old code only ever showed [0]).
+  const [conflictIdx, setConflictIdx] = useState(0);
+
+  const advanceConflict = () => {
+    if (conflictIdx + 1 < conflicts.length) {
+      setConflictIdx(conflictIdx + 1);
+    } else {
+      setConflictOpen(false);
+      setConflictIdx(0);
+    }
+    void loadMine();
+  };
 
   const loadMine = useCallback(async () => {
     try {
@@ -113,7 +133,7 @@ export function TemplatesPage() {
     try {
       setCommunity(
         await share.fetchCommunityTemplates({
-          q: search,
+          q: debouncedSearch,
           sort: sort as "updated" | "used" | "name",
         }),
       );
@@ -123,7 +143,7 @@ export function TemplatesPage() {
     } finally {
       setCommunityLoading(false);
     }
-  }, [search, sort]);
+  }, [debouncedSearch, sort]);
 
   useEffect(() => {
     loadMine();
@@ -143,22 +163,32 @@ export function TemplatesPage() {
 
   // A saved copy whose template is no longer on the server is withdrawn by its
   // author. Nothing is written locally: the copy stays, and still prints.
+  // Withdrawal checks run bounded-parallel (5 at a time): the old serial
+  // loop made a large Saved tab take one round trip per row.
   useEffect(() => {
     if (activeTab !== "saved" || saved.length === 0) return;
     let cancelled = false;
     (async () => {
       const missing = new Set<number>();
-      for (const tpl of saved) {
-        if (!tpl.remote_id) continue;
-        try {
-          await share.fetchRemoteTemplate(tpl.remote_id);
-        } catch (e) {
-          // Only a template the server says is gone counts. An unreachable server
-          // or an ended session says nothing about the template itself.
-          if (e instanceof share.RemoteTemplateNotFoundError)
-            missing.add(tpl.id);
+      const queue = saved.filter((tpl) => tpl.remote_id);
+      const lane = async () => {
+        while (!cancelled) {
+          const tpl = queue.shift();
+          if (!tpl?.remote_id) return;
+          try {
+            await share.fetchRemoteTemplate(tpl.remote_id);
+          } catch (e) {
+            // Only a template the server says is gone counts. An
+            // unreachable server or an ended session says nothing about
+            // the template itself.
+            if (e instanceof share.RemoteTemplateNotFoundError)
+              missing.add(tpl.id);
+          }
         }
-      }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(5, queue.length) }, () => lane()),
+      );
       if (!cancelled) {
         // Only re-render when the answer changed; the table is expensive to rebuild.
         setGone((prev) =>
@@ -297,7 +327,7 @@ export function TemplatesPage() {
       setPreviewHtml(
         renderTemplate(
           detail.body ?? "",
-          "",
+          detail.css ?? "",
           DEFAULT_MOCK_DATA as any,
           compiled,
         ),
@@ -527,7 +557,10 @@ export function TemplatesPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setConflictOpen(true)}
+                onClick={() => {
+                  setConflictIdx(0);
+                  setConflictOpen(true);
+                }}
               >
                 Review
               </Button>
@@ -721,11 +754,10 @@ export function TemplatesPage() {
       />
 
       <ConflictDialog
-        conflict={conflictOpen ? (conflicts[0] ?? null) : null}
+        conflict={conflictOpen ? (conflicts[conflictIdx] ?? null) : null}
+        position={{ index: conflictIdx, total: conflicts.length }}
         onOpenChange={setConflictOpen}
-        onResolved={() => {
-          void loadMine();
-        }}
+        onResolved={advanceConflict}
       />
 
       <ConfirmDialog

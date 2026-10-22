@@ -94,6 +94,144 @@ async fn health_is_open_without_a_key() {
 }
 
 #[tokio::test]
+async fn health_reports_the_database() {
+    let (db, _key) = setup();
+    let app = router(&db);
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/health")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body: serde_json::Value = {
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    };
+    assert_eq!(body["status"], "ok");
+    assert_eq!(body["db"], "up");
+}
+
+#[tokio::test]
+async fn metrics_reports_counters() {
+    let (db, key) = setup();
+    {
+        let guard = db.lock().unwrap();
+        guard
+            .connection()
+            .execute(
+                "INSERT INTO print_jobs (status, source, copies, is_test) VALUES ('success', 'api', 1, 0)",
+                [],
+            )
+            .unwrap();
+        guard
+            .connection()
+            .execute(
+                "INSERT INTO batches (total, done, failed, mode, status) VALUES (2, 1, 0, 'per_record', 'printing')",
+                [],
+            )
+            .unwrap();
+    }
+    let app = router(&db);
+
+    // Unauthenticated metrics stay refused like every other keyed route.
+    let anon = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/metrics")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(anon.status(), StatusCode::UNAUTHORIZED);
+
+    let app = router(&db);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/metrics")
+                .header("authorization", format!("Bearer {key}"))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: serde_json::Value = {
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    };
+    assert_eq!(body["jobs"]["success"], 1);
+    assert_eq!(body["jobs"]["queued"], 0);
+    assert_eq!(body["batches"]["active"], 1);
+    assert!(body["printers"]["tracked"].is_number());
+}
+
+#[tokio::test]
+async fn metrics_prometheus_renders_gauges() {
+    let (db, key) = setup();
+    {
+        let guard = db.lock().unwrap();
+        guard
+            .connection()
+            .execute(
+                "INSERT INTO print_jobs (status, source, copies, is_test) VALUES ('failed', 'api', 1, 0)",
+                [],
+            )
+            .unwrap();
+    }
+    let app = router(&db);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/metrics/prometheus")
+                .header("authorization", format!("Bearer {key}"))
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(res
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .starts_with("text/plain"));
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    assert!(
+        text.contains("printninja_jobs{status=\"failed\"} 1\n"),
+        "failed gauge must render: {text}"
+    );
+    assert!(text.contains("printninja_batches_active 0\n"), "{text}");
+    assert!(text.contains("# TYPE printninja_jobs gauge"), "{text}");
+    assert!(
+        text.contains("# TYPE printninja_jobs_completed_total counter"),
+        "completed totals are counters: {text}"
+    );
+    for outcome in ["success", "failed", "cancelled"] {
+        assert!(
+            text.contains(&format!(
+                "printninja_jobs_completed_total{{outcome=\"{outcome}\"}} "
+            )),
+            "outcome {outcome} rendered: {text}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn printers_requires_authorization() {
     let (db, _key) = setup();
     let app = router(&db);

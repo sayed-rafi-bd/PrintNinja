@@ -9,7 +9,7 @@ import { testids } from "../support/testids";
 // again.
 
 test("F2 session ends while working", async ({ browser }) => {
-  const handle = `f2-${Date.now().toString(36)}`;
+  const handle = `f2-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const password = "password123";
   const auth = await apiRegister(handle, password);
   const seeded = await pc(browser, {

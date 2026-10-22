@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { agent } from "@/lib/agent/commands";
 import { useTranslation } from "react-i18next";
@@ -41,6 +41,13 @@ import { DEFAULT_MOCK_DATA } from "@/lib/templates/defaultTemplate";
 import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
 import type { StarterTemplate } from "@/lib/templates/seedTemplates";
 import { compileTemplateCss } from "@/lib/templates/compileTemplateCss";
+import {
+  applyColumnMapping,
+  CSV_MAX_BYTES,
+  CsvTooLargeError,
+  parseCsv,
+  type ColumnMapping,
+} from "@/lib/csv";
 const MM_TO_PX = 3.7795;
 
 export function PrintPage() {
@@ -56,6 +63,8 @@ export function PrintPage() {
     Record<string, string>
   > | null>(null);
   const [batchCsvHeaders, setBatchCsvHeaders] = useState<string[]>([]);
+  const [batchCsvRows, setBatchCsvRows] = useState<string[][]>([]);
+  const [columnMap, setColumnMap] = useState<ColumnMapping>({});
   const [batches, setBatches] = useState<
     Array<{
       id: number;
@@ -69,6 +78,11 @@ export function PrintPage() {
 
   const [previewHtml, setPreviewHtml] = useState<string>("");
   const [previewError, setPreviewError] = useState<string>("");
+  const [previewNotice, setPreviewNotice] = useState<string>("");
+  // Version ids already backfilled with compiled CSS this session, so the
+  // preview effect does not write a "Compiled Tailwind CSS" version on
+  // every render of the same template.
+  const cssBackfilled = useRef<Set<number>>(new Set());
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showBatches, setShowBatches] = useState(false);
 
@@ -104,7 +118,14 @@ export function PrintPage() {
     [templates, store.templateId],
   );
 
-  // The preview follows the selected template, so operators see what will print.
+  // The preview follows the selected template and data source, so
+  // operators see what will print. With test data it renders the bundled
+  // mock; otherwise it fetches the data URL (same GET/POST choice the
+  // pipeline uses) and falls back to the mock with a notice when the
+  // fetch fails.
+  const dataUrl = store.dataUrl;
+  const useTestData = store.useTestData;
+  const httpMethod = store.httpMethod;
   useEffect(() => {
     const template = selectedTemplate;
     if (!template) {
@@ -132,40 +153,54 @@ export function PrintPage() {
 
         // A version saved before per-template compilation existed (or whose
         // compile failed) has no stored Tailwind CSS. Compile it now so the
-        // preview matches the Designer, and save the result so the actual
-        // print job (which reads the stored stylesheet) is styled too.
+        // preview matches the Designer, and store the result on the same
+        // row so the actual print job (which reads the stored stylesheet)
+        // is styled too. This updates the version in place: previews must
+        // not mint new versions just for being looked at.
         let compiledCss = latest.compiled_css ?? "";
-        if (!compiledCss.trim()) {
+        if (!compiledCss.trim() && !cssBackfilled.current.has(latest.id)) {
+          cssBackfilled.current.add(latest.id);
           const built = await compileTemplateCss(latest.html);
           compiledCss = built.css;
           if (built.css.trim() && !cancelled) {
-            agent("create_version", {
-              req: {
-                template_id: template.id,
-                html: latest.html,
-                css: latest.css,
-                compiled_css: built.css,
-                compiled_key: built.key,
-                label: null,
-                note: "Compiled Tailwind CSS",
-                created_by: "autosave",
-              },
+            agent("set_version_compiled", {
+              id: latest.id,
+              compiled_css: built.css,
+              compiled_key: built.key,
             })
               .then(() => notifyLocalEdit())
               .catch((e) => console.warn("Could not store compiled CSS:", e));
           }
         }
 
+        let data: unknown = DEFAULT_MOCK_DATA;
+        let notice = "";
+        if (!useTestData && dataUrl.trim()) {
+          try {
+            const res = await fetch(
+              dataUrl.trim(),
+              httpMethod === "POST"
+                ? {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: "{}",
+                  }
+                : undefined,
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            data = await res.json();
+          } catch (e) {
+            notice = `Could not load data from the URL (${e}); showing sample data.`;
+            data = DEFAULT_MOCK_DATA;
+          }
+        }
+
         if (!cancelled) {
           setPreviewHtml(
-            renderTemplate(
-              latest.html,
-              latest.css,
-              DEFAULT_MOCK_DATA as any,
-              compiledCss,
-            ),
+            renderTemplate(latest.html, latest.css, data as any, compiledCss),
           );
           setPreviewError("");
+          setPreviewNotice(notice);
         }
       } catch (e) {
         if (!cancelled) {
@@ -177,7 +212,7 @@ export function PrintPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedTemplate]);
+  }, [selectedTemplate, dataUrl, useTestData, httpMethod]);
 
   const refreshBatches = async () => {
     try {
@@ -185,53 +220,40 @@ export function PrintPage() {
       setBatches(list ?? []);
     } catch {}
   };
+  // Poll while the dialog is open (live progress on submit) or while
+  // any batch is still active. Idle pages do not poll: the old effect
+  // re-created the interval on every dialog toggle and kept it
+  // running with the dialog closed.
+  const hasActiveBatch = batches.some(
+    (b) => b.status === "queued" || b.status === "printing",
+  );
   useEffect(() => {
     refreshBatches();
+    if (!showBatchDialog && !hasActiveBatch) return;
     const id = setInterval(refreshBatches, 5000);
     return () => clearInterval(id);
-  }, [showBatchDialog]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showBatchDialog, hasActiveBatch]);
 
-  const parseCsv = (text: string): { headers: string[]; rows: string[][] } => {
-    const lines: string[][] = [];
-    let cur = "";
-    let row: string[] = [];
-    let inQuote = false;
-    for (let i = 0; i < text.length; i++) {
-      const c = text[i];
-      if (c === '"') {
-        if (inQuote && text[i + 1] === '"') {
-          cur += '"';
-          i++;
-        } else {
-          inQuote = !inQuote;
-        }
-      } else if (c === "," && !inQuote) {
-        row.push(cur.trim());
-        cur = "";
-      } else if ((c === "\n" || c === "\r") && !inQuote) {
-        if (cur !== "" || row.length > 0) {
-          row.push(cur.trim());
-          cur = "";
-          lines.push(row);
-          row = [];
-        }
-        if (c === "\r" && text[i + 1] === "\n") i++;
-      } else {
-        cur += c;
-      }
-    }
-    if (cur !== "" || row.length > 0) {
-      row.push(cur.trim());
-      lines.push(row);
-    }
-    if (lines.length === 0) return { headers: [], rows: [] };
-    const headers = lines[0].map((h) => h.trim());
-    return { headers, rows: lines.slice(1) };
+  const rebuildBatchJson = (
+    headers: string[],
+    rows: string[][],
+    mapping: ColumnMapping,
+  ) => {
+    const jsonRows = applyColumnMapping(headers, rows, mapping);
+    setBatchCsvPreview(jsonRows.slice(0, 5));
+    setBatchInput(JSON.stringify(jsonRows, null, 2));
+    return jsonRows;
   };
 
   const handleCsvUpload = async (file: File) => {
     setBatchCsvFile(file);
     try {
+      if (file.size > CSV_MAX_BYTES) {
+        throw new CsvTooLargeError(
+          `CSV file is ${(file.size / 1024).toFixed(0)} KiB (max ${(CSV_MAX_BYTES / 1024).toFixed(0)} KiB)`,
+        );
+      }
       const text = await file.text();
       const { headers, rows } = parseCsv(text);
       if (headers.length === 0) {
@@ -239,23 +261,24 @@ export function PrintPage() {
         return;
       }
       setBatchCsvHeaders(headers);
-      const jsonRows = rows
-        .filter((r) => r.some((c) => c !== ""))
-        .map((r) => {
-          const obj: Record<string, string> = {};
-          headers.forEach((h, i) => {
-            obj[h] = r[i] ?? "";
-          });
-          return obj;
-        });
-      setBatchCsvPreview(jsonRows.slice(0, 5));
-      setBatchInput(JSON.stringify(jsonRows, null, 2));
+      setBatchCsvRows(rows);
+      const mapping: ColumnMapping = {};
+      setColumnMap(mapping);
+      const jsonRows = rebuildBatchJson(headers, rows, mapping);
       toast.success(
         `CSV loaded: ${jsonRows.length} row(s), ${headers.length} column(s)`,
       );
     } catch (e) {
-      toast.error(`CSV parse failed: ${e}`);
+      toast.error(e instanceof Error ? e.message : `CSV parse failed: ${e}`);
     }
+  };
+
+  const handleColumnRename = (header: string, key: string) => {
+    setColumnMap((prev) => {
+      const next = { ...prev, [header]: key };
+      rebuildBatchJson(batchCsvHeaders, batchCsvRows, next);
+      return next;
+    });
   };
 
   const handleBatchPrint = async () => {
@@ -276,7 +299,8 @@ export function PrintPage() {
       );
       return;
     }
-    if (!store.templateId) {
+    const templateId = Number(store.templateId);
+    if (!Number.isInteger(templateId) || templateId <= 0) {
       toast.error("Select a template first");
       return;
     }
@@ -284,23 +308,32 @@ export function PrintPage() {
       toast.error("Select a printer first");
       return;
     }
-    const printer = printers.find((p) => p.name === store.printerId);
-    let printerId = printer ? Number(printer.id) || 0 : 0;
-    if (!printerId) {
+    const resolvePrinterId = async (): Promise<number | null> => {
+      const system = printers.find((p) => p.name === store.printerId);
+      const systemId =
+        system && Number.isInteger(Number(system.id)) && Number(system.id) > 0
+          ? Number(system.id)
+          : null;
+      // System-printer ids are strings ("printer-3"); only the device
+      // list carries numeric row ids, so fall through to it.
+      if (systemId !== null) return systemId;
       try {
         const all = await agent("list_printers", {});
-        const match = all.find((p) => p.name === store.printerId);
-        if (match) printerId = match.id;
-      } catch {}
-    }
-    if (!printerId) {
+        const match = (all ?? []).find((p) => p.name === store.printerId);
+        return typeof match?.id === "number" && match.id > 0 ? match.id : null;
+      } catch {
+        return null;
+      }
+    };
+    const printerId = await resolvePrinterId();
+    if (printerId === null) {
       toast.error("Could not resolve printer — re-select it");
       return;
     }
     try {
       await agent("create_batch", {
         req: {
-          template_id: Number(store.templateId) || 0,
+          template_id: templateId,
           printer_id: printerId,
           data,
           mode: store.batchMode2,
@@ -311,6 +344,9 @@ export function PrintPage() {
       setBatchInput("");
       setBatchCsvFile(null);
       setBatchCsvPreview(null);
+      setBatchCsvHeaders([]);
+      setBatchCsvRows([]);
+      setColumnMap({});
       refreshBatches();
     } catch (e) {
       toast.error(`Batch failed: ${e}`);
@@ -378,10 +414,13 @@ export function PrintPage() {
           margin_bottom: store.marginBottom,
           margin_left: store.marginLeft,
           fit_mode: store.fitMode,
+          page_range: store.pageRange.trim() || undefined,
+          grayscale: store.grayscale,
           test: store.useTestData,
           source: store.useTestData ? "test" : "ui",
           data: store.useTestData ? DEFAULT_MOCK_DATA : undefined,
           data_url: store.useTestData ? undefined : store.dataUrl || undefined,
+          http_method: store.useTestData ? undefined : store.httpMethod,
         },
       });
 
@@ -430,7 +469,13 @@ export function PrintPage() {
     ? "Choose a printer to enable printing."
     : !store.templateId
       ? "Choose a template to enable printing."
-      : "";
+      : store.status === "printing"
+        ? "A print is already running."
+        : store.copies < 1
+          ? "Copies must be at least 1."
+          : loading
+            ? "Loading printers and templates…"
+            : "";
   const field = "space-y-1.5";
 
   return (
@@ -590,6 +635,33 @@ export function PrintPage() {
                   onChange={(e) => store.setDataUrl(e.target.value)}
                   disabled={store.useTestData}
                 />
+                <div className="flex items-center gap-2 pt-1">
+                  <Label
+                    htmlFor="http-method"
+                    className="text-xs text-muted-foreground"
+                  >
+                    Method
+                  </Label>
+                  <Select
+                    value={store.httpMethod}
+                    onValueChange={(v: "GET" | "POST") =>
+                      store.setHttpMethod(v)
+                    }
+                    disabled={store.useTestData}
+                  >
+                    <SelectTrigger
+                      id="http-method"
+                      aria-label="HTTP method"
+                      className="h-7 w-[5.5rem] text-xs"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="GET">GET</SelectItem>
+                      <SelectItem value="POST">POST</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 {store.useTestData && (
                   <p className="text-xs text-muted-foreground">
                     Sample data: {DEFAULT_MOCK_DATA.store.name}, order #
@@ -619,12 +691,19 @@ export function PrintPage() {
                   className="w-full"
                   onClick={handlePrint}
                   disabled={!canPrint}
+                  title={blocker || undefined}
+                  aria-describedby={blocker ? "print-blocker" : undefined}
                 >
                   <Printer className="h-5 w-5" aria-hidden="true" />
                   {store.status === "printing" ? "Printing…" : t("print.print")}
                 </Button>
                 {blocker && (
-                  <p className="text-xs text-muted-foreground">{blocker}</p>
+                  <p
+                    id="print-blocker"
+                    className="text-xs text-muted-foreground"
+                  >
+                    {blocker}
+                  </p>
                 )}
               </div>
             </CardContent>
@@ -810,12 +889,17 @@ export function PrintPage() {
                 <CardTitle>Preview</CardTitle>
                 <p className="text-xs text-muted-foreground">
                   {selectedTemplate
-                    ? `${selectedTemplate.name}, ${selectedTemplate.page_w_mm} × ${selectedTemplate.page_h_mm} mm, sample data`
+                    ? `${selectedTemplate.name}, ${selectedTemplate.page_w_mm} × ${selectedTemplate.page_h_mm} mm, ${useTestData || !dataUrl.trim() ? "sample data" : "live data URL"}`
                     : "Choose a template to see a preview."}
                 </p>
               </div>
             </CardHeader>
             <CardContent>
+              {previewNotice && !previewError ? (
+                <p className="mb-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning">
+                  {previewNotice}
+                </p>
+              ) : null}
               {previewError ? (
                 <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning">
                   {previewError}
@@ -994,21 +1078,43 @@ export function PrintPage() {
               )}
               {batchCsvHeaders.length > 0 && (
                 <div className="rounded border p-2 text-xs">
-                  <p className="font-medium mb-1">
-                    Columns → variables: {batchCsvHeaders.join(", ")}
+                  <p className="font-medium mb-1">Columns → variables</p>
+                  <p className="text-muted-foreground mb-2">
+                    Rename a column to change its template key (e.g. {"{{"}
+                    name{"}}"}). Clear the name to drop the column; the JSON
+                    below rebuilds itself.
                   </p>
-                  <p className="text-muted-foreground">
-                    Headers become template keys (e.g. {"{{"}name{"}}"}). Edit
-                    JSON below to rename if needed.
-                  </p>
+                  <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                    {/* Duplicate header names share one mapping entry. */}
+                    {batchCsvHeaders.map((h, i) => (
+                      <label
+                        key={`${h}-${i}`}
+                        className="flex items-center gap-1.5"
+                      >
+                        <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">
+                          {h === "" ? "(blank header)" : h}
+                        </span>
+                        <span aria-hidden="true">→</span>
+                        <Input
+                          aria-label={`Template key for column ${h === "" ? "(blank header)" : h}`}
+                          className="h-7 text-xs"
+                          value={columnMap[h] ?? h}
+                          placeholder="(drop)"
+                          onChange={(e) =>
+                            handleColumnRename(h, e.target.value)
+                          }
+                        />
+                      </label>
+                    ))}
+                  </div>
                   {batchCsvPreview && (
                     <div className="mt-2 overflow-auto max-h-32">
                       <table className="w-full text-xs">
                         <thead>
                           <tr>
-                            {batchCsvHeaders.map((h) => (
-                              <th key={h} className="text-left border-b p-1">
-                                {h}
+                            {Object.keys(batchCsvPreview[0] ?? {}).map((k) => (
+                              <th key={k} className="text-left border-b p-1">
+                                {k}
                               </th>
                             ))}
                           </tr>
@@ -1016,12 +1122,12 @@ export function PrintPage() {
                         <tbody>
                           {batchCsvPreview.map((row, i) => (
                             <tr key={i}>
-                              {batchCsvHeaders.map((h) => (
+                              {Object.entries(row).map(([k, v]) => (
                                 <td
-                                  key={h}
+                                  key={k}
                                   className="p-1 border-b truncate max-w-[120px]"
                                 >
-                                  {row[h]}
+                                  {v}
                                 </td>
                               ))}
                             </tr>

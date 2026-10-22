@@ -1,5 +1,5 @@
 import { NotFoundError, QuotaExceededError } from "../errors.js";
-import type { Page } from "../pagination.js";
+import { toPage, type Page } from "../pagination.js";
 import type {
   PageQuery,
   SavedRepository,
@@ -65,16 +65,18 @@ export interface ManifestItem {
 
 /**
  * The saved manifest (endpoint 22): revision and state of every saved
- * template, in save order. A deleted template's revision is unknowable
- * (the row is gone), so it reports 0 with the tombstone time — the app
- * matches by id and marks it deleted.
+ * template, in save order, paged like every other list. A deleted
+ * template's revision is unknowable (the row is gone), so it reports 0
+ * with the tombstone time — the app matches by id and marks it deleted.
+ * Reads are bounded by the per-user save quota, same as listSaved.
  */
 export async function listManifest(
   repos: { saved: SavedRepository },
   userId: string,
-): Promise<ManifestItem[]> {
+  query: PageQuery,
+): Promise<Page<ManifestItem>> {
   const rows = await repos.saved.listManifest(userId);
-  return rows.map((row) => {
+  const items = rows.map((row) => {
     if (!row.template) {
       return {
         id: row.templateId,
@@ -94,4 +96,10 @@ export async function listManifest(
       updatedAt: row.template.updatedAt,
     };
   });
+  const start = (query.page - 1) * query.pageSize;
+  return toPage(
+    items.slice(start, start + query.pageSize),
+    items.length,
+    query,
+  );
 }

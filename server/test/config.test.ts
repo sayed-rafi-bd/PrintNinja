@@ -24,7 +24,7 @@ describe("loadConfig", () => {
     expect(config.argon2MemoryKib).toBe(19456);
     expect(config.argon2TimeCost).toBe(2);
     expect(config.argon2Parallelism).toBe(1);
-    expect(config.docsEnabled).toBe(true);
+    expect(config.docsEnabled).toBe(false);
     expect(config.corsOrigins).toEqual(["http://localhost:1420"]);
   });
 
@@ -48,6 +48,17 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...required, PORT: "70000" })).toThrow("PORT");
   });
 
+  it("rejects Argon2 settings that would OOM the host", () => {
+    expect(() =>
+      loadConfig({ ...required, ARGON2_MEMORY_KIB: "1048576" }),
+    ).toThrow("ARGON2_MEMORY_KIB");
+    expect(() => loadConfig({ ...required, ARGON2_TIME_COST: "99" })).toThrow(
+      "ARGON2_TIME_COST",
+    );
+    expect(() => loadConfig({ ...required, ARGON2_PARALLELISM: "64" })).toThrow(
+      "ARGON2_PARALLELISM",
+    );
+  });
   it("rejects an unknown LOG_LEVEL or NODE_ENV", () => {
     expect(() => loadConfig({ ...required, LOG_LEVEL: "loud" })).toThrow(
       "LOG_LEVEL",

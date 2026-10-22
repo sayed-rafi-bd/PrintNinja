@@ -22,6 +22,7 @@ import {
 import {
   ForbiddenError,
   NotFoundError,
+  RateLimitedError,
   RemoteReferenceError,
   PayloadTooLargeError,
   RevisionConflictError,
@@ -208,6 +209,16 @@ describe("putTemplate", () => {
       OWNER_ID,
     );
     await expect(big).rejects.toBeInstanceOf(PayloadTooLargeError);
+  });
+
+  it("rejects multibyte names and unbounded version notes by bytes", async () => {
+    const r = repos();
+    await expect(
+      putTemplate(r, write({ name: "é".repeat(120) }), OWNER_ID),
+    ).rejects.toBeInstanceOf(PayloadTooLargeError);
+    await expect(
+      putTemplate(r, write({ version: { note: "n".repeat(2001) } }), OWNER_ID),
+    ).rejects.toBeInstanceOf(PayloadTooLargeError);
   });
 });
 
@@ -480,14 +491,33 @@ describe("lists, search and use", () => {
   it("counts uses only for published templates", async () => {
     const { r, a, b } = await seeded();
     const deps = { templates: r.templates };
-    await recordUse(deps, b, 3);
+    const day = new Date("2026-10-20T00:00:00Z");
+    await recordUse(deps, b, OWNER_ID, 3, day);
     const got = await getTemplate(r, b, null);
     expect(got.useCount).toBe(3);
 
-    await expect(recordUse(deps, a, 1)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(recordUse(deps, a, OWNER_ID, 1, day)).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
     await expect(
-      recordUse(deps, "99999999-9999-4999-8999-999999999999", 1),
+      recordUse(deps, "99999999-9999-4999-8999-999999999999", OWNER_ID, 1, day),
     ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("caps one user's daily counts per template at 429", async () => {
+    const { r, b } = await seeded();
+    const deps = { templates: r.templates };
+    const day = new Date("2026-10-20T00:00:00Z");
+    await recordUse(deps, b, OWNER_ID, 1000, day);
+    await expect(recordUse(deps, b, OWNER_ID, 1, day)).rejects.toBeInstanceOf(
+      RateLimitedError,
+    );
+    // A new UTC day gets a fresh budget, and other users are unaffected.
+    const next = new Date("2026-10-21T00:00:00Z");
+    await recordUse(deps, b, OWNER_ID, 1, next);
+    await recordUse(deps, b, OTHER_ID, 1, day);
+    const got = await getTemplate(r, b, null);
+    expect(got.useCount).toBe(1002);
   });
 });
 
@@ -501,7 +531,9 @@ describe("manifest", () => {
     await publishTemplate(tdeps, id, OWNER_ID, new Date());
     await saveTemplate(sdeps, OTHER_ID, id);
 
-    let manifest = await listManifest(sdeps, OTHER_ID);
+    let manifest = (
+      await listManifest(sdeps, OTHER_ID, { page: 1, pageSize: 20 })
+    ).items;
     expect(manifest).toEqual([
       {
         id,
@@ -517,19 +549,23 @@ describe("manifest", () => {
       { ...write(), body: "<div>v2</div>", ifRevision: 1 },
       OWNER_ID,
     );
-    manifest = await listManifest(sdeps, OTHER_ID);
+    manifest = (await listManifest(sdeps, OTHER_ID, { page: 1, pageSize: 20 }))
+      .items;
     expect(manifest[0]).toMatchObject({ revision: 2, state: "published" });
 
     await unpublishTemplate(tdeps, id, OWNER_ID);
-    manifest = await listManifest(sdeps, OTHER_ID);
+    manifest = (await listManifest(sdeps, OTHER_ID, { page: 1, pageSize: 20 }))
+      .items;
     expect(manifest[0]).toMatchObject({ revision: 2, state: "withdrawn" });
 
     await publishTemplate(tdeps, id, OWNER_ID, new Date());
-    manifest = await listManifest(sdeps, OTHER_ID);
+    manifest = (await listManifest(sdeps, OTHER_ID, { page: 1, pageSize: 20 }))
+      .items;
     expect(manifest[0]).toMatchObject({ revision: 2, state: "published" });
 
     await deleteTemplate(tdeps, id, OWNER_ID);
-    manifest = await listManifest(sdeps, OTHER_ID);
+    manifest = (await listManifest(sdeps, OTHER_ID, { page: 1, pageSize: 20 }))
+      .items;
     expect(manifest[0]).toMatchObject({
       id,
       revision: 0,
@@ -537,6 +573,42 @@ describe("manifest", () => {
       ownerHandle: "",
     });
     expect((manifest[0]?.updatedAt as Date).getTime()).not.toBeNaN();
+  });
+
+  it("pages like every other list", async () => {
+    const r = repos();
+    const tdeps = { templates: r.templates };
+    const sdeps = { templates: r.templates, saved: r.saved };
+    for (const [id, name] of [
+      ["11111111-1111-4111-8111-111111111111", "one"],
+      ["22222222-2222-4222-8222-222222222222", "two"],
+      ["33333333-3333-4333-8333-333333333333", "three"],
+    ] as const) {
+      await putTemplate(r, { ...write(), id, name }, OWNER_ID);
+      await publishTemplate(tdeps, id, OWNER_ID, new Date());
+      await saveTemplate(sdeps, OTHER_ID, id);
+    }
+
+    const first = await listManifest(sdeps, OTHER_ID, { page: 1, pageSize: 2 });
+    expect(first.items).toHaveLength(2);
+    expect(first).toMatchObject({
+      page: 1,
+      page_size: 2,
+      total: 3,
+      has_more: true,
+    });
+
+    const second = await listManifest(sdeps, OTHER_ID, {
+      page: 2,
+      pageSize: 2,
+    });
+    expect(second.items).toHaveLength(1);
+    expect(second).toMatchObject({
+      page: 2,
+      page_size: 2,
+      total: 3,
+      has_more: false,
+    });
   });
 });
 

@@ -64,6 +64,28 @@ impl Default for OpenApiSpec {
                         }
                     }
                 },
+                "/v1/metrics": {
+                    "get": {
+                        "summary": "Operational counters",
+                        "description": "Jobs by status, active batches, queue-tracked printers, and completed totals since boot. Same shape every call; poll it.",
+                        "responses": {
+                            "200": { "description": "Counters" },
+                            "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
+                        }
+                    }
+                },
+                "/v1/metrics/prometheus": {
+                    "get": {
+                        "summary": "Prometheus exposition",
+                        "description": "Same counters as /v1/metrics in text format 0.0.4.",
+                        "responses": {
+                            "200": { "description": "Metrics in Prometheus text format" },
+                            "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
+                        }
+                    }
+                },
                 "/v1/print": {
                     "post": {
                         "summary": "Render a template and print it",
@@ -94,6 +116,8 @@ impl Default for OpenApiSpec {
                                                 "properties": {
                                                     "copies": { "type": "integer", "minimum": 1, "default": 1 },
                                                     "orientation": { "type": "string", "enum": ["portrait", "landscape"] },
+                                                    "page_range": { "type": "string", "description": "1-based pages, e.g. \"1-3\" or \"1,3,5-7\"; empty means all" },
+                                                    "grayscale": { "type": "boolean", "default": false },
                                                     "fit": { "type": "string", "enum": ["fit-width", "fit-page", "shrink", "fill"] }
                                                 }
                                             }

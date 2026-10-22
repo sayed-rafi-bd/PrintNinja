@@ -40,6 +40,34 @@ fn cache_dir() -> std::path::PathBuf {
     dir
 }
 
+/// Serializes tests that force the no-browser path. They all point
+/// PRINTNINJA_CHROMIUM_BIN at a missing file, so they must not run
+/// while another test changes the same variable. Async mutex: the guard
+/// is held across awaits by design.
+static NO_BROWSER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Serializes tests that complete print jobs. Completions feed the
+/// process-global metrics counters, so tests asserting exact deltas
+/// must not run while another job finishes. Async mutex: the guard is
+/// held across awaits by design.
+static FINISH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+async fn lock_finishes() -> tokio::sync::MutexGuard<'static, ()> {
+    FINISH_LOCK.lock().await
+}
+
+/// Holds the no-browser override for the scope, restoring a clean
+/// variable afterwards. Returns the lock guard.
+async fn force_no_browser() -> tokio::sync::MutexGuard<'static, ()> {
+    let guard = NO_BROWSER_LOCK.lock().await;
+    // Edition 2021: set_var is safe (it became unsafe in 2024).
+    std::env::set_var(
+        "PRINTNINJA_CHROMIUM_BIN",
+        "/nonexistent/chromium-for-printninja",
+    );
+    guard
+}
+
 fn seed_printer(db: &Db, name: &str, address: &str) {
     let guard = db.lock().unwrap();
     guard
@@ -64,10 +92,13 @@ fn print_request(printer: &str) -> PrintRequest {
         margin_bottom: None,
         margin_left: None,
         fit_mode: None,
+        page_range: None,
+        grayscale: None,
         template_id: None,
         template_version_id: None,
         data: None,
         data_url: None,
+        http_method: None,
         test: None,
         source: Some("ui".to_string()),
         idempotency_key: None,
@@ -266,15 +297,19 @@ fn the_renderer_has_no_stub_pdf_and_no_shared_render_file() {
 #[cfg(not(windows))]
 #[tokio::test]
 async fn rendering_without_a_browser_fails_instead_of_returning_the_stub() {
+    let _finishes = lock_finishes().await;
+    // The host may well have a Chromium (CI images and dev machines
+    // do); the override forces the no-browser path deterministically.
+    let _lock = force_no_browser().await;
     let dir = cache_dir();
     let renderer = PdfRenderer::new(dir.clone());
 
     let err = renderer
         .html_to_pdf("<html><body>hi</body></html>", 100.0, 50.0, "portrait")
         .await
-        .expect_err("no renderer on this platform must fail, not return a stub PDF");
+        .expect_err("no renderer available must fail, not return a stub PDF");
     let msg = format!("{err:#}");
-    assert!(msg.contains("no PDF renderer"), "{msg}");
+    assert!(msg.contains("is not a file"), "{msg}");
 
     // The per-job file is cleaned up, on the error path too.
     let leftovers: Vec<String> = std::fs::read_dir(&dir)
@@ -283,6 +318,7 @@ async fn rendering_without_a_browser_fails_instead_of_returning_the_stub() {
         .filter(|name| name.starts_with("render-"))
         .collect();
     assert!(leftovers.is_empty(), "no per-job leftovers: {leftovers:?}");
+    std::env::remove_var("PRINTNINJA_CHROMIUM_BIN");
 }
 
 /// A render failure fails the job — recorded, with the row's own id (P15's
@@ -290,6 +326,9 @@ async fn rendering_without_a_browser_fails_instead_of_returning_the_stub() {
 #[cfg(not(windows))]
 #[tokio::test]
 async fn a_render_failure_fails_the_job_with_its_own_id() {
+    let _finishes = lock_finishes().await;
+    // Force the failure path: the host may have a real Chromium.
+    let _lock = force_no_browser().await;
     let db = test_db();
     seed_printer(&db, "Mock", "127.0.0.1:1");
     let queue = PrintQueue::new();
@@ -300,7 +339,7 @@ async fn a_render_failure_fails_the_job_with_its_own_id() {
     assert!(!res.success);
     let err = res.error.expect("the failure is reported");
     assert!(
-        err.contains("no PDF renderer"),
+        err.contains("is not a file"),
         "failed at the render step: {err}"
     );
     assert!(
@@ -317,12 +356,12 @@ async fn a_render_failure_fails_the_job_with_its_own_id() {
     );
     assert!(finished_at.is_some(), "finished_at recorded when it failed");
     assert!(duration.is_some(), "duration recorded");
-    assert!(
-        error
-            .as_deref()
-            .is_some_and(|e| e.contains("no PDF renderer")),
+    assert_eq!(
+        error.as_deref(),
+        Some(err.as_str()),
         "the row carries the render error"
     );
+    std::env::remove_var("PRINTNINJA_CHROMIUM_BIN");
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -332,6 +371,7 @@ async fn a_render_failure_fails_the_job_with_its_own_id() {
 /// A malformed template fails the job instead of printing the raw source.
 #[tokio::test]
 async fn a_template_error_fails_the_job_instead_of_printing_the_source() {
+    let _finishes = lock_finishes().await;
     let db = test_db();
     seed_printer(&db, "Mock", "127.0.0.1:1");
     let queue = PrintQueue::new();
@@ -354,10 +394,49 @@ async fn a_template_error_fails_the_job_instead_of_printing_the_source() {
     );
 }
 
+/// Terminal transitions feed the process-lifetime counters exactly once:
+/// a success and a failure each move only their own total. Deltas, not
+/// absolutes — the counters are global and other tests print too.
+#[tokio::test]
+async fn finished_jobs_feed_the_completed_counters_once_each() {
+    let _finishes = lock_finishes().await;
+    use printninja_lib::metrics::finished_counts;
+
+    let db = test_db();
+    let queue = PrintQueue::new();
+    let before = finished_counts();
+
+    let good = mock_ipp_server(0x0000);
+    seed_printer(&db, "Good", &good);
+    let res = run_print_with(
+        &cache_dir(),
+        &db,
+        &queue,
+        print_request("Good"),
+        &FakeRenderer,
+    )
+    .await
+    .expect("print succeeds");
+    assert!(res.success, "{:?}", res.error);
+
+    let mut bad_req = print_request("Good");
+    bad_req.html = "{{#if unclosed".to_string();
+    let res = run_print_with(&cache_dir(), &db, &queue, bad_req, &FakeRenderer)
+        .await
+        .expect("a template error is an outcome, not a pipeline error");
+    assert!(!res.success);
+
+    let after = finished_counts();
+    assert_eq!(after.0 - before.0, 1, "one success counted");
+    assert_eq!(after.1 - before.1, 1, "one failure counted");
+    assert_eq!(after.2 - before.2, 0, "nothing cancelled");
+}
+
 /// A job's per-stage timing is returned to the caller and stored on its
 /// history row, so History can show where the time went.
 #[tokio::test]
 async fn a_job_records_its_stage_timings_on_the_history_row() {
+    let _finishes = lock_finishes().await;
     let db = test_db();
     seed_printer(&db, "Mock", "127.0.0.1:1");
     let queue = PrintQueue::new();
@@ -392,6 +471,7 @@ async fn a_job_records_its_stage_timings_on_the_history_row() {
 /// template text.
 #[tokio::test]
 async fn a_job_without_data_still_gets_its_template_rendered() {
+    let _finishes = lock_finishes().await;
     let db = test_db();
     let addr = mock_ipp_server(0x0000);
     seed_printer(&db, "Mock", &addr);
@@ -516,6 +596,7 @@ async fn http_200_with_an_ipp_success_status_prints() {
 /// an IPP error status and the job must end `failed`.
 #[tokio::test]
 async fn a_job_the_printer_rejects_ends_failed() {
+    let _finishes = lock_finishes().await;
     let db = test_db();
     let addr = mock_ipp_server(0x0502);
     seed_printer(&db, "Mock", &addr);
@@ -552,6 +633,7 @@ async fn a_job_the_printer_rejects_ends_failed() {
 /// Then the print completes and the row reaches its terminal state.
 #[tokio::test]
 async fn a_running_job_shows_as_printing_and_then_finishes() {
+    let _finishes = lock_finishes().await;
     let db = test_db();
     let addr = mock_ipp_server(0x0000);
     seed_printer(&db, "Mock", &addr);

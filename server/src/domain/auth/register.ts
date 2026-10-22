@@ -1,5 +1,6 @@
 import { HandleTakenError } from "../errors.js";
 import type { AuthDeps, UserRecord } from "../ports.js";
+import { MAX_SESSIONS_PER_USER } from "./session.js";
 import { assertValidHandle, assertValidPassword, handleKey } from "./shared.js";
 
 export interface RegisterInput {
@@ -50,6 +51,7 @@ export async function registerUser(
     deps.clock.now().getTime() + deps.sessionTtlDays * 86_400_000,
   );
   await deps.sessions.create({ tokenHash, userId: user.id, expiresAt });
+  await deps.sessions.deleteOldestForUser(user.id, MAX_SESSIONS_PER_USER);
 
   return { user, token, expiresAt };
 }

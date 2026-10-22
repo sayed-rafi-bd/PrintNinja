@@ -60,6 +60,11 @@ pub struct DirtyFont {
 
 const VALID_FORMATS: &[&str] = &["ttf", "otf", "woff", "woff2"];
 
+/// Largest font accepted. Desktop fonts are kilobytes; even a big CJK
+/// woff2 is ~5 MiB. Anything larger is a mistake or a disk-fill attempt —
+/// the IPC payload already holds the whole file in memory.
+pub const MAX_FONT_BYTES: usize = 8 * 1024 * 1024;
+
 /// Validates the upload payload before anything touches the disk:
 /// known extension, non-empty, and magic bytes matching the format.
 pub fn check_upload_bytes(file_name: &str, file_data: &[u8]) -> AppResult<(String, String)> {
@@ -85,6 +90,14 @@ pub fn check_upload_bytes(file_name: &str, file_data: &[u8]) -> AppResult<(Strin
         return Err(AppError::Validation("Font file is empty".into()));
     }
 
+    if file_data.len() > MAX_FONT_BYTES {
+        return Err(AppError::Validation(format!(
+            "Font file is {} MiB (max {} MiB)",
+            file_data.len() / (1024 * 1024),
+            MAX_FONT_BYTES / (1024 * 1024)
+        )));
+    }
+
     // Fail fast on the wrong content (a renamed non-font): the server
     // re-checks the same magic on upload.
     if let Some(magic) = magic_for(&ext) {
@@ -106,6 +119,43 @@ fn magic_for(format: &str) -> Option<&'static [u8]> {
         "woff2" => Some(b"wOF2"),
         _ => None,
     }
+}
+
+/// Deletes font files with no DB row. Uploads use UUID names and
+/// re-downloads overwrite in place, but crashed deletes and failed
+/// overwrites leak files — the disk fills while the DB looks small.
+pub fn sweep_orphan_font_files(conn: &Connection, fonts_dir: &Path) -> AppResult<usize> {
+    let mut stmt = conn.prepare("SELECT file_path FROM fonts WHERE file_path <> ''")?;
+    let known: std::collections::HashSet<std::ffi::OsString> = stmt
+        .query_map([], |r| {
+            let p: String = r.get(0)?;
+            Ok(Path::new(&p).file_name().unwrap_or_default().to_os_string())
+        })?
+        .collect::<Result<_, _>>()?;
+    let entries = match std::fs::read_dir(fonts_dir) {
+        Ok(entries) => entries,
+        Err(_) => return Ok(0),
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        if !known.contains(&entry.file_name()) {
+            std::fs::remove_file(entry.path())?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+/// Stored `file_path` values are bare filenames; the directory is always
+/// the app's `fonts` dir, resolved at use. Old rows hold absolute paths
+/// (pre-relative storage); this takes the basename so they survive a
+/// profile move or restore instead of pointing at a dead location.
+pub fn resolve_font_path(fonts_dir: &Path, stored: &str) -> PathBuf {
+    let base = Path::new(stored).file_name().unwrap_or_default();
+    fonts_dir.join(base)
 }
 
 /// The device-local download state key for one font.
@@ -222,7 +272,8 @@ async fn store_upload(
     let server_id = Uuid::new_v4().to_string();
     let sha256 = sha256_hex(file_data);
     let size_bytes = file_data.len() as i64;
-    let path_str = dest.to_string_lossy().to_string();
+    // Bare filename only: the directory is resolved at use, so the row
+    // survives profile moves and restores.
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
@@ -232,7 +283,7 @@ async fn store_upload(
         "INSERT INTO fonts (family, style, weight, file_path, format,
                 server_id, sync_state, sha256, size_bytes)
          VALUES (?1, 'normal', '400', ?2, ?3, ?4, 'dirty', ?5, ?6)",
-        rusqlite::params![family, path_str, ext, server_id, sha256, size_bytes],
+        rusqlite::params![family, stored, ext, server_id, sha256, size_bytes],
     )?;
 
     let id = conn.last_insert_rowid();
@@ -274,6 +325,20 @@ pub fn apply_font_upsert(
     data: &FontDataIn,
     report: &mut crate::commands::cache::ApplyReport,
 ) -> AppResult<()> {
+    // Server bytes cross the same bar as uploads: a known format and a
+    // sane size. Rejects the page before anything is written.
+    if !VALID_FORMATS.contains(&data.format.as_str()) {
+        return Err(AppError::Validation(format!(
+            "sync font has an unsupported format '{}'",
+            data.format
+        )));
+    }
+    if data.size_bytes < 0 || data.size_bytes as u64 > MAX_FONT_BYTES as u64 {
+        return Err(AppError::Validation(format!(
+            "sync font has an invalid size {}",
+            data.size_bytes
+        )));
+    }
     let existing: Option<(i64, String, String)> = tx
         .query_row(
             "SELECT id, sync_state, sha256 FROM fonts WHERE server_id = ?1",
@@ -342,6 +407,7 @@ pub fn apply_font_upsert(
 
 pub fn apply_font_delete(
     tx: &Transaction,
+    fonts_dir: &Path,
     server_id: &str,
     report: &mut crate::commands::cache::ApplyReport,
 ) -> AppResult<()> {
@@ -369,7 +435,7 @@ pub fn apply_font_delete(
                 })?;
             tx.execute("DELETE FROM fonts WHERE id = ?1", [id])?;
             if !path.is_empty() {
-                let _ = std::fs::remove_file(path);
+                let _ = std::fs::remove_file(resolve_font_path(fonts_dir, &path));
             }
             tx.execute(
                 "INSERT INTO settings (key, value) VALUES (?1, 'pending')
@@ -444,7 +510,7 @@ pub fn list_synced_fonts(conn: &Connection) -> AppResult<Vec<String>> {
 /// Forgets a local copy outright and removes its file. Used after the
 /// server confirms a delete and when a reset pass proves a synced row
 /// is gone. Idempotent.
-pub fn forget_font(conn: &Connection, server_id: &str) -> AppResult<bool> {
+pub fn forget_font(conn: &Connection, fonts_dir: &Path, server_id: &str) -> AppResult<bool> {
     let path: Option<String> = conn
         .query_row(
             "SELECT file_path FROM fonts WHERE server_id = ?1",
@@ -456,7 +522,7 @@ pub fn forget_font(conn: &Connection, server_id: &str) -> AppResult<bool> {
     if changed > 0 {
         if let Some(p) = path {
             if !p.is_empty() {
-                let _ = std::fs::remove_file(p);
+                let _ = std::fs::remove_file(resolve_font_path(fonts_dir, &p));
             }
         }
         return Ok(true);
@@ -466,14 +532,15 @@ pub fn forget_font(conn: &Connection, server_id: &str) -> AppResult<bool> {
 
 /// The stored bytes for the engine's file push. Missing file is a
 /// caller bug (a dirty font always has bytes), reported as not found.
-pub fn read_font_file(conn: &Connection, server_id: &str) -> AppResult<Vec<u8>> {
-    let path: String = conn
+pub fn read_font_file(conn: &Connection, fonts_dir: &Path, server_id: &str) -> AppResult<Vec<u8>> {
+    let stored: String = conn
         .query_row(
             "SELECT file_path FROM fonts WHERE server_id = ?1",
             [server_id],
             |r| r.get(0),
         )
         .map_err(|_| AppError::NotFound(format!("Font {server_id} not found")))?;
+    let path = resolve_font_path(fonts_dir, &stored);
     std::fs::read(&path).map_err(|e| AppError::Internal(format!("Font file unreadable: {e}")))
 }
 
@@ -502,6 +569,13 @@ pub fn store_font_file_bytes(
             "Font {server_id} has no bytes on the server yet"
         )));
     }
+    if bytes.len() > MAX_FONT_BYTES {
+        return Err(AppError::Validation(format!(
+            "Font {server_id} is {} MiB (max {} MiB)",
+            bytes.len() / (1024 * 1024),
+            MAX_FONT_BYTES / (1024 * 1024)
+        )));
+    }
     let actual = sha256_hex(bytes);
     if actual != expected_sha {
         return Err(AppError::Validation(format!(
@@ -510,22 +584,25 @@ pub fn store_font_file_bytes(
     }
     std::fs::create_dir_all(fonts_dir)?;
     // Deterministic name: re-downloads overwrite instead of piling up.
+    // Stored as a bare filename; the directory resolves at use.
     let ext = if format.is_empty() {
         "ttf".to_string()
     } else {
         format
     };
-    let dest = fonts_dir.join(format!("{server_id}.{ext}"));
+    let file_name = format!("{server_id}.{ext}");
+    let dest = fonts_dir.join(&file_name);
     std::fs::write(&dest, bytes)?;
     let old: String = conn.query_row("SELECT file_path FROM fonts WHERE id = ?1", [id], |r| {
         r.get(0)
     })?;
-    if !old.is_empty() && Path::new(&old) != dest {
-        let _ = std::fs::remove_file(old);
+    let old_path = resolve_font_path(fonts_dir, &old);
+    if !old.is_empty() && old_path != dest {
+        let _ = std::fs::remove_file(old_path);
     }
     conn.execute(
         "UPDATE fonts SET file_path = ?1, size_bytes = ?2, synced_at = datetime('now') WHERE id = ?3",
-        rusqlite::params![dest.to_string_lossy().to_string(), bytes.len() as i64, id],
+        rusqlite::params![file_name, bytes.len() as i64, id],
     )?;
     conn.execute(
         "INSERT INTO settings (key, value) VALUES (?1, 'ready')
@@ -696,19 +773,25 @@ pub fn cache_list_synced_fonts(db: State<DbState>) -> AppResult<Vec<String>> {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn cache_forget_font(db: State<DbState>, server_id: String) -> AppResult<bool> {
+pub fn cache_forget_font(app: AppHandle, db: State<DbState>, server_id: String) -> AppResult<bool> {
+    let fonts_dir = app.path().app_data_dir()?.join("fonts");
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    forget_font(guard.connection(), &server_id)
+    forget_font(guard.connection(), &fonts_dir, &server_id)
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn cache_read_font_file(db: State<DbState>, server_id: String) -> AppResult<Vec<u8>> {
+pub fn cache_read_font_file(
+    app: AppHandle,
+    db: State<DbState>,
+    server_id: String,
+) -> AppResult<Vec<u8>> {
+    let fonts_dir = app.path().app_data_dir()?.join("fonts");
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    read_font_file(guard.connection(), &server_id)
+    read_font_file(guard.connection(), &fonts_dir, &server_id)
 }
 
 #[tauri::command]

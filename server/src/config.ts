@@ -72,11 +72,11 @@ const configSchema = z.object({
   RATE_LIMIT_MAX: positiveInt.default(120),
   RATE_LIMIT_AUTH_MAX: positiveInt.default(10),
   RATE_LIMIT_AUTH_WINDOW_SECONDS: positiveInt.default(300),
-  ARGON2_MEMORY_KIB: positiveInt.default(19456),
-  ARGON2_TIME_COST: positiveInt.default(2),
-  ARGON2_PARALLELISM: positiveInt.default(1),
+  ARGON2_MEMORY_KIB: positiveInt.max(262144).default(19456),
+  ARGON2_TIME_COST: positiveInt.max(8).default(2),
+  ARGON2_PARALLELISM: positiveInt.max(8).default(1),
   // prefault, not default: Zod 4 defaults skip the enum/transform
-  DOCS_ENABLED: booleanFromString.prefault("true"),
+  DOCS_ENABLED: booleanFromString.prefault("false"),
 });
 
 export type Config = {

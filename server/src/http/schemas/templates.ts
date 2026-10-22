@@ -43,8 +43,8 @@ export const putTemplateRequest = z.object({
   version: z
     .object({
       created_by: z.enum(["manual", "autosave"]).optional(),
-      label: z.string().optional(),
-      note: z.string().optional(),
+      label: z.string().max(200).optional(),
+      note: z.string().max(2000).optional(),
     })
     .optional(),
 });

@@ -15,6 +15,8 @@ export interface FakeVersion {
   created_by: string;
   label?: string | null;
   note?: string | null;
+  compiled_css?: string;
+  compiled_key?: string;
 }
 
 export interface FakeTemplateRow {
@@ -664,6 +666,14 @@ export function createFakeCache() {
           _current: i === 0,
         }));
     },
+    listLatestVersions(templateIds: number[]): Record<string, unknown>[] {
+      const out: Record<string, unknown>[] = [];
+      for (const id of templateIds) {
+        const latest = this.listVersions(id)[0];
+        if (latest) out.push(latest);
+      }
+      return out;
+    },
 
     createVersion(
       templateId: number,
@@ -672,6 +682,53 @@ export function createFakeCache() {
       const row = templates.get(templateId);
       if (!row || row.sync_state === "deleted_pending") {
         throw new Error(`Template ${templateId} not found`);
+      }
+      const html = String(req["html"] ?? "");
+      const css = String(req["css"] ?? "");
+      // Mirrors find_remote_refs in src-tauri/src/render/handlebars.rs:
+      // the same needles, lowercased, and the same error shape, so the
+      // Designer shows the backend's rejection.
+      const lowerHtml = html.toLowerCase();
+      const lowerCss = css.toLowerCase();
+      const issues: string[] = [];
+      for (const needle of [
+        'src="http',
+        "src='http",
+        'href="http',
+        "href='http",
+        'src="//',
+        'href="//',
+      ]) {
+        if (lowerHtml.includes(needle)) {
+          issues.push(
+            `Remote reference in HTML: ${needle.slice(0, 20)} — use data: URIs`,
+          );
+        }
+      }
+      for (const needle of [
+        'url("http',
+        "url('http",
+        "url(http",
+        'url("//',
+        "url('//",
+        "url(//",
+      ]) {
+        if (lowerHtml.includes(needle) || lowerCss.includes(needle)) {
+          issues.push(`Remote url() in CSS/HTML: ${needle} — use data: URIs`);
+        }
+      }
+      if (
+        lowerHtml.includes("@import") &&
+        (lowerHtml.includes("http://") ||
+          lowerHtml.includes("https://") ||
+          lowerHtml.includes("//"))
+      ) {
+        issues.push("@import with remote URL — use data: URIs");
+      }
+      if (issues.length > 0) {
+        throw new Error(
+          `Template contains remote references (${issues.join("; ")}). Use data: URIs instead.`,
+        );
       }
       const maxNo = row.versions.reduce((m, v) => Math.max(m, v.version_no), 0);
       const version = {
@@ -695,6 +752,24 @@ export function createFakeCache() {
         created_at: row.updated_at,
         ...version,
       };
+    },
+    setVersionCompiled(
+      versionId: number,
+      compiledCss: string,
+      compiledKey: string,
+    ): Record<string, unknown> {
+      for (const row of templates.values()) {
+        const v = row.versions.find(
+          (x) => row.id * 1000 + x.version_no === versionId,
+        );
+        if (v) {
+          v.compiled_css = compiledCss;
+          v.compiled_key = compiledKey;
+          persist();
+          return { id: versionId, template_id: row.id, ...v };
+        }
+      }
+      throw new Error(`Version ${versionId} not found`);
     },
 
     deleteTemplate(id: number): void {
@@ -762,7 +837,9 @@ export function createFakeCache() {
      * tables the fake does not implement), every dataset, profile, font
      * and printer, the sync state and every setting — including the
      * session, so the app returns to sign-in. Counts mirror the Rust
-     * ResetReport; tables the fake does not implement report zero.
+     * ResetReport; print_jobs stays 0 (no worker, no job rows) while
+     * batches are real in the fake — the reset_database command
+     * overwrites that count after clearing them.
      */
     resetDatabase(): Record<string, number> {
       let versions = 0;

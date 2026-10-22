@@ -18,14 +18,17 @@ function stack() {
 
 /** Installs the fake agent into a page or context with the given seed.
  * The seed script runs first (registration order), so the bundle picks
- * the seed up on load; the seed key is consumed once. */
+ * the seed up on load; the seed key is consumed once. The seed rides
+ * base64: raw JSON in a single-quoted script breaks on `'` and
+ * `</script>` inside template HTML. */
 export async function installAgent(
   target: Page | BrowserContext,
   seed: AgentSeed = {},
 ): Promise<void> {
   const { agentBundle } = stack();
+  const encoded = Buffer.from(JSON.stringify(seed), "utf8").toString("base64");
   await target.addInitScript({
-    content: `localStorage.setItem('fake-agent:seed', '${JSON.stringify(seed).replace(/'/g, "\\'")}')`,
+    content: `localStorage.setItem('fake-agent:seed', atob('${encoded}'))`,
   });
   await target.addInitScript({ path: agentBundle });
 }
@@ -52,10 +55,11 @@ export interface SignedInPc extends Pc {
   userId: string;
 }
 
-/** A PC whose agent already holds a live session token. */
+/** A PC whose agent already holds a live session token. The handle
+ * is a random UUID: Date.now() collides across parallel workers. */
 export async function signedInPc(
   browser: Browser,
-  handle = `e2e-${Date.now().toString(36)}`,
+  handle = `e2e-${crypto.randomUUID()}`,
   password = "password123",
 ): Promise<SignedInPc> {
   const auth = await apiRegister(handle, password);
@@ -68,4 +72,11 @@ export async function signedInPc(
     handle,
     userId: auth.user.id,
   };
+}
+
+/** A second page on the same PC (same browser context, same agent and
+ * cache): two tabs racing one record, e.g. conflict drills, without
+ * paying for a second context. */
+export async function secondPage(contextPc: Pc): Promise<Page> {
+  return contextPc.context.newPage();
 }

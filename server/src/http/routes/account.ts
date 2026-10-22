@@ -8,12 +8,14 @@ import {
   putFont,
   putFontFile,
 } from "../../domain/fonts.js";
+import { FONT_MAX_BYTES } from "../../domain/fonts.js";
 import { UnauthorizedError } from "../../domain/errors.js";
 import type { AuthDeps } from "../../domain/ports.js";
 import type {
-  FontRepository,
   SettingRepository,
+  FontRepository,
 } from "../../domain/libraryPorts.js";
+import { etagMatches } from "../etag.js";
 import { requireAuth } from "../plugins/auth.js";
 import { errorBody } from "../schemas/error.js";
 import {
@@ -109,16 +111,13 @@ export async function accountRoutes(
       if (!request.authUser) {
         throw new UnauthorizedError();
       }
-      const before = await deps.settings
-        .findByKey(request.authUser.id, request.params.key)
-        .catch(() => null);
-      const view = await putSetting(
+      const { view, status } = await putSetting(
         { settings: deps.settings },
         request.authUser.id,
         request.params.key,
         request.body.value,
       );
-      return reply.status(before ? 200 : 201).send(toSetting(view));
+      return reply.status(status).send(toSetting(view));
     },
   );
 
@@ -191,6 +190,11 @@ export async function accountRoutes(
     "/v2/fonts/:id/file",
     {
       preHandler: [requireAuth(deps)],
+      // Raw bytes ride outside JSON: the only envelope is the octet
+      // headers, so the budget is the domain cap plus a small margin.
+      // Without this the 16 KiB service default rejects every real font
+      // as a framework 413 before the domain can answer 413 itself.
+      bodyLimit: FONT_MAX_BYTES + 64 * 1024,
       schema: {
         description: "Upload font bytes; checked against the format and size.",
         params: fontIdParams,
@@ -253,7 +257,7 @@ export async function accountRoutes(
         request.authUser.id,
       );
       const etag = `"${file.sha256}"`;
-      if (request.headers["if-none-match"] === etag) {
+      if (etagMatches(request.headers["if-none-match"], file.sha256)) {
         return reply.status(304).send();
       }
       void reply.header("ETag", etag);

@@ -1,6 +1,14 @@
 import { UnauthorizedError } from "../errors.js";
 import type { AuthDeps, UserRecord } from "../ports.js";
 
+/**
+ * Sessions kept per user. Logins mint a row each; devices rarely log
+ * out, so without pruning one user grows a row per login until the
+ * 30-day TTL purge. 20 covers a phone, a tablet, a desktop and plenty
+ * of reinstalls.
+ */
+export const MAX_SESSIONS_PER_USER = 20;
+
 export interface SessionResult {
   user: UserRecord;
 }
@@ -33,6 +41,22 @@ export async function logoutUser(deps: AuthDeps, token: string): Promise<void> {
     throw new UnauthorizedError();
   }
   await deps.sessions.deleteByTokenHash(deps.tokens.hash(token));
+}
+
+/**
+ * Ends every session of a user except the calling one. After a password
+ * change (or a lost device) this is how the account is taken back: the
+ * current token keeps working, everything else 401s on next use.
+ */
+export async function revokeOtherSessions(
+  deps: AuthDeps,
+  userId: string,
+  currentToken: string,
+): Promise<number> {
+  return deps.sessions.deleteOthersForUser(
+    userId,
+    deps.tokens.hash(currentToken),
+  );
 }
 
 /**

@@ -72,8 +72,8 @@ pub fn wipe_database(conn: &Connection, fonts_dir: &Path) -> AppResult<ResetRepo
          DROP TABLE IF EXISTS sample_datasets;
          DROP TABLE IF EXISTS presets;",
     )?;
-    for path in font_paths {
-        let _ = std::fs::remove_file(path);
+    for stored in font_paths {
+        let _ = std::fs::remove_file(crate::commands::font::resolve_font_path(fonts_dir, &stored));
     }
     let _ = std::fs::remove_dir(fonts_dir);
     Ok(report)

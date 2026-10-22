@@ -76,6 +76,8 @@ describe("error envelope", () => {
     expect(body.error.code).toBe("internal_error");
     expect(body.error.message).not.toContain("secret");
     expect(body.error.message).not.toMatch(/at .*\(/);
+    // Even a 500 carries the id, so the operator can quote it.
+    expect(response.headers["x-request-id"]).toBeTruthy();
   });
 });
 
@@ -130,6 +132,43 @@ describe("CORS allow-list", () => {
     });
 
     expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  it("answers preflights per origin without leaking the list", async () => {
+    app = await buildApp({ config: testConfig(), deps: fakeDeps() });
+    const allowed = await app.inject({
+      method: "OPTIONS",
+      url: "/v2/templates/mine",
+      headers: {
+        origin: "http://localhost:1420",
+        "access-control-request-method": "GET",
+      },
+    });
+    expect(allowed.statusCode).toBeLessThan(300);
+    expect(allowed.headers["access-control-allow-origin"]).toBe(
+      "http://localhost:1420",
+    );
+
+    const denied = await app.inject({
+      method: "OPTIONS",
+      url: "/v2/templates/mine",
+      headers: {
+        origin: "https://evil.example",
+        "access-control-request-method": "GET",
+      },
+    });
+    expect(denied.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+});
+
+describe("security headers", () => {
+  it("sends helmet's baseline headers on plain responses", async () => {
+    app = await buildApp({ config: testConfig(), deps: fakeDeps() });
+    const response = await app.inject({ method: "GET", url: "/v2/health" });
+
+    expect(response.headers["x-content-type-options"]).toBe("nosniff");
+    expect(response.headers["x-frame-options"]).toBeDefined();
+    expect(response.headers["referrer-policy"]).toBeDefined();
   });
 });
 
@@ -232,10 +271,170 @@ describe("docs gating", () => {
       config: testConfig({ docsEnabled: false }),
       deps: fakeDeps(),
     });
-    const response = await app.inject({ url: "/docs" });
+    const docs = await app.inject({ url: "/docs" });
 
-    expect(response.statusCode).toBe(404);
-    const body = response.json() as { error: { code: string } };
-    expect(body.error.code).toBe("not_found");
+    expect(docs.statusCode).toBe(404);
+    const docsBody = docs.json() as { error: { code: string } };
+    expect(docsBody.error.code).toBe("not_found");
+
+    const openapi = await app.inject({ url: "/openapi.json" });
+    expect(openapi.statusCode).toBe(404);
+    const openapiBody = openapi.json() as { error: { code: string } };
+    expect(openapiBody.error.code).toBe("not_found");
+  });
+
+  it("never caches token-carrying auth responses", async () => {
+    app = await buildApp({
+      config: testConfig({ docsEnabled: false }),
+      deps: fakeDeps(),
+    });
+    const reg = await app.inject({
+      method: "POST",
+      url: "/v2/auth/register",
+      headers: { "content-type": "application/json" },
+      payload: { handle: "bo", password: "password123" },
+    });
+    expect(reg.statusCode).toBe(201);
+    expect(reg.headers["cache-control"]).toBe("no-store");
+    const token = (reg.json() as { token: string }).token;
+
+    const me = await app.inject({
+      method: "GET",
+      url: "/v2/auth/me",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(me.statusCode).toBe(200);
+    expect(me.headers["cache-control"]).toBe("no-store");
+
+    const logout = await app.inject({
+      method: "POST",
+      url: "/v2/auth/logout",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(logout.statusCode).toBe(204);
+    expect(logout.headers["cache-control"]).toBe("no-store");
+  });
+
+  it("DELETE /v2/auth/sessions revokes every session but the caller", async () => {
+    app = await buildApp({
+      config: testConfig({ docsEnabled: false }),
+      deps: fakeDeps(),
+    });
+    const headers = { "content-type": "application/json" };
+    const first = await app.inject({
+      method: "POST",
+      url: "/v2/auth/register",
+      headers,
+      payload: { handle: "bo", password: "password123" },
+    });
+    const t1 = (first.json() as { token: string }).token;
+    const second = await app.inject({
+      method: "POST",
+      url: "/v2/auth/login",
+      headers,
+      payload: { handle: "bo", password: "password123" },
+    });
+    const t2 = (second.json() as { token: string }).token;
+    expect(t2).not.toBe(t1);
+
+    const revoke = await app.inject({
+      method: "DELETE",
+      url: "/v2/auth/sessions",
+      headers: { authorization: `Bearer ${t1}` },
+    });
+    expect(revoke.statusCode).toBe(200);
+    expect(revoke.json()).toEqual({ revoked: 1 });
+
+    // The caller works; the other token is dead.
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/v2/auth/me",
+          headers: { authorization: `Bearer ${t1}` },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/v2/auth/me",
+          headers: { authorization: `Bearer ${t2}` },
+        })
+      ).statusCode,
+    ).toBe(401);
+  });
+
+  it("PUT /v2/auth/password changes the password and revokes the rest", async () => {
+    app = await buildApp({
+      config: testConfig({ docsEnabled: false }),
+      deps: fakeDeps(),
+    });
+    const headers = { "content-type": "application/json" };
+    const reg = await app.inject({
+      method: "POST",
+      url: "/v2/auth/register",
+      headers,
+      payload: { handle: "bo", password: "password123" },
+    });
+    const t1 = (reg.json() as { token: string }).token;
+    const second = await app.inject({
+      method: "POST",
+      url: "/v2/auth/login",
+      headers,
+      payload: { handle: "bo", password: "password123" },
+    });
+    const t2 = (second.json() as { token: string }).token;
+
+    // Wrong current password: 401, nothing changes.
+    const wrong = await app.inject({
+      method: "PUT",
+      url: "/v2/auth/password",
+      headers: { ...headers, authorization: `Bearer ${t1}` },
+      payload: { current_password: "nope", new_password: "new-password-1" },
+    });
+    expect(wrong.statusCode).toBe(401);
+
+    const changed = await app.inject({
+      method: "PUT",
+      url: "/v2/auth/password",
+      headers: { ...headers, authorization: `Bearer ${t1}` },
+      payload: {
+        current_password: "password123",
+        new_password: "new-password-1",
+      },
+    });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.json()).toEqual({ revoked: 1 });
+    expect(changed.headers["cache-control"]).toBe("no-store");
+
+    // Old password dead, new password works, other session revoked,
+    // caller still valid.
+    const oldLogin = await app.inject({
+      method: "POST",
+      url: "/v2/auth/login",
+      headers,
+      payload: { handle: "bo", password: "password123" },
+    });
+    expect(oldLogin.statusCode).toBe(401);
+    const newLogin = await app.inject({
+      method: "POST",
+      url: "/v2/auth/login",
+      headers,
+      payload: { handle: "bo", password: "new-password-1" },
+    });
+    expect(newLogin.statusCode).toBe(200);
+    for (const [token, want] of [
+      [t1, 200],
+      [t2, 401],
+    ] as const) {
+      const me = await app.inject({
+        method: "GET",
+        url: "/v2/auth/me",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(me.statusCode).toBe(want);
+    }
   });
 });

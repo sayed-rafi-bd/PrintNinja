@@ -30,6 +30,9 @@ const resources = {
         page: "Page",
         of: "of",
         all: "All",
+        sort_by: "Sort by {{column}}",
+        select_all_rows: "Select all rows",
+        select_row: "Select row {{id}}",
       },
       nav: {
         designer: "Designer",

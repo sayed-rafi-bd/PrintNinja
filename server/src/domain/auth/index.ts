@@ -2,9 +2,12 @@ export { registerUser } from "./register.js";
 export type { RegisterInput, RegisterResult } from "./register.js";
 export { loginUser } from "./login.js";
 export type { LoginInput, LoginResult } from "./login.js";
+export { changePassword } from "./password.js";
 export {
   logoutUser,
+  MAX_SESSIONS_PER_USER,
   purgeExpiredSessions,
+  revokeOtherSessions,
   validateSession,
 } from "./session.js";
 export type { SessionResult } from "./session.js";

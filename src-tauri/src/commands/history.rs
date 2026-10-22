@@ -85,6 +85,70 @@ pub fn delete_job(db: State<DbState>, id: i64) -> AppResult<()> {
     delete_job_conn(guard.connection(), id)
 }
 
+/// Retention defaults, matching the Settings UI.
+pub const DEFAULT_RETENTION_DAYS: u32 = 30;
+pub const DEFAULT_MAX_RECORDS: u32 = 10000;
+
+/// Reads the retention settings with the UI defaults. Unparseable or
+/// out-of-range values fall back instead of disabling the purge.
+pub fn read_retention_prefs(conn: &Connection) -> (u32, u32) {
+    let get = |key: &str| -> Option<String> {
+        conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+            r.get(0)
+        })
+        .ok()
+    };
+    let days = get("retention_days")
+        .and_then(|v| v.parse::<u32>().ok())
+        .filter(|d| (1..=3650).contains(d))
+        .unwrap_or(DEFAULT_RETENTION_DAYS);
+    let max = get("max_records")
+        .and_then(|v| v.parse::<u32>().ok())
+        .filter(|m| (1..=1_000_000).contains(m))
+        .unwrap_or(DEFAULT_MAX_RECORDS);
+    (days, max)
+}
+
+/// Deletes terminal history rows older than `retention_days`, then —
+/// if more than `max_records` terminal rows remain — the oldest beyond
+/// the cap. Returns (deleted_by_age, deleted_by_cap). Queued and
+/// printing rows are never touched: a long queue is not history yet.
+/// Runs at startup and once a day (see lib.rs setup).
+pub fn purge_old_jobs(
+    conn: &Connection,
+    retention_days: u32,
+    max_records: u32,
+) -> AppResult<(usize, usize)> {
+    let by_age = conn.execute(
+        "DELETE FROM print_jobs
+         WHERE status IN ('success', 'failed', 'cancelled')
+           AND created_at < datetime('now', '-' || ?1 || ' days')",
+        [retention_days],
+    )?;
+    let over: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) - ?1 FROM print_jobs
+             WHERE status IN ('success', 'failed', 'cancelled')",
+            [max_records],
+            |r| r.get(0),
+        )
+        .unwrap_or(0)
+        .max(0);
+    let mut by_cap = 0;
+    if over > 0 {
+        by_cap = conn.execute(
+            "DELETE FROM print_jobs WHERE id IN (
+               SELECT id FROM print_jobs
+               WHERE status IN ('success', 'failed', 'cancelled')
+               ORDER BY created_at ASC, id ASC
+               LIMIT ?1
+             )",
+            [over],
+        )?;
+    }
+    Ok((by_age, by_cap))
+}
+
 pub fn list_jobs_conn(conn: &Connection) -> AppResult<Vec<PrintJob>> {
     // ORDER BY lives here, not in the shared column list: `get_job`,
     // `reprint_job` and `retry_job` append `WHERE id = ?1`, which after an

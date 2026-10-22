@@ -152,10 +152,13 @@ export interface PrintHtmlReq {
   margin_bottom?: number | null;
   margin_left?: number | null;
   fit_mode?: string | null;
+  page_range?: string | null;
+  grayscale?: boolean | null;
   template_id?: number | null;
   template_version_id?: number | null;
   data?: unknown;
   data_url?: string | null;
+  http_method?: string | null;
   test?: boolean | null;
   source?: string | null;
   idempotency_key?: string | null;
