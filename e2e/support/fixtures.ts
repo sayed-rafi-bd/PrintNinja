@@ -55,11 +55,12 @@ export interface SignedInPc extends Pc {
   userId: string;
 }
 
-/** A PC whose agent already holds a live session token. The handle
- * is a random UUID: Date.now() collides across parallel workers. */
+/** A PC whose agent already holds a live session token. The handle is a
+ * short random suffix: a full UUID does not fit HANDLE_MAX_LENGTH (32),
+ * and Date.now() collides across parallel workers. */
 export async function signedInPc(
   browser: Browser,
-  handle = `e2e-${crypto.randomUUID()}`,
+  handle = `e2e-${crypto.randomUUID().slice(0, 8)}`,
   password = "password123",
 ): Promise<SignedInPc> {
   const auth = await apiRegister(handle, password);
@@ -72,6 +73,25 @@ export async function signedInPc(
     handle,
     userId: auth.user.id,
   };
+}
+
+/** A signed-in PC with a seed (printers, templates, settings overrides).
+ * Bare pc() seeds never get past the sign-in gate when the API is up,
+ * so every spec that drives app UI starts here. */
+export async function signedSeed(
+  browser: Browser,
+  stem: string,
+  seed: AgentSeed = {},
+  password = "password123",
+): Promise<Pc> {
+  const auth = await apiRegister(
+    `${stem}-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    password,
+  );
+  return pc(browser, {
+    ...seed,
+    settings: { share_session_token: auth.token, ...seed.settings },
+  });
 }
 
 /** A second page on the same PC (same browser context, same agent and

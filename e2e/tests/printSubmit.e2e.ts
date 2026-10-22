@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { pc } from "../support/fixtures";
+import { signedSeed } from "../support/fixtures";
 
 // The UI half of the print path (REFACTORING.md section 11): on the
 // Print page, choosing a printer and a template and pressing Print
@@ -29,8 +29,7 @@ async function printCalls(page: {
 test("print submits the whole form, including page range and grayscale", async ({
   browser,
 }) => {
-  const seeded = await pc(browser, {
-    settings: { share_session_token: null },
+  const seeded = await signedSeed(browser, "submit", {
     templates: [
       {
         name: "Submit Label",

@@ -19,7 +19,7 @@ import {
 } from "./db.js";
 
 // Ported template characterization (server-legacy/src/main.rs, the B4 and
-// P1 families) against the v2 service on PostgreSQL. Deliberate v2
+// P1 families) against the v2 service on a real database. Deliberate v2
 // changes are asserted, not glossed over:
 // - creates answer 201 and are always private (no publish flag);
 // - updates need if_revision (428 without, 409 on stale with the stored

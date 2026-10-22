@@ -24,6 +24,10 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Local SQLite databases (dev.db, test tmp files)
+*.db
+*.db-journal
+
 # Logs
 *.log
 npm-debug.log*
@@ -37,7 +41,7 @@ src-tauri/gen/schemas
 
 # Server (TypeScript service, REFACTORING.md Phase 1)
 server/dist
-server/src/infra/prisma/generated
+server/src/infra/db/generated
 
 # Test reports
 playwright-report

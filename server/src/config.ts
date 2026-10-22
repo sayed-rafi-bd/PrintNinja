@@ -41,49 +41,60 @@ const originList = z.string().transform((value, ctx) => {
   return origins;
 });
 
-const configSchema = z.object({
-  NODE_ENV: z
-    .enum(["development", "production", "test"])
-    .default("development"),
-  HOST: z.string().min(1).default("127.0.0.1"),
-  PORT: port.default(3001),
-  DATABASE_URL: z.string().min(1),
-  LOG_LEVEL: z
-    .enum(["trace", "debug", "info", "warn", "error", "fatal"])
-    .default("info"),
-  CORS_ORIGINS: originList,
-  /**
-   * Number of reverse-proxy hops to trust for the client IP (0 = none).
-   * Deliberately numeric, not a bare boolean: the deployed shape decides.
-   */
-  TRUST_PROXY: z.coerce
-    .number({ message: "must be a number" })
-    .int()
-    .min(0)
-    .default(0),
-  SESSION_TTL_DAYS: positiveInt.default(30),
-  SESSION_CLEANUP_MINUTES: positiveInt.default(60),
-  /** Days tombstones are kept before the hourly cleanup purges them.
-   * A cursor older than the oldest kept tombstone gets reset: true. */
-  SYNC_TOMBSTONE_DAYS: positiveInt.default(90),
-  /** Per-page byte budget for the sync stream. Pages stop at the
-   * record limit or this budget, whichever is first. */
-  SYNC_PAGE_BYTES: positiveInt.default(8 * 1024 * 1024),
-  RATE_LIMIT_MAX: positiveInt.default(120),
-  RATE_LIMIT_AUTH_MAX: positiveInt.default(10),
-  RATE_LIMIT_AUTH_WINDOW_SECONDS: positiveInt.default(300),
-  ARGON2_MEMORY_KIB: positiveInt.max(262144).default(19456),
-  ARGON2_TIME_COST: positiveInt.max(8).default(2),
-  ARGON2_PARALLELISM: positiveInt.max(8).default(1),
-  // prefault, not default: Zod 4 defaults skip the enum/transform
-  DOCS_ENABLED: booleanFromString.prefault("false"),
-});
+const configSchema = z
+  .object({
+    NODE_ENV: z
+      .enum(["development", "production", "test"])
+      .default("development"),
+    HOST: z.string().min(1).default("127.0.0.1"),
+    PORT: port.default(3001),
+    // Local `file:` database for development and tests, Turso Cloud
+    // (`libsql://` + DATABASE_AUTH_TOKEN) in production.
+    DATABASE_URL: z.string().min(1),
+    DATABASE_AUTH_TOKEN: z.string().optional(),
+    LOG_LEVEL: z
+      .enum(["trace", "debug", "info", "warn", "error", "fatal"])
+      .default("info"),
+    CORS_ORIGINS: originList,
+    /**
+     * Number of reverse-proxy hops to trust for the client IP (0 = none).
+     * Deliberately numeric, not a bare boolean: the deployed shape decides.
+     */
+    TRUST_PROXY: z.coerce
+      .number({ message: "must be a number" })
+      .int()
+      .min(0)
+      .default(0),
+    SESSION_TTL_DAYS: positiveInt.default(30),
+    SESSION_CLEANUP_MINUTES: positiveInt.default(60),
+    /** Days tombstones are kept before the hourly cleanup purges them.
+     * A cursor older than the oldest kept tombstone gets reset: true. */
+    SYNC_TOMBSTONE_DAYS: positiveInt.default(90),
+    /** Per-page byte budget for the sync stream. Pages stop at the
+     * record limit or this budget, whichever is first. */
+    SYNC_PAGE_BYTES: positiveInt.default(8 * 1024 * 1024),
+    RATE_LIMIT_MAX: positiveInt.default(120),
+    RATE_LIMIT_AUTH_MAX: positiveInt.default(10),
+    RATE_LIMIT_AUTH_WINDOW_SECONDS: positiveInt.default(300),
+    ARGON2_MEMORY_KIB: positiveInt.max(262144).default(19456),
+    ARGON2_TIME_COST: positiveInt.max(8).default(2),
+    ARGON2_PARALLELISM: positiveInt.max(8).default(1),
+    // prefault, not default: Zod 4 defaults skip the enum/transform
+    DOCS_ENABLED: booleanFromString.prefault("false"),
+  })
+  .refine(
+    (parsed) =>
+      !parsed.DATABASE_URL.startsWith("libsql:") ||
+      (parsed.DATABASE_AUTH_TOKEN ?? "").length > 0,
+    { message: "DATABASE_AUTH_TOKEN: required for a libsql:// DATABASE_URL" },
+  );
 
 export type Config = {
   nodeEnv: "development" | "production" | "test";
   host: string;
   port: number;
   databaseUrl: string;
+  databaseAuthToken?: string;
   logLevel: "trace" | "debug" | "info" | "warn" | "error" | "fatal";
   corsOrigins: string[];
   trustProxy: number;
@@ -125,6 +136,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     host: parsed.HOST,
     port: parsed.PORT,
     databaseUrl: parsed.DATABASE_URL,
+    databaseAuthToken: parsed.DATABASE_AUTH_TOKEN,
     logLevel: parsed.LOG_LEVEL,
     corsOrigins: parsed.CORS_ORIGINS,
     trustProxy: parsed.TRUST_PROXY,

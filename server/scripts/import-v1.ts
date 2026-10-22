@@ -1,9 +1,9 @@
 import { DatabaseSync } from "node:sqlite";
-import type { DbClient } from "../src/infra/prisma/client.js";
-import { createSavedRepository } from "../src/infra/prisma/saved.js";
-import { createSessionRepository } from "../src/infra/prisma/sessions.js";
-import { createTemplateRepository } from "../src/infra/prisma/templates.js";
-import { createUserRepository } from "../src/infra/prisma/users.js";
+import type { DbClient } from "../src/infra/db/client.js";
+import { createSavedRepository } from "../src/infra/db/saved.js";
+import { createSessionRepository } from "../src/infra/db/sessions.js";
+import { createTemplateRepository } from "../src/infra/db/templates.js";
+import { createUserRepository } from "../src/infra/db/users.js";
 
 export interface ImportCounts {
 	users: number;
@@ -58,7 +58,7 @@ interface LegacySaved {
 /**
  * One-off import from the Rust server's SQLite file (REFACTORING.md
  * section 7, E9). Reads every row, writes through the Prisma
- * repositories into PostgreSQL. Ids are kept verbatim, so every
+ * repositories. Ids are kept verbatim, so every
  * remote_id stored in installed apps still resolves; scrypt password
  * hashes and session token hashes are stored untouched, so an old
  * password logs in (and rehashes to argon2id) and an old token still
@@ -118,57 +118,59 @@ export async function importV1(options: {
 		const templatesRepo = createTemplateRepository(options.db);
 		const savedRepo = createSavedRepository(options.db);
 
-		await options.db.$transaction(async () => {
-			for (const user of users) {
-				await usersRepo.create({
-					id: user.id,
-					handle: user.handle,
-					handleKey: user.handle.trim().toLowerCase(),
-					passwordHash: user.password_hash,
+		// No outer transaction: every repository call below already runs in
+		// its own. (SQLite takes the write lock at BEGIN, so an idle outer
+		// transaction would starve the inner ones; on PostgreSQL the same
+		// wrapper committed each inner transaction independently anyway.)
+		for (const user of users) {
+			await usersRepo.create({
+				id: user.id,
+				handle: user.handle,
+				handleKey: user.handle.trim().toLowerCase(),
+				passwordHash: user.password_hash,
+			});
+		}
+		for (const session of sessions) {
+			await sessionsRepo.create({
+				tokenHash: session.token_hash,
+				userId: session.user_id,
+				expiresAt: parseDate(session.expires_at),
+			});
+		}
+		for (const template of templates) {
+			// v1 has no created_at column; updated_at is the best
+			// available birth date for imported rows.
+			const updatedAt = parseDate(template.updated_at);
+			await templatesRepo.create(
+				{
+					id: template.id,
+					ownerId: template.owner_id,
+					name: template.name,
+					summary: template.summary,
+					pageWMm: template.page_w_mm,
+					pageHMm: template.page_h_mm,
+					language: template.language || "html",
+					body: template.body,
+					css: template.css,
+					readme: template.readme,
+					createdAt: updatedAt,
+					updatedAt,
+				},
+				{ createdBy: "manual" },
+			);
+			if (template.published_at !== "") {
+				await templatesRepo.setPublished(template.id, parseDate(template.published_at));
+			}
+			if (template.use_count !== 0) {
+				await options.db.template.update({
+					where: { id: template.id },
+					data: { useCount: template.use_count },
 				});
 			}
-			for (const session of sessions) {
-				await sessionsRepo.create({
-					tokenHash: session.token_hash,
-					userId: session.user_id,
-					expiresAt: parseDate(session.expires_at),
-				});
-			}
-			for (const template of templates) {
-				// v1 has no created_at column; updated_at is the best
-				// available birth date for imported rows.
-				const updatedAt = parseDate(template.updated_at);
-				await templatesRepo.create(
-					{
-						id: template.id,
-						ownerId: template.owner_id,
-						name: template.name,
-						summary: template.summary,
-						pageWMm: template.page_w_mm,
-						pageHMm: template.page_h_mm,
-						language: template.language || "html",
-						body: template.body,
-						css: template.css,
-						readme: template.readme,
-						createdAt: updatedAt,
-						updatedAt,
-					},
-					{ createdBy: "manual" },
-				);
-				if (template.published_at !== "") {
-					await templatesRepo.setPublished(template.id, parseDate(template.published_at));
-				}
-				if (template.use_count !== 0) {
-					await options.db.template.update({
-						where: { id: template.id },
-						data: { useCount: template.use_count },
-					});
-				}
-			}
-			for (const row of saved) {
-				await savedRepo.save(row.user_id, row.template_id);
-			}
-		});
+		}
+		for (const row of saved) {
+			await savedRepo.save(row.user_id, row.template_id);
+		}
 
 		return { dryRun: false, source: options.sqlitePath, counts };
 	} finally {
@@ -203,8 +205,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 		console.error("DATABASE_URL is not set (not needed for --dry-run)");
 		process.exit(2);
 	}
-	const { createDbClient } = await import("../src/infra/prisma/client.js");
-	const db = dryRun ? (undefined as unknown as import("../src/infra/prisma/client.js").DbClient) : createDbClient(databaseUrl as string);
+	const { createDbClient } = await import("../src/infra/db/client.js");
+	const db = dryRun ? (undefined as unknown as import("../src/infra/db/client.js").DbClient) : createDbClient(databaseUrl as string);
 	try {
 		const report = await importV1({ sqlitePath: source, db, dryRun });
 		console.log(JSON.stringify(report, null, 2));

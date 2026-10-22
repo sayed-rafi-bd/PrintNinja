@@ -4,16 +4,16 @@ import { loadConfig } from "./config.js";
 import { purgeExpiredSessions } from "./domain/auth/index.js";
 import { purgeOldTombstones } from "./domain/sync/index.js";
 import type { AppDeps } from "./domain/ports.js";
-import { createDbClient } from "./infra/prisma/client.js";
-import { createDatasetRepository } from "./infra/prisma/datasets.js";
-import { createSettingRepository } from "./infra/prisma/settings.js";
-import { createFontRepository } from "./infra/prisma/fonts.js";
-import { createProfileRepository } from "./infra/prisma/profiles.js";
-import { createSavedRepository } from "./infra/prisma/saved.js";
-import { createSessionRepository } from "./infra/prisma/sessions.js";
-import { createSyncRepository } from "./infra/prisma/sync.js";
-import { createTemplateRepository } from "./infra/prisma/templates.js";
-import { createUserRepository } from "./infra/prisma/users.js";
+import { createDbClient } from "./infra/db/client.js";
+import { createDatasetRepository } from "./infra/db/datasets.js";
+import { createSettingRepository } from "./infra/db/settings.js";
+import { createFontRepository } from "./infra/db/fonts.js";
+import { createProfileRepository } from "./infra/db/profiles.js";
+import { createSavedRepository } from "./infra/db/saved.js";
+import { createSessionRepository } from "./infra/db/sessions.js";
+import { createSyncRepository } from "./infra/db/sync.js";
+import { createTemplateRepository } from "./infra/db/templates.js";
+import { createUserRepository } from "./infra/db/users.js";
 import { createPasswordHasher } from "./infra/security/passwordHasher.js";
 import { createTokenService } from "./infra/security/tokens.js";
 
@@ -22,7 +22,7 @@ import { createTokenService } from "./infra/security/tokens.js";
 // requests finish, close the database, then exit. Fail-fast: a bad
 // environment aborts here with the offending field named.
 const config = loadConfig();
-const db = createDbClient(config.databaseUrl);
+const db = createDbClient(config.databaseUrl, config.databaseAuthToken);
 
 const deps: AppDeps = {
   users: createUserRepository(db),

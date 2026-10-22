@@ -1,45 +1,24 @@
-# PrintNinja v2 stack (REFACTORING.md Phase 1, packaging): the TypeScript
-# service plus PostgreSQL. First boot migrates the database itself (see
-# ./docker-entrypoint.sh), so `docker compose up` lands healthy.
-# Run from this directory: `docker compose up -d --build`.
+# PrintNinja v2 stack: the TypeScript service. First boot migrates the
+# database itself (see ./docker-entrypoint.sh), so `docker compose up`
+# lands healthy. Run from this directory: `docker compose up -d --build`.
 # The env file is the `.env` next to this file (never committed).
+#
+# Two database modes, same image:
+# - Bundled file (default): DATABASE_URL=file:/data/printninja.db keeps
+#   everything in the named volume below. Zero configuration.
+# - Turso Cloud: set DATABASE_URL=libsql://... plus DATABASE_AUTH_TOKEN
+#   in `.env`; the volume is then unused.
 name: printninja
 
 services:
-  db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    logging: &logging
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    environment:
-      POSTGRES_USER: printninja
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in server/.env}
-      POSTGRES_DB: printninja
-    volumes:
-      # A dedicated volume (not the old share server's): mounting foreign
-      # data at a PGDATA path would break initdb.
-      - printninja-pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U printninja -d printninja"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
   server:
     build:
       context: ..
       dockerfile: server/Dockerfile
     restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
     environment:
-      # Same variable name as the legacy service, different meaning:
-      # the v2 service wants a PostgreSQL URL, not a SQLite path.
-      DATABASE_URL: postgresql://printninja:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in server/.env}@db:5432/printninja
+      DATABASE_URL: ${DATABASE_URL:-file:/data/printninja.db}
+      DATABASE_AUTH_TOKEN: ${DATABASE_AUTH_TOKEN:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:1420}
       HOST: 0.0.0.0
       PORT: 3001
@@ -55,9 +34,24 @@ services:
       - no-new-privileges:true
     # Let in-flight requests finish on SIGTERM (see server/src/server.ts).
     stop_grace_period: 20s
-    logging: *logging
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Migrations run at boot, so the first readiness probe lands after
+    # the schema is in place; /v2/ready also round-trips the database.
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001/v2/ready').then((r) => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))\""]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    volumes:
+      # Backs the default file:/data/printninja.db. Unused with Turso.
+      - printninja-data:/data
     ports:
       - "${SERVER_PORT:-3001}:3001"
 
 volumes:
-  printninja-pgdata:
+  printninja-data:

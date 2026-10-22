@@ -22,7 +22,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     nodeEnv: "test",
     host: "127.0.0.1",
     port: 3001,
-    databaseUrl: "postgresql://user:pass@localhost:5432/printninja_test",
+    databaseUrl: "file:./test.db",
     logLevel: "error",
     corsOrigins: ["http://localhost:1420", "tauri://localhost"],
     trustProxy: 0,
@@ -44,7 +44,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
 /**
  * Full AppDeps with in-memory fakes, for tests that only exercise the
  * HTTP layer (envelope, headers, docs gating). Anything touching real
- * behaviour uses test/integration/ with PostgreSQL instead.
+ * behaviour uses test/integration/ with a local SQLite file instead.
  */
 export function fakeDeps(overrides: Partial<AppDeps> = {}): AppDeps {
   const users = createFakeUsers();

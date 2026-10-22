@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 // container: `pnpm --filter server test:e2e:stack` (clean database, booted stack), then
 // `E2E_BASE_URL=http://localhost:3001 pnpm --filter server test:e2e`.
 // Same behaviors the integration suite pins through inject, replayed
-// through the real socket, image and PostgreSQL — the layer that caught
+// through the real socket, image and database file — the layer that caught
 // the image-only zod and version.js bugs. Handles carry a run-unique
 // suffix so repeated runs against one stack never collide.
 

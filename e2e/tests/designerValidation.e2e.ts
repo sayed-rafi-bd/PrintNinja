@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { pc } from "../support/fixtures";
+import { signedSeed } from "../support/fixtures";
 import { testids } from "../support/testids";
 
 // Designer validation paths: the same rules the Rust backend enforces
@@ -35,7 +35,7 @@ async function templateIdByName(page: Page, name: string): Promise<number> {
 test("designer rejects duplicates, blanks and remote references", async ({
   browser,
 }) => {
-  const seeded = await pc(browser, {});
+  const seeded = await signedSeed(browser, "designer", {});
   const page = await seeded.context.newPage();
   await page.goto("/templates");
 

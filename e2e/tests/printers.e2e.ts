@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { pc } from "../support/fixtures";
+import { pc, signedSeed } from "../support/fixtures";
 
 // Printer management against the fake agent, whose addPrinter mirrors
 // the Rust validation in commands/printer.rs (empty name, unknown
@@ -17,7 +17,7 @@ async function openAdd(page: Page): Promise<void> {
 test("printers add, reject duplicates, test and remove", async ({
   browser,
 }) => {
-  const seeded = await pc(browser, {});
+  const seeded = await signedSeed(browser, "printer", {});
   const page = await seeded.context.newPage();
   await page.goto("/printers");
 
@@ -36,6 +36,8 @@ test("printers add, reject duplicates, test and remove", async ({
   // Case-insensitive duplicate: same name, different case.
   await openAdd(page);
   await page.getByLabel("Printer name").fill("e2e jetdirect");
+  await page.getByLabel("Connection").click();
+  await page.getByRole("option", { name: /Raw TCP/i }).click();
   await page.getByLabel(/address|host|port/i).fill("127.0.0.1:9101");
   await page.getByRole("button", { name: "Save printer" }).click();
   await expect(page.getByText(/already exists/i)).toBeVisible({

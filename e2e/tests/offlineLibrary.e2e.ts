@@ -1,6 +1,7 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { apiRegister, apiSyncChanges } from "../support/api";
 import { pc } from "../support/fixtures";
+import { readStackState } from "../support/stack-state";
 import { testids } from "../support/testids";
 
 const PASSWORD = "password123";
@@ -66,10 +67,11 @@ test("offline library edits queue dirty and replay on recovery", async ({
     timeout: 15_000,
   });
 
-  const stackUrl = await page.evaluate(() =>
-    localStorage.getItem("printninja-setting:share_service_url"),
-  );
-  await blockApi(seeded.context, stackUrl ?? "http://127.0.0.1:9");
+  // Block at the stack URL, not the page's localStorage copy: the fake
+  // agent keeps settings in its own store, so the localStorage key the
+  // app falls back to is empty and blocking it no-ops (offline.e2e
+  // reads the stack state for the same reason).
+  await blockApi(seeded.context, readStackState().apiUrl);
   await page.goto("/templates");
   await expect(page.getByTestId(testids.offlineBanner)).toBeVisible();
 
@@ -136,6 +138,6 @@ test("offline library edits queue dirty and replay on recovery", async ({
     expect(names).toContain("dataset:upsert:Offline Orders");
     expect(names).toContain("font:upsert:body");
     expect(names).toContain("setting:upsert:brand_name");
-    expect(names).toContain("profile:upsert:offline printer");
+    expect(names).toContain("profile:upsert:e2e offline printer");
   }).toPass({ timeout: 60_000 });
 });

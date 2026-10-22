@@ -22,23 +22,44 @@ Never commit any `.env` file (`server/.env` is gitignored).
 
 ## Database
 
-### `POSTGRES_PASSWORD`
-Password for the PostgreSQL container in `server/docker-compose.yml`.
-Required for compose; it has no default. Use letters and digits only —
-the password is interpolated into `DATABASE_URL`, so characters such as
-`@ : / # %` would break the URL. To generate one: `openssl rand -hex 24`.
+The service stores everything in a SQLite-family database through Prisma
+plus the `@prisma/adapter-libsql` driver adapter — the same code path for
+every environment:
 
-Changing it later requires a fresh volume: PostgreSQL sets the password
-only at first init, so a changed password on an existing volume fails
-authentication (`P1000` in the server log while `db` stays healthy).
-Rotate by dumping the database, `docker compose down -v`, setting the
-new password, booting, and restoring the dump. Never change it on a
-volume that holds data you have not backed up.
+| Run | Database |
+| --- | --- |
+| `docker compose up` (from `server/`) | Bundled file (`file:/data/printninja.db` in the named volume), unless `DATABASE_URL` is set |
+| Local server (`node --env-file=.env`, from `server/`) | `DATABASE_URL=file:./dev.db` (no token) |
+| Production container | Turso Cloud (`DATABASE_URL=libsql://…` + `DATABASE_AUTH_TOKEN`) |
 
 ### `DATABASE_URL`
-PostgreSQL connection URL for running the server outside Docker.
-Not needed with compose, which sets its own value.
-Example for scratch work: `postgresql://postgres:postgres@localhost:5433/printninja`
+
+- `file:` — a local SQLite file. Relative paths resolve from the process
+  working directory. Used for development, tests and the bundled compose
+  volume. No token needed.
+- `libsql://…` — a Turso Cloud database (e.g.
+  `libsql://your-db.turso.io`). Requires `DATABASE_AUTH_TOKEN`. This is
+  the production shape: no database container to run, backups and
+  replication are the provider's job.
+
+### `DATABASE_AUTH_TOKEN`
+
+Turso auth token (`turso db tokens create <database-name>`). Required
+exactly when `DATABASE_URL` starts with `libsql:` — the service refuses
+to start otherwise, naming the field. Never commit it; rotate it like
+any secret.
+
+### Migrations
+
+Author with `pnpm --filter server db:migrate` (Prisma Migrate against a
+local file), apply with `pnpm --filter server db:apply`. The container
+entrypoint applies pending migrations on boot (`RUN_MIGRATIONS=false`
+skips it — set that on all but one replica). `prisma migrate deploy`
+cannot reach a remote Turso database, so the boot runner
+(`src/infra/db/migrate.ts`) executes the same `migration.sql` files
+through the libSQL client instead; it fails fast if an applied
+migration's file changed. Migrations are forward-only: back up before
+deploying a release that carries one, and test the restore.
 
 ## Network
 

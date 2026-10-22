@@ -38,7 +38,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Generate the Prisma client and build the service
         run: |
-          DATABASE_URL=postgresql://localhost:5432/printninja_ci_dummy \
+          DATABASE_URL=file:/tmp/printninja_ci_dummy.db \
           pnpm --filter server db:generate
           pnpm --filter server build
       - name: Cache Playwright browsers

@@ -21,7 +21,7 @@ import {
 
 // Ported auth characterization tests (server-legacy/src/main.rs, the B3
 // family). v1 ran on SQLite behind axum; these run the same behaviours
-// against the v2 service on PostgreSQL. Deliberate v2 changes are
+// against the v2 service on a real database. Deliberate v2 changes are
 // asserted, not glossed over:
 // - register answers 201 (was 200) and the body gains expires_at;
 // - a taken handle is 409 handle_taken (was 400);

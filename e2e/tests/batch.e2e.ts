@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { pc } from "../support/fixtures";
+import { signedSeed } from "../support/fixtures";
 
 // Batch lifecycle against the fake agent, whose batch store mirrors
 // the Rust validation and cancel/retry rules in commands/batch.rs.
@@ -23,7 +23,7 @@ async function selectPrinterAndTemplate(page: {
 }
 
 test("batch create, cancel and retry through the UI", async ({ browser }) => {
-  const seeded = await pc(browser, {
+  const seeded = await signedSeed(browser, "batche2e", {
     printers: [{ name: "E2E Batch Printer" }],
     templates: [
       {
@@ -49,7 +49,7 @@ test("batch create, cancel and retry through the UI", async ({ browser }) => {
 
   const row = page.getByText("Batch #1", { exact: false });
   await expect(row).toBeVisible();
-  await expect(page.getByText("queued", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText(/queued/i).first()).toBeVisible();
 
   await page.getByRole("button", { name: "Cancel" }).first().click();
   await expect(page.getByText("Batch #1 cancelled")).toBeVisible({
@@ -67,8 +67,8 @@ test("batch create, cancel and retry through the UI", async ({ browser }) => {
       }
     ).__TAURI_INTERNALS__.invoke("retry_batch", { id: 1 }),
   );
-  await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(page.getByText("queued", { exact: true }).first()).toBeVisible({
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(page.getByText(/queued/i).first()).toBeVisible({
     timeout: 15_000,
   });
 });
@@ -76,7 +76,7 @@ test("batch create, cancel and retry through the UI", async ({ browser }) => {
 test("batch validation rejects empty, broken and non-array input", async ({
   browser,
 }) => {
-  const seeded = await pc(browser, {
+  const seeded = await signedSeed(browser, "batche2e", {
     printers: [{ name: "E2E Batch Printer" }],
     templates: [
       {

@@ -87,8 +87,8 @@ jobs:
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
-  # Phase 1: the TypeScript service. Integration tests need Docker for
-  # Testcontainers (present on ubuntu-latest). The drift check regenerates
+  # Phase 1: the TypeScript service. Integration tests run against local
+  # SQLite files (no Docker needed). The drift check regenerates
   # the OpenAPI document and fails on any difference, so the committed
   # file cannot go stale.
   server-check:
@@ -110,7 +110,7 @@ jobs:
       # config loading (same trick as the Dockerfile).
       - name: Generate the Prisma client
         run: |
-          DATABASE_URL=postgresql://localhost:5432/printninja_ci_dummy \
+          DATABASE_URL=file:/tmp/printninja_ci_dummy.db \
           pnpm --filter server db:generate
       - run: pnpm --filter server typecheck
       - run: pnpm --filter server arch
@@ -118,7 +118,7 @@ jobs:
       - run: pnpm --filter server test:coverage
       - name: OpenAPI drift check
         run: |
-          DATABASE_URL=postgresql://user:pass@localhost:5432/printninja \
+          DATABASE_URL=file:/tmp/printninja_openapi_dummy.db \
           CORS_ORIGINS=http://localhost:1420 \
           pnpm --filter server openapi:generate
           git diff --exit-code -- server/openapi/openapi.json
@@ -133,8 +133,8 @@ jobs:
       - name: Build the service image
         run: docker build -f server/Dockerfile -t printninja-server:ci .
 
-  # E1 and E8 over HTTP against the composed stack (built image, real
-  # PostgreSQL, real network port). Tag-only with the rest of the heavy
+  # E1 and E8 over HTTP against the composed stack (built image, database
+  # file in the named volume, real network port). Tag-only with the rest of the heavy
   # jobs: pushes and PRs run the basic checks.
   server-e2e:
     if: startsWith(github.ref, 'refs/tags/v') && github.head_ref != 'refactoring'
@@ -152,7 +152,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Start the stack
         run: |
-          printf 'POSTGRES_PASSWORD=e2e-test-password\nCORS_ORIGINS=http://localhost:1420\n' > server/.env
+          printf 'CORS_ORIGINS=http://localhost:1420\n' > server/.env
           # The container suite shares one client address, so the global
           # limiter runs relaxed here (the auth limiter stays production:
           # E8 asserts the real 429). See RATE_LIMIT_* in env.example.
@@ -167,7 +167,7 @@ jobs:
         run: docker compose -f server/docker-compose.yml down -v
 
   # The Playwright smoke spec: the app in Chromium against the harness
-  # stack (own PostgreSQL, built service, fake desktop agent).
+  # stack (own SQLite file per worker, built service, fake desktop agent).
   app-e2e:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -184,7 +184,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Generate the Prisma client and build the service
         run: |
-          DATABASE_URL=postgresql://localhost:5432/printninja_ci_dummy \
+          DATABASE_URL=file:/tmp/printninja_ci_dummy.db \
           pnpm --filter server db:generate
           pnpm --filter server build
       - name: Cache Playwright browsers

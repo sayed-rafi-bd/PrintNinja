@@ -19,7 +19,7 @@ import {
 } from "./db.js";
 
 // Endpoints 23-26 (Phase 4, deliverable 1): datasets and profiles over
-// HTTP against PostgreSQL. Same revision contract as templates — 428
+// HTTP against a real database. Same revision contract as templates — 428
 // without if_revision on update, 409 on stale unless the content is
 // identical (replayed 200) — plus ownership checks and tombstones on
 // delete (visible in the sync stream).
