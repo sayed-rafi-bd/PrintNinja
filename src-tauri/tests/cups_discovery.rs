@@ -157,6 +157,10 @@ fn cups_lists_queues_as_system_printers() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "System printers go through WinSpool on Windows, not the CUPS mock"
+)]
 fn cups_queue_prints_pdf_through_print_job() {
     let _guard = lock();
     let url = mock_cupsd(vec![
@@ -183,6 +187,10 @@ fn cups_queue_prints_pdf_through_print_job() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "System printers go through WinSpool on Windows, not the CUPS mock"
+)]
 fn cups_test_probe_needs_no_print() {
     let _guard = lock();
     // Unknown queue: the mock answers Get-Printer-Attributes with a
