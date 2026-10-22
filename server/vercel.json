@@ -1,10 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "pnpm db:generate && pnpm build",
   "functions": {
     "api/index.ts": {
       "maxDuration": 30,
       "includeFiles": "src/infra/db/generated/**"
     }
   },
-  "buildCommand": "pnpm db:generate && pnpm build"
+  "rewrites": [{ "source": "/(.*)", "destination": "/api" }]
 }
