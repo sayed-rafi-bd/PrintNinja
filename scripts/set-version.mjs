@@ -81,6 +81,30 @@ function bumpCargoToml(text) {
 	return lines.join("\n");
 }
 
+// Cargo.lock entry of this crate, found line by line (no regex escapes to get
+// mangled when the file is copied around). Returns the indexes of its version lines.
+function lockVersionLines(lines, crate) {
+	const hits = [];
+	lines.forEach((line, i) => {
+		if (
+			line.trim() === "[[package]]" &&
+			(lines[i + 1] || "").trim() === `name = "${crate}"` &&
+			/^version\s*=/.test((lines[i + 2] || "").trim())
+		) {
+			hits.push(i + 2);
+		}
+	});
+	return hits;
+}
+
+function bumpCargoLock(text) {
+	const lines = text.split("\n"); // keeps any \r, so line endings are preserved
+	const hits = lockVersionLines(lines, crate);
+	if (hits.length !== 1) die(`${FILES.lock}: expected one "${crate}" entry, found ${hits.length}`);
+	lines[hits[0]] = lines[hits[0]].replace(/^(\s*version\s*=\s*")[^"]+(")/, (_, a, b) => `${a}${version}${b}`);
+	return lines.join("\n");
+}
+
 const crate = cargoTomlInfo(read(FILES.cargo));
 if (!crate) die(`could not read the crate name from ${FILES.cargo}`);
 
@@ -88,11 +112,7 @@ const updated = {
 	[FILES.pkg]: replaceOnce(read(FILES.pkg), /^(\s*"version"\s*:\s*")[^"]+(")/m, FILES.pkg),
 	[FILES.tauri]: replaceOnce(read(FILES.tauri), /("version"\s*:\s*")[^"]+(")/, FILES.tauri),
 	[FILES.cargo]: bumpCargoToml(read(FILES.cargo)),
-	[FILES.lock]: replaceOnce(
-		read(FILES.lock),
-		new RegExp(`(\[\[package\]]\r?\nname = "${crate}"\r?\nversion = ")[^"]+(")`),
-		FILES.lock,
-	),
+	[FILES.lock]: bumpCargoLock(read(FILES.lock)),
 	[FILES.settings]: replaceOnce(read(FILES.settings), /("v)\d+\.\d+\.\d+(")/, FILES.settings),
 };
 

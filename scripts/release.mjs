@@ -84,10 +84,34 @@ function cargoPackageField(text, field) {
 	return "";
 }
 
+// Cargo.lock entry of this crate, found line by line (no regex escapes to get
+// mangled when the file is copied around). Returns the indexes of its version lines.
+function lockVersionLines(lines, crate) {
+	const hits = [];
+	lines.forEach((line, i) => {
+		if (
+			line.trim() === "[[package]]" &&
+			(lines[i + 1] || "").trim() === `name = "${crate}"` &&
+			/^version\s*=/.test((lines[i + 2] || "").trim())
+		) {
+			hits.push(i + 2);
+		}
+	});
+	return hits;
+}
+
+function bumpCargoLock(text, version, crate) {
+	const lines = text.split("\n"); // keep any \r so line endings are preserved
+	const hits = lockVersionLines(lines, crate);
+	if (hits.length !== 1) die(`${FILES.lock}: expected one "${crate}" entry, found ${hits.length}`);
+	lines[hits[0]] = lines[hits[0]].replace(/^(\s*version\s*=\s*")[^"]+(")/, (_, a, b) => `${a}${version}${b}`);
+	return lines.join("\n");
+}
+
 function readVersions(crate) {
-	const lock = read(FILES.lock).match(
-		new RegExp(`\[\[package\]]\r?\nname = "${crate}"\r?\nversion = "([^"]+)"`),
-	);
+	const lockLines = read(FILES.lock).split("\n");
+	const lockHits = lockVersionLines(lockLines, crate);
+	const lock = lockHits.length === 1 ? lockLines[lockHits[0]].match(/"([^"]+)"/) : null;
 	const settings = read(FILES.settings).match(/"v(\d+\.\d+\.\d+)"/);
 	return {
 		"package.json": JSON.parse(read(FILES.pkg)).version,
@@ -131,15 +155,7 @@ function applyVersion(version, crate) {
 	write(FILES.pkg, replaceOnce(read(FILES.pkg), /^(\s*"version"\s*:\s*")[^"]+(")/m, version, FILES.pkg));
 	write(FILES.tauri, replaceOnce(read(FILES.tauri), /("version"\s*:\s*")[^"]+(")/, version, FILES.tauri));
 	write(FILES.cargo, bumpCargoToml(read(FILES.cargo), version));
-	write(
-		FILES.lock,
-		replaceOnce(
-			read(FILES.lock),
-			new RegExp(`(\[\[package\]]\r?\nname = "${crate}"\r?\nversion = ")[^"]+(")`),
-			version,
-			FILES.lock,
-		),
-	);
+	write(FILES.lock, bumpCargoLock(read(FILES.lock), version, crate));
 	write(FILES.settings, replaceOnce(read(FILES.settings), /("v)\d+\.\d+\.\d+(")/, version, FILES.settings));
 }
 
