@@ -420,7 +420,7 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             dist-artifacts/*.msi
-            dist-artifacts/*.deb
-            dist-artifacts/*.AppImage
+            dist-artifacts/**/*.deb
+            dist-artifacts/**/*.AppImage
             dist-artifacts/**/*.apk
             dist-artifacts/**/*.aab
