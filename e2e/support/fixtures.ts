@@ -75,6 +75,25 @@ export async function signedInPc(
   };
 }
 
+/** A signed-in PC with a seed (printers, templates, settings overrides).
+ * Bare pc() seeds never get past the sign-in gate when the API is up,
+ * so every spec that drives app UI starts here. */
+export async function signedSeed(
+  browser: Browser,
+  stem: string,
+  seed: AgentSeed = {},
+  password = "password123",
+): Promise<Pc> {
+  const auth = await apiRegister(
+    `${stem}-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    password,
+  );
+  return pc(browser, {
+    ...seed,
+    settings: { share_session_token: auth.token, ...seed.settings },
+  });
+}
+
 /** A second page on the same PC (same browser context, same agent and
  * cache): two tabs racing one record, e.g. conflict drills, without
  * paying for a second context. */

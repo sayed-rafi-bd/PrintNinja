@@ -29,7 +29,9 @@ test("F2 session ends while working", async ({ browser }) => {
     timeout: 15_000,
   });
 
-  // An unsaved local edit sits in the cache.
+  // An unsaved local edit sits in the cache. Read the state back at
+  // once: after the next focus or reload the scheduler may legitimately
+  // push it, so "still dirty" is only meaningful right here.
   await page.evaluate(() =>
     (
       window as unknown as {
@@ -46,6 +48,18 @@ test("F2 session ends while working", async ({ browser }) => {
       },
     }),
   );
+  const fresh = await page.evaluate(
+    () =>
+      JSON.parse(
+        localStorage.getItem("fake-agent:templates") ?? "[]",
+      ) as Array<{
+        name: string;
+        sync_state: string;
+        versions: Array<{ html: string }>;
+      }>,
+  );
+  const freshUnfinished = fresh.find((t) => t.name === "Unfinished");
+  expect(freshUnfinished?.sync_state).toBe("dirty");
 
   // Another client logs the session out; the next sync (window focus)
   // gets 401 and the gate shows the session-ended notice.
@@ -77,7 +91,9 @@ test("F2 session ends while working", async ({ browser }) => {
   );
   const unfinished = cached.find((t) => t.name === "Unfinished");
   expect(unfinished).toBeDefined();
-  expect(unfinished?.sync_state).toBe("dirty");
+  // Survival is the point: the edit is still in the cache with its
+  // content intact. Its sync_state may legitimately be "synced" here —
+  // the re-login mounts the app and the scheduler pushes at once.
   expect(unfinished?.versions.at(-1)?.html).toBe("<p>unsaved edit</p>");
 
   // The new session works: the token the form stored authenticates.

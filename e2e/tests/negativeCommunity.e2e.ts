@@ -29,8 +29,14 @@ test("withdrawn templates still print from the saved copy", async ({
   });
   await apiPublish(auth.token, serverId);
 
+  // A second user saves it: saving your own template has no Save button
+  // in the Community gallery, so the saver and the publisher differ.
+  const viewer = await apiRegister(
+    `negv-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    PASSWORD,
+  );
   const seeded = await pc(browser, {
-    settings: { share_session_token: auth.token },
+    settings: { share_session_token: viewer.token },
     printers: [{ name: "E2E Negative Printer" }],
   });
   const page = await seeded.context.newPage();

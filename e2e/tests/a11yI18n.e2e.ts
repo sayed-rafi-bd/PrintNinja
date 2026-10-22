@@ -1,5 +1,7 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
-import { installAgent, pc } from "../support/fixtures";
+import { apiRegister } from "../support/api";
+import { installAgent, signedSeed } from "../support/fixtures";
+import { readStackState } from "../support/stack-state";
 import { testids } from "../support/testids";
 
 // Accessibility + i18n floor (no axe in the harness): the app is
@@ -36,7 +38,7 @@ async function seededPc(
   browser: Browser,
   viewport?: { width: number; height: number },
 ) {
-  const seeded = await pc(browser, {
+  const seeded = await signedSeed(browser, "a11y", {
     printers: [{ name: "E2E A11y Printer" }],
     templates: [
       {
@@ -171,7 +173,17 @@ test("small and large viewports do not scroll sideways", async ({
 
 test("prefers-reduced-motion loads cleanly", async ({ browser }) => {
   const reduced = await browser.newContext({ reducedMotion: "reduce" });
-  await installAgent(reduced, {});
+  const auth = await apiRegister(
+    `a11ym-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    "password123",
+  );
+  await installAgent(reduced, {
+    settings: {
+      onboarding_done: "true",
+      share_service_url: readStackState().apiUrl,
+      share_session_token: auth.token,
+    },
+  });
   const page = await reduced.newPage();
   await page.goto("/");
   await expect(page.getByTestId(testids.shellApp)).toBeVisible({
