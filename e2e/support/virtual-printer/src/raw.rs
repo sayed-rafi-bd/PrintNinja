@@ -204,27 +204,49 @@ fn raw_replies(p: &Printer, chunk: &[u8]) -> Vec<Vec<u8>> {
     out
 }
 
+/// Pin a tiny receive buffer so fault states are deterministic: a fast
+/// loopback can otherwise swallow even multi-megabyte writes without the
+/// peer ever reading, and the timeout/close tests pass vacuously.
+/// Returns false (and logs) when the socket does not honour it — the
+/// caller then closes instead of pretending to stall.
+fn pin_small_recv(stream: &std::net::TcpStream) -> bool {
+    let pinned = (|| {
+        socket2::SockRef::from(stream).set_recv_buffer_size(4096)?;
+        let actual = socket2::SockRef::from(stream).recv_buffer_size()?;
+        // Kernels report back more than asked (Linux doubles it).
+        if actual <= 16384 {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("receive buffer stayed at {actual}"),
+            ))
+        }
+    })();
+    if pinned.is_err() {
+        eprintln!("[raw] cannot pin a small receive buffer; closing instead of stalling vacuously");
+        return false;
+    }
+    true
+}
+
 // --------------------------------------------------------------------------
 pub fn handle(p: &Printer, mut stream: TcpStream) {
     match p.state() {
         State::Drop => {
-            // Shrink the receive buffer before closing: on a fast loopback
-            // the client can otherwise push the whole test payload through
-            // before this close is processed, and the close test passes
-            // vacuously instead of on the reset.
-            let _ =
-                socket2::SockRef::from(&stream).set_recv_buffer_size(4096);
+            // Best effort: shrink the window so the client cannot finish
+            // its write before this close is processed. Either way the
+            // connection closes now.
+            let _ = pin_small_recv(&stream);
             return;
         }
         State::Hang => {
             // Never read, and leave no room to absorb the write: the
             // client must block in the kernel (and hit its deadline)
-            // instead of completing into loopback buffers. Without this
-            // a fast loopback swallows even multi-megabyte payloads and
-            // the timeout test passes vacuously.
-            let _ =
-                socket2::SockRef::from(&stream).set_recv_buffer_size(4096);
-            thread::sleep(Duration::from_secs(60));
+            // instead of completing into loopback buffers.
+            if pin_small_recv(&stream) {
+                thread::sleep(Duration::from_secs(60));
+            }
             return;
         }
         _ => {}
