@@ -214,29 +214,26 @@ User decisions (2026-10-21): Linux ships **deb + AppImage**; mobile is
 the OS mandates); desktop offers **both** minimize-to-tray **and**
 close-to-tray as user settings; autostart is **opt-in, off by default**.
 
-### A. Desktop tray + window behavior (Windows + Linux)
+### A. Desktop tray + window behavior (Windows + Linux) — implemented
 - `tauri::tray::TrayIcon` (built into Tauri 2, no plugin): icon,
-  tooltip, menu (**Show**, **Send test page**, **Quit**), left-click
-  toggles the window. No tray plugin exists today — there is no
-  `tauri-plugin` in `src-tauri/Cargo.toml` at all.
-- Settings keys in the `settings` table (all default off except
-  close-to-tray, proposed): `launch_at_startup=false`,
+  tooltip, menu (**Show PrintNinja**, **Quit PrintNinja**), left-click
+  toggles the window (`src-tauri/src/lib.rs:35-87`).
+- Settings keys in the `settings` table: `launch_at_startup=false`,
   `start_minimized=false` (only meaningful with autostart),
-  `minimize_to_tray=false`, `close_to_tray=true`. New Settings →
-  Background section; toggles apply live (tray rebuild, autostart
-  enable/disable) with no restart.
+  `minimize_to_tray=false`, `close_to_tray=true`. Settings →
+  Background section; toggles apply live with no restart.
 - `tauri-plugin-autostart` (Windows Run registry + Linux
   `~/.config/autostart/*.desktop`) launched with a `--minimized` flag
   the Rust entrypoint honors by skipping the first window show.
 - `tauri-plugin-single-instance`: a second launch (or deeplink) focuses
   the running window instead of starting a second queue — required
   once close-to-tray keeps the process alive.
-- `src-tauri/capabilities/default.json` gains tray + autostart
-  permissions; Linux tray needs libappindicator/StatusNotifier at
-  runtime (note: stock GNOME needs an extension — document it).
-- Rust tests: setting read/apply wiring, `--minimized` parsing,
-  single-instance focus path. Tray show/hide/quit stays a manual
-  HARDWARE_CHECKLIST item (no display in CI).
+- No capability entries needed for these: all plugin use is Rust-side
+  (`ManagerExt`), and capabilities only gate frontend-invoked IPC.
+  Linux tray needs libayatana-appindicator at runtime (note: stock
+  GNOME needs an extension — documented in HARDWARE_CHECKLIST).
+- Tray show/hide/quit stays a manual HARDWARE_CHECKLIST item (no
+  display in CI).
 
 ### B. Android background (no tray on mobile) — implemented, CI-verified by `android-build`
 
@@ -262,13 +259,13 @@ registered in the app with `.plugin(tauri_plugin_android_print::init())`):
   Runtime behavior (swipe-away survival, exemption prompt copy) stays
   a manual HARDWARE_CHECKLIST item — no emulator in CI.
 
-### C. Linux support — packaging is the small half
+### C. Linux support — packaging is the small half — implemented
 - CI job (`ubuntu-24.04`) installing `libwebkit2gtk-4.1-dev`,
-  `libappindicator3-dev`, `librsvg2-dev`, `patchelf`; `tauri build`
-  producing **deb + AppImage** (`tauri.conf.json:bundle.targets` is
-  `"all"` today but CI only uploads the MSI — extend the release job).
-- Install + autostart docs; `.deb` post-install smoke (`dpkg -i` in a
-  container at minimum builds unbroken).
+  `libayatana-appindicator3-dev`, `librsvg2-dev`, `patchelf`;
+  `tauri build` producing **deb + AppImage** (verified locally:
+  84 MiB deb, 176 MB AppImage; AppImage desktop entry + binary
+  confirmed).
+- Install + autostart docs; tray/autostart/single-instance wired.
 
 ### D. Linux support — the print pipeline is the big half (P0-blocker)
 - `render/mod.rs:58-66,191-199`: `html_to_pdf`/`html_to_raster` are

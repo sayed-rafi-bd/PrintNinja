@@ -112,6 +112,9 @@ with the platform message, never silently.
 - [ ] A raw TCP printer prints; a switched-off printer ends `failed`
       with the reason, never `success`
 - [ ] USB/system printer setup is refused with the platform message
+- [ ] No udev rules, `dialout`/`lp` groups, or permission tweaks are
+      needed: USB is unsupported-by-design on Linux v1 (not a
+      permissions problem), so there is nothing to grant
 - [ ] AppImage runs from a download folder with no install (`chmod +x`)
 
 ## Appendix M. Android foreground service (manual — no emulator in CI)
