@@ -206,10 +206,7 @@ jobs:
   # 5. Windows is the shipped desktop target, so run the Rust tests there on
   # every PR/push instead of only discovering breakage during the tag build.
   rust-test-windows:
-    # TEMPORARY (revert after verification): also run on develop pushes
-    # so the hang/drop loopback fix can be proven on a real Windows
-    # runner without cutting a tag.
-    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/develop'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     needs: [web-check]
     steps:
