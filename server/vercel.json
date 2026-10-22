@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   // Deploy this directory (`server/`) as its own Vercel project
-  // (Root Directory = server). The API is one Node.js function;
+  // (Root Directory = server). The API is one Node.js function.
   // the web app is a separate project.
   "functions": {
     "api/index.ts": {
