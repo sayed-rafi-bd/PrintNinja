@@ -35,6 +35,29 @@ pub struct RawTcpPrinter {
     pub port: u16,
 }
 
+/// Test-only send-buffer cap, honoured when PRINTNINJA_TEST_SNDBUF holds
+/// a byte count. Integration tests stall a sender against a wedged peer
+/// by capping the buffer: whatever the OS autotuning would otherwise
+/// grow it to, a small fixed buffer fills after a few kilobytes and the
+/// write blocks until the deadline instead of completing vacuously.
+/// Never set in production; without the variable the socket is untouched
+/// (a failed parse or setsockopt also leaves it untouched).
+fn cap_test_send_buffer(stream: TcpStream) -> TcpStream {
+    let size: usize = match std::env::var("PRINTNINJA_TEST_SNDBUF") {
+        Ok(v) => match v.parse() {
+            Ok(n) => n,
+            Err(_) => return stream,
+        },
+        Err(_) => return stream,
+    };
+    let Ok(std_stream) = stream.into_std() else {
+        panic!("PRINTNINJA_TEST_SNDBUF is set but the socket cannot leave async mode");
+    };
+    let _ = socket2::SockRef::from(&std_stream).set_send_buffer_size(size);
+    TcpStream::from_std(std_stream)
+        .expect("PRINTNINJA_TEST_SNDBUF is set but the socket cannot re-enter async mode")
+}
+
 impl RawTcpPrinter {
     pub fn new(name: String, address: String) -> Self {
         // The address column may carry `host:port` (bracketed IPv6:
@@ -68,7 +91,8 @@ impl RawTcpPrinter {
     ///
     /// Shared by the status probe and by the job, so a printer that cannot be
     /// reached produces exactly one message, whichever of the two got there
-    /// first — the probe simply gets there sooner.
+    /// first — the probe simply gets there sooner. Test-only socket tuning
+    /// lives here too (see below).
     async fn connect(&self) -> Result<TcpStream, String> {
         let addr = self.socket_addr();
         let at = self.at();
@@ -78,7 +102,7 @@ impl RawTcpPrinter {
                 CONNECT_TIMEOUT.as_secs()
             )),
             Ok(Err(e)) => Err(format!("Could not reach {at}: {e}")),
-            Ok(Ok(stream)) => Ok(stream),
+            Ok(Ok(stream)) => Ok(cap_test_send_buffer(stream)),
         }
     }
 

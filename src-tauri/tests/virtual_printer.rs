@@ -487,6 +487,10 @@ async fn a_hanging_raw_printer_times_out_instead_of_blocking_forever() {
         return;
     };
     printer.set_state("hang");
+    // Cap the send buffer so the stalled write is observable: without it
+    // a loopback with aggressive send autotuning can swallow the whole
+    // payload and the timeout never fires (see [`BIG`]).
+    std::env::set_var("PRINTNINJA_TEST_SNDBUF", "4096");
     let sender = RawTcpPrinter::new(
         "Virtual".into(),
         format!("127.0.0.1:{}", printer.raw_port()),
@@ -559,6 +563,9 @@ async fn a_dropping_raw_printer_reports_a_closed_connection() {
         return;
     };
     printer.set_state("drop");
+    // Same cap as the hang test: without it the close can land after a
+    // fast loopback has already absorbed the payload.
+    std::env::set_var("PRINTNINJA_TEST_SNDBUF", "4096");
     let sender = RawTcpPrinter::new(
         "Virtual".into(),
         format!("127.0.0.1:{}", printer.raw_port()),
@@ -687,6 +694,9 @@ async fn a_hung_print_ends_as_a_failed_job_not_a_stuck_one() {
         return;
     };
     printer.set_state("hang");
+    // Same send-buffer cap as the direct hang test: the pipeline goes
+    // through the same RawTcpPrinter::connect.
+    std::env::set_var("PRINTNINJA_TEST_SNDBUF", "4096");
     let db = test_db();
     seed_printer(
         &db,
