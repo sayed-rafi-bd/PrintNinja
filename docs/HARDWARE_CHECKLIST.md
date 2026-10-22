@@ -91,8 +91,8 @@ that holds `last-render.pdf`:
 ## Appendix L. Linux (deb + AppImage, §5 of IMPROVEMENTS.md)
 
 Run on a clean Debian/Ubuntu machine (VM is fine) before publishing.
-Linux v1 serves **IPP + raw TCP** printers rendered by a **system
-Chromium**; USB and the system spooler stay Windows-only and must fail
+Linux v1 serves **IPP + raw TCP + CUPS queues** rendered by a **system
+Chromium**; USB and Bluetooth stay Windows-only and must fail
 with the platform message, never silently.
 
 - [ ] `.deb` installs (`dpkg -i`); the app opens from the launcher icon
@@ -111,7 +111,11 @@ with the platform message, never silently.
       `chromium` makes the same job print
 - [ ] A raw TCP printer prints; a switched-off printer ends `failed`
       with the reason, never `success`
-- [ ] USB/system printer setup is refused with the platform message
+- [ ] USB/Bluetooth printer setup is refused with the platform message
+- [ ] A CUPS queue appears in Add → discovered printers; adding it
+      stores the queue; a test page prints through the queue
+- [ ] With cupsd stopped, the discovered list is empty and Setup
+      still loads (no hang, no error toast)
 - [ ] No udev rules, `dialout`/`lp` groups, or permission tweaks are
       needed: USB is unsupported-by-design on Linux v1 (not a
       permissions problem), so there is nothing to grant

@@ -267,23 +267,22 @@ registered in the app with `.plugin(tauri_plugin_android_print::init())`):
   confirmed).
 - Install + autostart docs; tray/autostart/single-instance wired.
 
-### D. Linux support — the print pipeline is the big half (P0-blocker)
-- `render/mod.rs:58-66,191-199`: `html_to_pdf`/`html_to_raster` are
-  `Err` off-Windows by design (honest, never a placeholder).
-  `transport/mod.rs:251`: `system`/`usb`/`bt` return `None`
-  off-Windows. **IPP + raw TCP already work everywhere** — the plan is:
-  - Linux v1 = IPP + raw TCP + test page, rendered via system
-    headless Chromium when present
+### D. Linux support — the print pipeline is the big half — implemented
+- `render/mod.rs`: `html_to_pdf`/`html_to_raster` use the system
+  headless Chromium on Linux; `transport/mod.rs`: **IPP + raw TCP
+  work everywhere**, and `system` printers resolve through CUPS
+  (`transport/cups.rs`: CUPS-Get-Printers discovery, Print-Job
+  sending, Get-Printer-Attributes test probe — no libcups, no
+  `lpstat` parsing).
+  - Linux v1 = IPP + raw TCP + CUPS queues + test page, rendered via
+    system headless Chromium when present
     (`chromium --headless=new --print-to-pdf --no-pdf-header-footer`
     with `@page` from `apply_layout`); when no Chromium binary is
-    found, fail loudly naming the missing renderer, same honesty as
-    today's non-Windows error.
-  - USB/system-spooler stay Windows-only with clear UI messaging;
-    CUPS-native PDF/render is the follow-up, not v1.
-- `docs/HARDWARE_CHECKLIST.md` gains a Linux section: CUPS discovery
-  (`lpstat`, `ippfind`), AppIndicator on KDE vs GNOME, `.deb`
-  install, autostart `.desktop` verification, Chromium-present vs
-  absent print paths.
+    found, fail loudly naming the missing renderer.
+  - USB/Bluetooth stay Windows-only with clear UI messaging.
+- `docs/HARDWARE_CHECKLIST.md` Appendix L covers CUPS discovery,
+  AppIndicator on KDE vs GNOME, `.deb` install, autostart `.desktop`
+  verification, Chromium-present vs absent print paths.
 
 ### E. E2E + CI for this scope
 - Automated gate: Linux build job + existing Vitest/cargo suites;

@@ -255,7 +255,7 @@ impl IppPrinter {
         body
     }
 
-    fn push_attr(body: &mut Vec<u8>, tag: u8, name: &str, value: &[u8]) {
+    pub(crate) fn push_attr(body: &mut Vec<u8>, tag: u8, name: &str, value: &[u8]) {
         body.push(tag);
         body.extend_from_slice(&(name.len() as u16).to_be_bytes());
         body.extend_from_slice(name.as_bytes());
@@ -263,7 +263,7 @@ impl IppPrinter {
         body.extend_from_slice(value);
     }
 
-    fn push_integer(body: &mut Vec<u8>, name: &str, value: i32) {
+    pub(crate) fn push_integer(body: &mut Vec<u8>, name: &str, value: i32) {
         body.push(0x21); // integer
         body.extend_from_slice(&(name.len() as u16).to_be_bytes());
         body.extend_from_slice(name.as_bytes());
@@ -277,7 +277,7 @@ impl IppPrinter {
     /// Written for the diagnosis path rather than polled on every print —
     /// printing must not gain a second round trip per job, and nothing here
     /// is needed when the first request already succeeded.
-    fn build_get_printer_attributes(printer_uri: &str) -> Vec<u8> {
+    pub(crate) fn build_get_printer_attributes(printer_uri: &str) -> Vec<u8> {
         let mut body = Vec::new();
         body.extend_from_slice(&[0x01, 0x01]); // IPP 1.1
         body.extend_from_slice(&[0x00, 0x0B]); // Get-Printer-Attributes
@@ -311,7 +311,7 @@ impl PrinterTransport for IppPrinter {
 
 /// The status code from an IPP response body: version (2 bytes), status code
 /// (2), request-id (4), then the attribute groups.
-fn parse_status_code(body: &[u8]) -> Result<u16, String> {
+pub(crate) fn parse_status_code(body: &[u8]) -> Result<u16, String> {
     if body.len() < 4 {
         return Err(format!(
             "malformed IPP response: {} bytes, need at least 4",
@@ -433,7 +433,7 @@ fn parse_job_outcome(body: &[u8]) -> JobOutcome {
 /// name as empty (RFC 8010 §3.1.6), so the last name is carried forward and
 /// `printer-state-reasons`-style lists collect under one name. Every bound
 /// is checked: a truncated or hostile body must not panic the print path.
-fn parse_attributes(body: &[u8]) -> Vec<(String, u8, Vec<u8>)> {
+pub(crate) fn parse_attributes(body: &[u8]) -> Vec<(String, u8, Vec<u8>)> {
     let mut out: Vec<(String, u8, Vec<u8>)> = Vec::new();
     let mut last_name = String::new();
     let mut i = 8; // version (2), status code (2), request-id (4)

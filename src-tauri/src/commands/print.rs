@@ -1339,7 +1339,11 @@ pub fn enumerate_system_printers() -> AppResult<Vec<crate::transport::PrinterInf
     {
         Ok(WindowsSpooler::enumerate_printers())
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        Ok(crate::transport::cups::list_blocking())
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         Ok(vec![])
     }
