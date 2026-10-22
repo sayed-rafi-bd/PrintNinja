@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { FileText, GitCompare, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -64,11 +63,9 @@ interface Props<T extends { id: number; name: string }> {
   openDiff: (from: VersionRow, to: VersionRow) => void;
   handleRestoreVersion: (v: VersionRow) => void;
   handleDeleteVersion: (v: VersionRow) => void;
-  /** The Sample data section's content. Omitted on a phone, where Sample data is a tab. */
-  sampleData?: ReactNode;
   /** Show the Helpers section. A phone shows the helpers inside the Sample data tab instead. */
   showHelpers?: boolean;
-  /** Section ids open at first: "templates", "page", "sample-data", "versions", "helpers". Desktop opens only "page"; a phone opens none. */
+  /** Section ids open at first: "templates", "page", "versions", "helpers". Desktop opens only "page"; a phone opens none. */
   defaultOpen?: string[];
   /** Controlled open sections. When given, the parent owns (and can remember) which are open. */
   openSections?: string[];
@@ -78,8 +75,9 @@ interface Props<T extends { id: number; name: string }> {
 }
 
 /**
- * The controls column: template list, page setup, sample data, version history
+ * The controls column: template list, page setup, version history
  * and helpers, as accordion sections. Several can be open at once.
+ * (Sample data lives in the editor pane, after the HTML / CSS / README tabs.)
  */
 export function ControlsAccordion<T extends { id: number; name: string }>({
   templates,
@@ -99,7 +97,6 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
   openDiff,
   handleRestoreVersion,
   handleDeleteVersion,
-  sampleData,
   showHelpers = true,
   defaultOpen = ["page"],
   openSections,
@@ -223,13 +220,6 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
           </div>
         </AccordionContent>
       </AccordionItem>
-
-      {sampleData && (
-        <AccordionItem value="sample-data">
-          <AccordionTrigger>{t("designer.sampleData")}</AccordionTrigger>
-          <AccordionContent>{sampleData}</AccordionContent>
-        </AccordionItem>
-      )}
 
       <AccordionItem value="versions">
         <AccordionTrigger>{t("designer.versions")}</AccordionTrigger>
