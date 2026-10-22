@@ -237,11 +237,11 @@ export function createTemplateRepository(db: DbClient): TemplateRepository {
         ...(q
           ? {
               OR: [
-                { name: { contains: q, mode: "insensitive" as const } },
-                { summary: { contains: q, mode: "insensitive" as const } },
+                { name: { contains: q } },
+                { summary: { contains: q } },
                 {
                   owner: {
-                    handle: { contains: q, mode: "insensitive" as const },
+                    handle: { contains: q },
                   },
                 },
               ],

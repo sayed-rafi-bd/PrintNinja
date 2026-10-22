@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { pc } from "../support/fixtures";
+import { signedSeed } from "../support/fixtures";
 import { testids } from "../support/testids";
 
 // Settings administration through the real UI: onboarding, branding,
@@ -10,7 +10,7 @@ import { testids } from "../support/testids";
 test("onboarding welcomes a fresh install and routes onward", async ({
   browser,
 }) => {
-  const fresh = await pc(browser, {
+  const fresh = await signedSeed(browser, "onboard", {
     settings: { onboarding_done: null },
   });
   const page = await fresh.context.newPage();
@@ -26,7 +26,7 @@ test("onboarding welcomes a fresh install and routes onward", async ({
 test("settings admin: brand, density, API port, trusted sources, logo", async ({
   browser,
 }) => {
-  const seeded = await pc(browser, {});
+  const seeded = await signedSeed(browser, "admin", {});
   const page = await seeded.context.newPage();
   await page.goto("/settings?section=general");
   await expect(page.getByTestId(testids.shellApp)).toBeVisible({
@@ -78,6 +78,7 @@ test("settings admin: brand, density, API port, trusted sources, logo", async ({
   );
 
   // Trusted sources add and remove.
+  await page.goto("/settings?section=api");
   await page.getByLabel("Trusted source").fill("pos.local");
   await page.getByRole("button", { name: "Add" }).click();
   await expect(page.getByText("pos.local")).toBeVisible();

@@ -4,15 +4,16 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { writeStackState, writeWorkerStackStates } from "./stack-state.js";
 
-// Global setup: start PostgreSQL, then bring up one API stack per
-// Playwright worker — each with its own database and server, so
-// parallel specs never see each other's handles, templates or
-// sessions. Everything the specs need arrives through per-worker
-// stack files (separate processes cannot share memory); specs never
-// start infrastructure themselves.
+// Global setup: bring up one API stack per Playwright worker — each with
+// its own local SQLite file (migrated with the same runner production
+// boots with) and its own server, so parallel specs never see each
+// other's handles, templates or sessions. Everything the specs need
+// arrives through per-worker stack files (separate processes cannot
+// share memory); specs never start infrastructure themselves. No Docker,
+// no cloud: the file database exercises the same Prisma + libSQL code
+// path as Turso, minus the network.
 //
 // Worker count matches the Playwright config (CI: 4, local: 2) unless
 // E2E_WORKERS overrides it; keep the two in sync.
@@ -59,8 +60,7 @@ export default async function globalSetup(): Promise<void> {
     logLevel: "silent",
   });
 
-  const container = await new PostgreSqlContainer("postgres:16").start();
-  const databaseUrl = container.getConnectionUri();
+  const dbDir = mkdtempSync(join(tmpdir(), "printninja-e2e-"));
   const distServer = join(serverDir, "dist", "server.js");
   if (!existsSync(distServer)) {
     throw new Error(
@@ -71,7 +71,7 @@ export default async function globalSetup(): Promise<void> {
   const services: { pid?: number }[] = [];
   try {
     for (let worker = 0; worker < WORKERS; worker += 1) {
-      services.push(await startWorkerApi(container, databaseUrl, worker));
+      services.push(await startWorkerApi(dbDir, worker));
     }
   } catch (error) {
     for (const service of services) {
@@ -83,7 +83,6 @@ export default async function globalSetup(): Promise<void> {
         }
       }
     }
-    await container.stop();
     throw error;
   }
 
@@ -91,7 +90,7 @@ export default async function globalSetup(): Promise<void> {
   const base = {
     apiUrl: `http://127.0.0.1:${BASE_API_PORT}`,
     agentBundle: bundlePath,
-    pgContainerId: container.getId(),
+    dbDir,
     servicePid: services[0]?.pid,
     servicePids: services
       .map((service) => service.pid)
@@ -105,36 +104,21 @@ export default async function globalSetup(): Promise<void> {
 }
 
 /**
- * One worker's API: its own database (migrated from the committed
- * migrations) and its own server on BASE_API_PORT + worker index.
- * The first worker keeps the historic port, so a single-worker run
- * behaves exactly like the old shared stack.
+ * One worker's API: its own database file (migrated from the committed
+ * migrations with the same runner production boots with) and its own
+ * server on BASE_API_PORT + worker index. The first worker keeps the
+ * historic port, so a single-worker run behaves exactly like the old
+ * shared stack.
  */
 async function startWorkerApi(
-  container: {
-    getConnectionUri(): string;
-    exec(command: string[]): Promise<unknown>;
-  },
-  databaseUrl: string,
+  dbDir: string,
   worker: number,
 ): Promise<{ pid?: number }> {
-  const url = new URL(databaseUrl);
-  const dbName = `printninja_w${worker}`;
-  await container.exec([
-    "psql",
-    "-U",
-    decodeURIComponent(url.username),
-    "-d",
-    decodeURIComponent(url.pathname.slice(1) || "postgres"),
-    "-c",
-    `CREATE DATABASE "${dbName}"`,
-  ]);
-  const workerUrl = new URL(databaseUrl);
-  workerUrl.pathname = `/${dbName}`;
-  execFileSync("pnpm", ["exec", "prisma", "migrate", "deploy"], {
-    env: { ...process.env, DATABASE_URL: workerUrl.toString() },
+  const databaseUrl = `file:${join(dbDir, `worker-${worker}.db`)}`;
+  execFileSync("pnpm", ["--filter", "server", "db:apply"], {
+    env: { ...process.env, DATABASE_URL: databaseUrl },
     stdio: "pipe",
-    cwd: serverDir,
+    cwd: repoDir,
     timeout: 120_000,
   });
 
@@ -147,7 +131,7 @@ async function startWorkerApi(
       NODE_ENV: "production",
       HOST: "127.0.0.1",
       PORT: String(port),
-      DATABASE_URL: workerUrl.toString(),
+      DATABASE_URL: databaseUrl,
       LOG_LEVEL: "warn",
       CORS_ORIGINS: "http://localhost:1420",
       TRUST_PROXY: "0",

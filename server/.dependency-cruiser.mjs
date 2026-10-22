@@ -31,7 +31,7 @@ export default {
       comment: "no Prisma type or client outside infra (Phase 1 done-when)",
       severity: "error",
       from: { pathNot: "^src/infra" },
-      to: { path: "(@prisma/client|^src/infra/prisma/generated)" },
+      to: { path: "(@prisma/client|^src/infra/db/generated)" },
     },
   ],
   options: {
@@ -40,7 +40,7 @@ export default {
     // The generated Prisma client is third-party code in our tree: its
     // hundreds of files would drown the layer check, and the
     // prisma-stays-in-infra rule above already guards who imports it.
-    exclude: { path: "^(test|scripts|node_modules|src/infra/prisma/generated)" },
+    exclude: { path: "^(test|scripts|node_modules|src/infra/db/generated)" },
     reporterOptions: { "text": { "highlightFocused": true } },
   },
 };

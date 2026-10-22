@@ -10,7 +10,7 @@
       "server/src/**/*.ts",
       "server/test/**/*.ts",
       "e2e/**/*.ts",
-      "!server/src/infra/prisma/generated/**",
+      "!server/src/infra/db/generated/**",
       "!server/dist/**",
       "!src/lib/api/schema.d.ts"
     ]

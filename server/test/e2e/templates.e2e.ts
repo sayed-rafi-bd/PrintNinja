@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 // E2-E7 (REFACTORING.md section 11) over HTTP against a running
 // container: `pnpm --filter server test:e2e:stack` (clean database, booted stack), then E2E_BASE_URL=... test:e2e.
 // Same behaviors the integration suite pins through inject, replayed
-// through the real socket, image and PostgreSQL.
+// through the real socket, image and database file.
 
 const baseUrl = process.env.E2E_BASE_URL;
 if (!baseUrl) {

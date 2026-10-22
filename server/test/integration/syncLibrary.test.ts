@@ -18,7 +18,7 @@ import {
   type TestStack,
 } from "./db.js";
 
-// Merged sync stream over the Phase 4 library (PostgreSQL only — the
+// Merged sync stream over the Phase 4 library (database only — the
 // in-memory fake sync serves templates, see test/fakes/templates.ts).
 // One user's writes share the user_sync sequence across all five tables,
 // so a single cursor walks templates, datasets, profiles, settings and

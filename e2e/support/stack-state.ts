@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 export interface StackState {
   apiUrl: string;
   agentBundle: string;
-  pgContainerId?: string;
+  dbDir?: string;
   servicePid?: number;
   servicePids?: number[];
   workerCount?: number;

@@ -410,8 +410,12 @@ export function DesignerPage() {
   };
 
   const handleSave = async () => {
-    const saved = await saveLocal();
-    if (saved) toast.success("Saved on this PC");
+    try {
+      const saved = await saveLocal();
+      if (saved) toast.success("Saved on this PC");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const runPublish = async (options: SaveOptions, done: string) => {
