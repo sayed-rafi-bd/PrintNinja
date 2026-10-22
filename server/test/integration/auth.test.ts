@@ -202,6 +202,15 @@ describe("v2 endpoint contracts", () => {
   it("logout is idempotent and needs a well-formed header", async () => {
     const reg = await register("frank", "password123");
 
+    // Auth responses that carry tokens are never cacheable (live token).
+    const me = await app.inject({
+      method: "GET",
+      url: "/v2/auth/me",
+      headers: { authorization: `Bearer ${reg.body.token}` },
+    });
+    expect(me.statusCode).toBe(200);
+    expect(me.headers["cache-control"]).toBe("no-store");
+
     const first = await app.inject({
       method: "POST",
       url: "/v2/auth/logout",
@@ -216,15 +225,6 @@ describe("v2 endpoint contracts", () => {
       headers: { authorization: `Bearer ${reg.body.token}` },
     });
     expect(second.statusCode).toBe(204);
-
-    // Auth responses that carry tokens are never cacheable.
-    const me = await app.inject({
-      method: "GET",
-      url: "/v2/auth/me",
-      headers: { authorization: `Bearer ${reg.body.token}` },
-    });
-    expect(me.statusCode).toBe(200);
-    expect(me.headers["cache-control"]).toBe("no-store");
 
     // A missing header is a 401, not a silent success.
     const missing = await app.inject({

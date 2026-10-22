@@ -828,10 +828,13 @@ describe("v2 endpoint contracts", () => {
     const created = await put(id, token, tpl());
     expect(created.status).toBe(201);
 
-    // Both writers read revision 1; only one update can win it.
+    // Both writers read revision 1; only one update can win it. The
+    // bodies differ on purpose: with identical bodies a serialized run
+    // would take the intentional replay-200 path instead, making the
+    // outcome depend on scheduling rather than on the revision guard.
     const attempts = await Promise.allSettled([
-      put(id, token, { ...tpl(), if_revision: 1 }),
-      put(id, token, { ...tpl(), if_revision: 1 }),
+      put(id, token, { ...tpl(), body: "<div>a</div>", if_revision: 1 }),
+      put(id, token, { ...tpl(), body: "<div>b</div>", if_revision: 1 }),
     ]);
     const statuses = attempts.map((result) =>
       result.status === "fulfilled" ? result.value.status : "rejected",
