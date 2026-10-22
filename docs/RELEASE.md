@@ -202,6 +202,27 @@ docker compose logs -f server
 
 Then continue with "Verify" below (the app part is the same).
 
+### Using an external PostgreSQL
+To point the container at your own database instead of the bundled `db`:
+
+```bash
+cd server
+cp env.example .env   # then set DATABASE_URL in .env, e.g.
+                      # DATABASE_URL=postgresql://printninja:secret%40pw@db.example.com:5432/printninja
+docker compose up -d --build --no-deps server
+```
+
+`--no-deps server` is what skips the bundled `db` container — a plain
+`docker compose up` would still boot it. `POSTGRES_PASSWORD` is unused in
+this mode. The database must exist and be empty, the role needs DDL rights
+(the image runs `prisma migrate deploy` on boot, same as bundled), and the
+host must be reachable from inside the container (`localhost` there means
+the container itself). URL-encode special characters in the password
+(`@` → `%40`, `:` → `%3A`, `/` → `%2F`, `#` → `%23`). PostgreSQL 16 is
+what the schema targets; a managed instance of the same major version is
+the safe choice. Backups are then your database provider's job, not the
+`Back up` section below.
+
 ### Back up
 PostgreSQL holds all accounts and everything they own. Dump it while the
 service is running:

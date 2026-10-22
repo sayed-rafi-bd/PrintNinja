@@ -3,6 +3,16 @@
 # ./docker-entrypoint.sh), so `docker compose up` lands healthy.
 # Run from this directory: `docker compose up -d --build`.
 # The env file is the `.env` next to this file (never committed).
+#
+# Two database modes:
+# - Bundled (default): DATABASE_URL unset, compose builds it from
+#   POSTGRES_PASSWORD against the `db` service below. `up -d --build`.
+# - External: set DATABASE_URL in `.env` to your own PostgreSQL and start
+#   only the server, so the bundled `db` never boots:
+#     docker compose up -d --build --no-deps server
+#   POSTGRES_PASSWORD is then unused. The database must exist, be empty,
+#   and reachable from inside the container (`localhost` there means the
+#   container itself); the role needs DDL rights for `migrate deploy`.
 name: printninja
 
 services:
@@ -16,7 +26,9 @@ services:
         max-file: "3"
     environment:
       POSTGRES_USER: printninja
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in server/.env}
+      # Bundled-db mode only. Default is the dev value from env.example;
+      # set a real one for anything shared. Unused with external DATABASE_URL.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme01}
       POSTGRES_DB: printninja
     volumes:
       # A dedicated volume (not the old share server's): mounting foreign
@@ -39,7 +51,10 @@ services:
     environment:
       # Same variable name as the legacy service, different meaning:
       # the v2 service wants a PostgreSQL URL, not a SQLite path.
-      DATABASE_URL: postgresql://printninja:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in server/.env}@db:5432/printninja
+      # Unset: bundled `db` (built from POSTGRES_PASSWORD). Set: your own
+      # PostgreSQL (start with `up --no-deps server`); URL-encode special
+      # characters in the password (@ → %40, : → %3A, / → %2F, # → %23).
+      DATABASE_URL: ${DATABASE_URL:-postgresql://printninja:${POSTGRES_PASSWORD:-changeme01}@db:5432/printninja}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:1420}
       HOST: 0.0.0.0
       PORT: 3001

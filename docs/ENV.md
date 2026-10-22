@@ -23,9 +23,11 @@ Never commit any `.env` file (`server/.env` is gitignored).
 ## Database
 
 ### `POSTGRES_PASSWORD`
-Password for the PostgreSQL container in `server/docker-compose.yml`.
-Required for compose; it has no default. Use letters and digits only —
-the password is interpolated into `DATABASE_URL`, so characters such as
+Password for the bundled PostgreSQL container in `server/docker-compose.yml`.
+Only used when `DATABASE_URL` (below) is unset. Default `changeme01` is the
+dev value from `server/env.example`; generate a real one for anything shared:
+`openssl rand -hex 24`. Use letters and digits only — the password is
+interpolated into the default `DATABASE_URL`, so characters such as
 `@ : / # %` would break the URL. To generate one: `openssl rand -hex 24`.
 
 Changing it later requires a fresh volume: PostgreSQL sets the password
@@ -36,9 +38,25 @@ new password, booting, and restoring the dump. Never change it on a
 volume that holds data you have not backed up.
 
 ### `DATABASE_URL`
-PostgreSQL connection URL for running the server outside Docker.
-Not needed with compose, which sets its own value.
-Example for scratch work: `postgresql://postgres:postgres@localhost:5433/printninja`
+PostgreSQL connection URL. Two modes:
+
+- **Unset (default):** compose builds it from `POSTGRES_PASSWORD` against
+  the bundled `db` container. Also the variable for running the server
+  outside Docker: `postgresql://postgres:postgres@localhost:5433/printninja`
+  for scratch work.
+- **Set:** the server connects to your own PostgreSQL instead of the
+  bundled container. Set it in `server/.env`, then start only the server
+  so the bundled `db` never boots:
+  `docker compose up -d --build --no-deps server` (from `server/`).
+  `POSTGRES_PASSWORD` is then unused.
+
+Requirements for an external database: PostgreSQL 16, an existing empty
+database, and a role with DDL rights (the image runs
+`prisma migrate deploy` on boot). URL-encode special characters in the
+password (`@` → `%40`, `:` → `%3A`, `/` → `%2F`, `#` → `%23`,
+`%` → `%25`). The host must be reachable from inside the container —
+`localhost` there means the container itself, so use a LAN IP,
+`host.docker.internal` (Docker Desktop), or a shared Docker network.
 
 ## Network
 

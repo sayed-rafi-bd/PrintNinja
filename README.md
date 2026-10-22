@@ -107,6 +107,11 @@ docker compose up -d     # postgres:16 + service, migrates on boot
 curl localhost:3001/v2/health
 ```
 
+To use your own PostgreSQL instead of the bundled container, set
+`DATABASE_URL` in `server/.env` and start only the server
+(`docker compose up -d --build --no-deps server`) — see
+`docs/RELEASE.md` ("Using an external PostgreSQL").
+
 Configuration is environment-only (nothing auto-loads; development passes `--env-file`). All variables are listed in `env.example`: `DATABASE_URL` (PostgreSQL), `CORS_ORIGINS`, `HOST` (`127.0.0.1` local, `0.0.0.0` in containers), `PORT`, `SESSION_TTL_DAYS`, `SESSION_CLEANUP_MINUTES`, `RATE_LIMIT_MAX`, `RATE_LIMIT_AUTH_MAX`, `RATE_LIMIT_AUTH_WINDOW_SECONDS`, `ARGON2_MEMORY_KIB`, `ARGON2_TIME_COST`, `ARGON2_PARALLELISM`, `DOCS_ENABLED`, `LOG_LEVEL`. The service fails fast naming the offending variable; the Dockerfile and CI generate the Prisma client with a dummy `DATABASE_URL` because generation never connects.
 
 ## Building
