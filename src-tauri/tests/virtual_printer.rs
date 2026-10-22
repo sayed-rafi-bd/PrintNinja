@@ -487,6 +487,35 @@ async fn a_hanging_raw_printer_times_out_instead_of_blocking_forever() {
         return;
     };
     printer.set_state("hang");
+    // TEMPORARY FORENSICS (remove once the Windows vacuous-Ok is
+    // root-caused): prove what the raw port is connected to. A silent
+    // hang peer never answers; an HTTP response here means we dialled
+    // someone else's dashboard/IPP port.
+    {
+        use std::io::{Read, Write};
+        let addr = format!("127.0.0.1:{}", printer.raw_port());
+        match std::net::TcpStream::connect(&addr) {
+            Err(e) => eprintln!("FORENSIC: raw probe connect failed: {e}"),
+            Ok(mut probe) => {
+                let _ = probe.set_read_timeout(Some(Duration::from_secs(3)));
+                let _ = probe.set_write_timeout(Some(Duration::from_secs(3)));
+                let _ = probe.write_all(b"GET /api/status HTTP/1.0\r\n\r\n");
+                let mut buf = [0u8; 512];
+                match probe.read(&mut buf) {
+                    Ok(0) => eprintln!("FORENSIC: raw port closed immediately"),
+                    Ok(n) => eprintln!(
+                        "FORENSIC: raw port ANSWERED {n} bytes: {:?}",
+                        &String::from_utf8_lossy(&buf[..n])[..n.min(200)]
+                    ),
+                    Err(e) => eprintln!(
+                        "FORENSIC: raw port read: {e} (timeout = silent hang, as expected)"
+                    ),
+                }
+            }
+        }
+        let status = printer.get("/api/status");
+        eprintln!("FORENSIC: dashboard: {}", &status[..status.len().min(300)]);
+    }
     // Cap the send buffer so the stalled write is observable: without it
     // a loopback with aggressive send autotuning can swallow the whole
     // payload and the timeout never fires (see [`BIG`]).
