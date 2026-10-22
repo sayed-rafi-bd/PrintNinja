@@ -79,7 +79,7 @@ export function CodeEditors({
   );
 }
 
-type EditorTab = "html" | "css" | "readme";
+type EditorTab = "html" | "css" | "readme" | "sample";
 
 /** What a parent can ask the editor pane to do. */
 export interface EditorPaneHandle {
@@ -99,12 +99,15 @@ interface Props extends CodeProps {
   /** Shown under the tabs while the HTML or CSS tab is open, such as the class-name warnings. */
   notices?: ReactNode;
   className?: string;
+  /** Content of the Sample data tab, after HTML / CSS / README. When omitted the tab is hidden. */
+  samplePanel?: ReactNode;
 }
 
 /**
- * The desktop editor: HTML, CSS and README as tabs in one pane that fills its
- * parent and scrolls on its own. Both code editors stay mounted, so switching
- * tabs keeps each one's cursor, scroll position and undo history.
+ * The desktop editor: HTML, CSS, README and (optionally) sample data as tabs
+ * in one pane that fills its parent and scrolls on its own. Both code
+ * editors stay mounted, so switching tabs keeps each one's cursor, scroll
+ * position and undo history.
  */
 export const EditorPane = forwardRef<EditorPaneHandle, Props>(
   function EditorPane(
@@ -119,6 +122,7 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
       readmeSaving,
       onSaveReadme,
       notices,
+      samplePanel,
       className,
     },
     ref,
@@ -158,6 +162,8 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
     // `data-[state=inactive]:hidden` rather than the `hidden` attribute alone: a
     // display class on the element would otherwise win over it.
     const pane = "mt-0 min-h-0 flex-1 data-[state=inactive]:hidden";
+    // Class warnings describe the HTML/CSS, so they only show on those tabs.
+    const showNotices = tab === "html" || tab === "css";
     return (
       <Tabs
         value={tab}
@@ -181,6 +187,11 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
             <TabsTrigger value="readme" className="h-7 px-3 text-xs">
               README
             </TabsTrigger>
+            {samplePanel !== undefined && (
+              <TabsTrigger value="sample" className="h-7 px-3 text-xs">
+                Sample data
+              </TabsTrigger>
+            )}
           </TabsList>
           <span
             className="min-w-0 truncate text-xs text-muted-foreground"
@@ -189,7 +200,7 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
             {templateName}
           </span>
         </div>
-        {tab !== "readme" && notices && (
+        {showNotices && notices && (
           <div className="max-h-40 shrink-0 overflow-auto border-b p-2">
             {notices}
           </div>
@@ -239,6 +250,14 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
             onSave={onSaveReadme}
           />
         </TabsContent>
+        {samplePanel !== undefined && (
+          <TabsContent
+            value="sample"
+            className="mt-0 min-h-0 flex-1 overflow-auto p-3"
+          >
+            {samplePanel}
+          </TabsContent>
+        )}
       </Tabs>
     );
   },

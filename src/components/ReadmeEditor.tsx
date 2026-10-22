@@ -14,6 +14,39 @@ import {
 
 const README_MAX_BYTES = 64 * 1024;
 
+interface MdastNode {
+  type: string;
+  value?: string;
+  children?: MdastNode[];
+}
+
+const HTML_COMMENT_RE = /<!--[\s\S]*?-->/g;
+
+/**
+ * Remark plugin: drop HTML comments (`<!-- … -->`) from `html` nodes so
+ * scaffold guidance never renders in the preview. Fenced code is a
+ * `code` node, not `html`, so documented comment syntax in samples keeps
+ * rendering verbatim; every other raw-HTML node keeps the existing
+ * escaped-as-text behavior, so the no-rehype-raw XSS posture is unchanged.
+ */
+function stripHtmlComments() {
+  const strip = (node: MdastNode): void => {
+    const children = node.children;
+    if (!children) return;
+    for (const child of children) strip(child);
+    node.children = children.filter((child) => {
+      if (child.type !== "html" || typeof child.value !== "string") return true;
+      const rest = child.value.replace(HTML_COMMENT_RE, "");
+      if (rest.trim() === "") return false;
+      child.value = rest;
+      return true;
+    });
+  };
+  return (tree: MdastNode): void => {
+    strip(tree);
+  };
+}
+
 interface ReadmeEditorProps {
   value: string;
   onChange: (value: string) => void;
@@ -154,7 +187,7 @@ export function ReadmeEditor({
   const preview = (
     <div className="prose prose-sm max-w-none p-4 border rounded-md bg-card min-h-[300px] overflow-auto">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, stripHtmlComments]}
         // No rehype-raw: raw HTML stays as text, which is the XSS guarantee
         components={{
           a: ({ href, children, ...props }) => {

@@ -378,7 +378,7 @@ describe("Designer page layout on desktop", () => {
       Array.from(files.querySelectorAll('[role="tab"]')).map(
         (t) => t.textContent,
       ),
-    ).toEqual(["HTML", "CSS", "README"]);
+    ).toEqual(["HTML", "CSS", "README", "Sample data"]);
     // Both are on screen at once: no switching tabs to see an edit.
     expect(screen.getByLabelText("HTML editor")).toBeInTheDocument();
     expect(screen.getByTitle("Canvas preview")).toBeInTheDocument();
@@ -387,14 +387,7 @@ describe("Designer page layout on desktop", () => {
   it("has no Visual, Preview, Canvas or Code tab and no Properties card", async () => {
     renderDesigner();
     await screen.findByTitle("Canvas preview");
-    for (const name of [
-      "Visual",
-      "Preview",
-      "Canvas",
-      "Code",
-      "Variables",
-      "Sample data",
-    ]) {
+    for (const name of ["Visual", "Preview", "Canvas", "Code", "Variables"]) {
       expect(screen.queryByRole("tab", { name })).not.toBeInTheDocument();
     }
     expect(screen.queryByText("Properties")).not.toBeInTheDocument();
@@ -406,30 +399,25 @@ describe("Designer page layout on desktop", () => {
     const controls = within(
       screen.getByRole("complementary", { name: "Designer controls" }),
     );
-    const states = [
-      "Templates",
-      "Page Setup",
-      "Sample data",
-      "Versions",
-      "Helpers",
-    ].map((name) => [
-      name,
-      controls.getByRole("button", { name }).getAttribute("aria-expanded"),
-    ]);
+    const states = ["Templates", "Page Setup", "Versions", "Helpers"].map(
+      (name) => [
+        name,
+        controls.getByRole("button", { name }).getAttribute("aria-expanded"),
+      ],
+    );
     expect(states).toEqual([
       ["Templates", "false"],
       ["Page Setup", "true"],
-      ["Sample data", "false"],
       ["Versions", "false"],
       ["Helpers", "false"],
     ]);
     expect(controls.getByLabelText("Width (mm)")).toBeInTheDocument();
   });
 
-  it("moves the sample datasets into the accordion, where they drive the canvas", async () => {
+  it("shows the sample datasets in the editor, after the README tab, where they drive the canvas", async () => {
     renderDesigner();
     await screen.findByTitle("Canvas preview");
-    fireEvent.click(screen.getByRole("button", { name: "Sample data" }));
+    openTab("Sample data");
     expect(
       await screen.findByRole("radio", { name: "Use dataset Sample Order" }),
     ).toBeChecked();
