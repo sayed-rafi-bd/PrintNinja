@@ -5,6 +5,10 @@ edition = "2021"
 description = "Virtual network printer: Raw/JetDirect, LPD and IPP (Rust port of virtualprinter.py, no dashboard)"
 
 [dependencies]
+# Small receive buffer so fault states are deterministic: without it a
+# fast loopback can swallow the whole test payload before a hang blocks
+# or a close lands, and the timeout/close tests pass vacuously.
+socket2 = "0.6"
 
 [profile.release]
 opt-level = 3
