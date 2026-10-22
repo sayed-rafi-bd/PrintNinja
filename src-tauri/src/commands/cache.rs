@@ -10,7 +10,8 @@ use crate::db::DbState;
 use crate::error::{AppError, AppResult};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use std::path::Path;
+use tauri::{AppHandle, Manager, State};
 
 use crate::commands::datasets::{apply_dataset_delete, apply_dataset_upsert, DatasetDataIn};
 use crate::commands::font::{apply_font_delete, apply_font_upsert, FontDataIn};
@@ -70,6 +71,7 @@ pub struct ApplyReport {
 /// Unknown entities and ops are rejected, never silently skipped.
 pub fn apply_changes(
     conn: &Connection,
+    fonts_dir: &Path,
     changes: &[SyncChangeIn],
     new_cursor: &str,
 ) -> AppResult<ApplyReport> {
@@ -129,7 +131,7 @@ pub fn apply_changes(
                     "dataset" => apply_dataset_delete(&tx, id, &mut report)?,
                     "profile" => apply_profile_delete(&tx, id, &mut report)?,
                     "setting" => apply_setting_delete(&tx, id, &mut report)?,
-                    "font" => apply_font_delete(&tx, id, &mut report)?,
+                    "font" => apply_font_delete(&tx, fonts_dir, id, &mut report)?,
                     other => {
                         return Err(AppError::Validation(format!(
                             "unsupported sync entity '{other}'"
@@ -658,7 +660,7 @@ pub fn list_queued_uses(conn: &Connection) -> AppResult<Vec<QueuedUse>> {
 /// versions, the sync state, the queued uses and the account settings
 /// sync flags. Device-local tables (printers, jobs, device settings)
 /// are untouched. The caller warns first when dirty rows would be lost.
-pub fn clear_account(conn: &Connection) -> AppResult<usize> {
+pub fn clear_account(conn: &Connection, fonts_dir: &Path) -> AppResult<usize> {
     let templates: i64 = conn.query_row("SELECT COUNT(*) FROM templates", [], |r| r.get(0))?;
     // Font bytes go with their rows (a re-sign-in re-downloads them).
     let font_paths: Vec<String> = conn
@@ -671,8 +673,11 @@ pub fn clear_account(conn: &Connection) -> AppResult<usize> {
          DELETE FROM sync_state; DELETE FROM queued_uses;
          UPDATE settings SET sync_state = 'synced', synced_at = NULL;",
     )?;
-    for path in font_paths {
-        let _ = std::fs::remove_file(path);
+    for stored in font_paths {
+        let _ = std::fs::remove_file(crate::commands::font::resolve_font_path(
+            fonts_dir,
+            &stored,
+        ));
     }
     Ok(templates as usize)
 }
@@ -681,14 +686,16 @@ pub fn clear_account(conn: &Connection) -> AppResult<usize> {
 
 #[tauri::command(rename_all = "snake_case")]
 pub fn cache_apply_changes(
+    app: AppHandle,
     db: State<'_, DbState>,
     changes: Vec<SyncChangeIn>,
     new_cursor: String,
 ) -> AppResult<ApplyReport> {
+    let fonts_dir = app.path().app_data_dir()?.join("fonts");
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    apply_changes(guard.connection(), &changes, &new_cursor)
+    apply_changes(guard.connection(), &fonts_dir, &changes, &new_cursor)
 }
 
 #[tauri::command]
@@ -764,11 +771,15 @@ pub fn cache_list_queued_uses(db: State<'_, DbState>) -> AppResult<Vec<QueuedUse
 }
 
 #[tauri::command]
-pub fn cache_clear_account(db: State<'_, DbState>) -> AppResult<usize> {
+pub fn cache_clear_account(
+    app: AppHandle,
+    db: State<'_, DbState>,
+) -> AppResult<usize> {
+    let fonts_dir = app.path().app_data_dir()?.join("fonts");
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    clear_account(guard.connection())
+    clear_account(guard.connection(), &fonts_dir)
 }
 
 #[tauri::command]

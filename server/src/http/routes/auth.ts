@@ -3,6 +3,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import {
   handleKey,
+  changePassword,
   loginUser,
   logoutUser,
   registerUser,
@@ -12,7 +13,12 @@ import type { AuthDeps } from "../../domain/ports.js";
 import { UnauthorizedError } from "../../domain/errors.js";
 import { toAuthResponse, toUserResponse } from "../mappers.js";
 import { bearerToken, requireAuth } from "../plugins/auth.js";
-import { authCredentials, authResponse, userSchema } from "../schemas/auth.js";
+import {
+  authCredentials,
+  authResponse,
+  changePasswordBody,
+  userSchema,
+} from "../schemas/auth.js";
 import { errorBody } from "../schemas/error.js";
 
 export interface AuthRouteOptions {
@@ -142,6 +148,37 @@ export async function authRoutes(
       const revoked = await revokeOtherSessions(
         deps,
         request.authUser.id,
+        bearerToken(request),
+      );
+      return reply.header("Cache-Control", "no-store").send({ revoked });
+    },
+  );
+
+  typed.put(
+    "/v2/auth/password",
+    {
+      preHandler: [requireAuth(deps)],
+      schema: {
+        description:
+          "Change the account password. The current password must verify; every other session is revoked.",
+        body: changePasswordBody,
+        response: {
+          200: z.object({ revoked: z.number() }),
+          400: errorBody,
+          401: errorBody,
+          429: errorBody,
+        },
+      },
+    },
+    async (request, reply) => {
+      if (!request.authUser) {
+        throw new UnauthorizedError();
+      }
+      const { revoked } = await changePassword(
+        deps,
+        request.authUser,
+        request.body.current_password,
+        request.body.new_password,
         bearerToken(request),
       );
       return reply.header("Cache-Control", "no-store").send({ revoked });

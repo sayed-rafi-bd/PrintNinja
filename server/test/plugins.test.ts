@@ -365,4 +365,76 @@ describe("docs gating", () => {
       ).statusCode,
     ).toBe(401);
   });
+
+  it("PUT /v2/auth/password changes the password and revokes the rest", async () => {
+    app = await buildApp({
+      config: testConfig({ docsEnabled: false }),
+      deps: fakeDeps(),
+    });
+    const headers = { "content-type": "application/json" };
+    const reg = await app.inject({
+      method: "POST",
+      url: "/v2/auth/register",
+      headers,
+      payload: { handle: "bo", password: "password123" },
+    });
+    const t1 = (reg.json() as { token: string }).token;
+    const second = await app.inject({
+      method: "POST",
+      url: "/v2/auth/login",
+      headers,
+      payload: { handle: "bo", password: "password123" },
+    });
+    const t2 = (second.json() as { token: string }).token;
+
+    // Wrong current password: 401, nothing changes.
+    const wrong = await app.inject({
+      method: "PUT",
+      url: "/v2/auth/password",
+      headers: { ...headers, authorization: `Bearer ${t1}` },
+      payload: { current_password: "nope", new_password: "new-password-1" },
+    });
+    expect(wrong.statusCode).toBe(401);
+
+    const changed = await app.inject({
+      method: "PUT",
+      url: "/v2/auth/password",
+      headers: { ...headers, authorization: `Bearer ${t1}` },
+      payload: {
+        current_password: "password123",
+        new_password: "new-password-1",
+      },
+    });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.json()).toEqual({ revoked: 1 });
+    expect(changed.headers["cache-control"]).toBe("no-store");
+
+    // Old password dead, new password works, other session revoked,
+    // caller still valid.
+    const oldLogin = await app.inject({
+      method: "POST",
+      url: "/v2/auth/login",
+      headers,
+      payload: { handle: "bo", password: "password123" },
+    });
+    expect(oldLogin.statusCode).toBe(401);
+    const newLogin = await app.inject({
+      method: "POST",
+      url: "/v2/auth/login",
+      headers,
+      payload: { handle: "bo", password: "new-password-1" },
+    });
+    expect(newLogin.statusCode).toBe(200);
+    for (const [token, want] of [
+      [t1, 200],
+      [t2, 401],
+    ] as const) {
+      const me = await app.inject({
+        method: "GET",
+        url: "/v2/auth/me",
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(me.statusCode).toBe(want);
+    }
+  });
 });

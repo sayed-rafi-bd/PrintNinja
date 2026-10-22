@@ -64,6 +64,17 @@ impl Default for OpenApiSpec {
                         }
                     }
                 },
+                "/v1/metrics": {
+                    "get": {
+                        "summary": "Operational counters",
+                        "description": "Jobs by status, active batches and queue-tracked printers. Same shape every call; poll it.",
+                        "responses": {
+                            "200": { "description": "Counters" },
+                            "401": { "description": "Missing or invalid API key" },
+                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
+                        }
+                    }
+                },
                 "/v1/print": {
                     "post": {
                         "summary": "Render a template and print it",

@@ -105,6 +105,9 @@ fn row_by_server_id(conn: &Connection, server_id: &str) -> Option<HashMap<String
 
 #[test]
 fn cache_cases_match_rust_behavior() {
+    let fonts_dir =
+        std::env::temp_dir().join(format!("pn-cache-fonts-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&fonts_dir).unwrap();
     for case in load_cases() {
         let name = case["name"].as_str().unwrap_or("?");
         let conn = Connection::open_in_memory().expect("memory db");
@@ -170,7 +173,7 @@ fn cache_cases_match_rust_behavior() {
         let changes: Vec<SyncChangeIn> =
             serde_json::from_value(case["changes"].clone()).expect("valid changes");
         let new_cursor = case["new_cursor"].as_str().unwrap();
-        let result = apply_changes(&conn, &changes, new_cursor);
+        let result = apply_changes(&conn, &fonts_dir, &changes, new_cursor);
         let expect = &case["expect"];
 
         if expect
@@ -662,6 +665,9 @@ fn queued_uses_accumulate_drain_and_clear() {
     use printninja_lib::commands::cache::{clear_account, list_queued_uses, queue_use};
     let conn = Connection::open_in_memory().unwrap();
     printninja_lib::db::init(&conn).unwrap();
+    let fonts_dir =
+        std::env::temp_dir().join(format!("pn-cache-fonts-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&fonts_dir).unwrap();
     seed_synced(&conn, "srv-q", 1);
 
     assert_eq!(queue_use(&conn, "srv-q", 3).unwrap(), 3);
@@ -675,7 +681,7 @@ fn queued_uses_accumulate_drain_and_clear() {
     assert_eq!(list_queued_uses(&conn).unwrap().len(), 1);
 
     // Clearing the account wipes templates and the queue.
-    assert_eq!(clear_account(&conn).unwrap(), 1);
+    assert_eq!(clear_account(&conn, &fonts_dir).unwrap(), 1);
     assert_eq!(list_queued_uses(&conn).unwrap().len(), 0);
     let remaining: i64 = conn
         .query_row("SELECT COUNT(*) FROM templates", [], |r| r.get(0))
@@ -712,6 +718,8 @@ fn non_synced_rows_skip_pulls() {
     use printninja_lib::commands::cache::{apply_changes, SyncChangeIn};
     let conn = Connection::open_in_memory().unwrap();
     printninja_lib::db::init(&conn).unwrap();
+    let fonts_dir =
+        std::env::temp_dir().join(format!("pn-cache-fonts-{}", uuid::Uuid::new_v4()));
     seed_synced(&conn, "srv-k", 1);
     for state in ["conflict", "deleted_pending"] {
         conn.execute(
@@ -725,7 +733,7 @@ fn non_synced_rows_skip_pulls() {
                       "body": "<p>x</p>", "revision": 2, "updated_at": "2026-10-20T00:00:00Z" }
         }]))
         .unwrap();
-        let report = apply_changes(&conn, &changes, "MQ==").unwrap();
+        let report = apply_changes(&conn, &fonts_dir, &changes, "MQ==").unwrap();
         assert_eq!(report.skipped_dirty, 1, "state {state} must skip");
         assert_eq!(report.applied_upserts, 0, "state {state} must not apply");
         assert_eq!(sync_state_of(&conn, "srv-k"), state);
@@ -800,11 +808,13 @@ fn apply_one(
     data: serde_json::Value,
 ) -> printninja_lib::commands::cache::ApplyReport {
     use printninja_lib::commands::cache::{apply_changes, SyncChangeIn};
+    let fonts_dir =
+        std::env::temp_dir().join(format!("pn-cache-fonts-{}", uuid::Uuid::new_v4()));
     let changes: Vec<SyncChangeIn> = serde_json::from_value(serde_json::json!([{
         "seq": 1, "entity": "template", "op": "upsert", "data": data
     }]))
     .unwrap();
-    apply_changes(conn, &changes, "MQ==").unwrap()
+    apply_changes(conn, &fonts_dir, &changes, "MQ==").unwrap()
 }
 
 fn server_data(id: &str, body: &str, revision: i64) -> serde_json::Value {

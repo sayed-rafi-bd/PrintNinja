@@ -56,6 +56,7 @@ pub fn router_with_state(state: ApiState, lan_access: bool) -> Router {
         .route("/v1/jobs", get(list_jobs))
         .route("/v1/jobs/{id}", get(get_job).delete(cancel_job))
         .route("/v1/jobs/{id}/retry", post(retry_job))
+        .route("/v1/metrics", get(metrics))
         .route("/v1/openapi.json", get(openapi))
         .with_state(state.clone())
         // Per-request spans (method, path, status, latency): the only way
@@ -763,6 +764,53 @@ async fn cancel_job(
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Operational counters for dashboards and smoke checks: jobs by
+/// status, active batches, and printers the queue currently serialises.
+/// One GROUP BY plus two cheap counts — no per-row work.
+async fn metrics(State(state): State<ApiState>) -> Result<Json<Value>, ApiRejection> {
+    let (by_status, batches_active) = {
+        let guard = state.db.lock().map_err(ApiRejection::from)?;
+        let conn = guard.connection();
+
+        let mut by_status: std::collections::HashMap<String, i64> = [
+            ("queued", 0),
+            ("printing", 0),
+            ("success", 0),
+            ("failed", 0),
+            ("cancelled", 0),
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), *v))
+        .collect();
+        let mut stmt = conn
+            .prepare("SELECT status, COUNT(*) FROM print_jobs GROUP BY status")
+            .map_err(ApiRejection::from)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(ApiRejection::from)?;
+        for row in rows {
+            let (status, count) = row.map_err(ApiRejection::from)?;
+            by_status.insert(status, count);
+        }
+        let batches_active: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM batches WHERE status IN ('queued', 'printing')",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(ApiRejection::from)?;
+        (by_status, batches_active)
+    };
+
+    Ok(Json(json!({
+        "jobs": by_status,
+        "batches": { "active": batches_active },
+        "printers": { "tracked": state.queue.tracked_printers().await },
+    })))
 }
 
 async fn openapi() -> Json<Value> {
