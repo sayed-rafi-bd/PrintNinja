@@ -4102,6 +4102,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v2/internal/cleanup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Scheduled cleanup: purge expired sessions and tombstones older than the retention window. Bearer CRON_SECRET; 404 when unconfigured. */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            purged_sessions: number;
+                            purged_tombstones: number;
+                        };
+                    };
+                };
+                /** @description Default Response */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "service_unavailable" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Default Response */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "validation_failed" | "remote_reference" | "payload_too_large" | "unauthorized" | "invalid_credentials" | "forbidden" | "not_found" | "handle_taken" | "revision_conflict" | "revision_required" | "quota_exceeded" | "service_unavailable" | "rate_limited" | "internal_error";
+                                message: string;
+                                details?: {
+                                    path: string;
+                                    message: string;
+                                }[];
+                                request_id: string;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {

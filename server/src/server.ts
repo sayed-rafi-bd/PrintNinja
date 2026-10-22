@@ -1,61 +1,21 @@
-import { randomUUID } from "node:crypto";
-import { buildApp } from "./app.js";
-import { loadConfig } from "./config.js";
+import { buildStack } from "./boot.js";
 import { purgeExpiredSessions } from "./domain/auth/index.js";
 import { purgeOldTombstones } from "./domain/sync/index.js";
-import type { AppDeps } from "./domain/ports.js";
-import { createDbClient } from "./infra/db/client.js";
-import { createDatasetRepository } from "./infra/db/datasets.js";
-import { createSettingRepository } from "./infra/db/settings.js";
-import { createFontRepository } from "./infra/db/fonts.js";
-import { createProfileRepository } from "./infra/db/profiles.js";
-import { createSavedRepository } from "./infra/db/saved.js";
-import { createSessionRepository } from "./infra/db/sessions.js";
-import { createSyncRepository } from "./infra/db/sync.js";
-import { createTemplateRepository } from "./infra/db/templates.js";
-import { createUserRepository } from "./infra/db/users.js";
-import { createPasswordHasher } from "./infra/security/passwordHasher.js";
-import { createTokenService } from "./infra/security/tokens.js";
 
-// Process entry (REFACTORING.md section 5): load config, build app,
-// listen, and shut down cleanly — stop accepting, let in-flight
-// requests finish, close the database, then exit. Fail-fast: a bad
-// environment aborts here with the offending field named.
-const config = loadConfig();
-const db = createDbClient(config.databaseUrl, config.databaseAuthToken);
-
-const deps: AppDeps = {
-  users: createUserRepository(db),
-  sessions: createSessionRepository(db),
-  hasher: createPasswordHasher({
-    memoryKib: config.argon2MemoryKib,
-    timeCost: config.argon2TimeCost,
-    parallelism: config.argon2Parallelism,
-  }),
-  tokens: createTokenService(),
-  clock: { now: () => new Date() },
-  ids: { newId: () => randomUUID() },
-  sessionTtlDays: config.sessionTtlDays,
-  templates: createTemplateRepository(db),
-  datasets: createDatasetRepository(db),
-  profiles: createProfileRepository(db),
-  settings: createSettingRepository(db),
-  fonts: createFontRepository(db),
-  saved: createSavedRepository(db),
-  sync: createSyncRepository(db),
-  ping: () => db.$queryRaw`SELECT 1`.then(() => undefined),
-};
-
-const app = await buildApp({ config, deps });
-app.addHook("onClose", async () => {
-  await db.$disconnect();
-});
+// Process entry (REFACTORING.md section 5): build the stack, purge
+// once, listen, and shut down cleanly — stop accepting, let in-flight
+// requests finish, close the database, then exit. The stack itself
+// lives in ./boot.js so the serverless entry (api/index.ts) shares
+// the wiring without the timers, purges or listener.
+const { app, config, deps, close } = await buildStack();
 
 // Cleanup: once at startup, then hourly. Sessions past their TTL go, and
 // tombstones older than the retention window go (their absence is what
 // lets a stale cursor answer reset instead of silently missing deletes).
 // No job queue — a timer in the process entry is the whole mechanism.
-// buildApp stays schedule-free so tests never inherit timers.
+// buildApp stays schedule-free so tests never inherit timers. Serverless
+// deployments run this from a scheduled job against /v2/internal/cleanup
+// instead (see docs/RELEASE.md).
 const purgedSessionsAtStartup = await purgeExpiredSessions(deps);
 const purgedTombstonesAtStartup = await purgeOldTombstones(
   deps,
@@ -102,8 +62,7 @@ app.addHook("onClose", async () => {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     app.log.info({ signal }, "shutting down");
-    app
-      .close()
+    close()
       .then(() => process.exit(0))
       .catch((error: unknown) => {
         app.log.error({ err: error }, "error during shutdown");

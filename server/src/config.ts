@@ -52,6 +52,9 @@ const configSchema = z
     // (`libsql://` + DATABASE_AUTH_TOKEN) in production.
     DATABASE_URL: z.string().min(1),
     DATABASE_AUTH_TOKEN: z.string().optional(),
+    // Shared secret for the scheduled cleanup endpoint
+    // (`GET /v2/internal/cleanup`). Unset disables the endpoint (404).
+    CRON_SECRET: z.string().min(1).optional(),
     LOG_LEVEL: z
       .enum(["trace", "debug", "info", "warn", "error", "fatal"])
       .default("info"),
@@ -95,6 +98,7 @@ export type Config = {
   port: number;
   databaseUrl: string;
   databaseAuthToken?: string;
+  cronSecret?: string;
   logLevel: "trace" | "debug" | "info" | "warn" | "error" | "fatal";
   corsOrigins: string[];
   trustProxy: number;
@@ -137,6 +141,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     port: parsed.PORT,
     databaseUrl: parsed.DATABASE_URL,
     databaseAuthToken: parsed.DATABASE_AUTH_TOKEN,
+    cronSecret: parsed.CRON_SECRET,
     logLevel: parsed.LOG_LEVEL,
     corsOrigins: parsed.CORS_ORIGINS,
     trustProxy: parsed.TRUST_PROXY,
