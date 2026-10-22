@@ -67,7 +67,7 @@ impl Default for OpenApiSpec {
                 "/v1/metrics": {
                     "get": {
                         "summary": "Operational counters",
-                        "description": "Jobs by status, active batches and queue-tracked printers. Same shape every call; poll it.",
+                        "description": "Jobs by status, active batches, queue-tracked printers, and completed totals since boot. Same shape every call; poll it.",
                         "responses": {
                             "200": { "description": "Counters" },
                             "401": { "description": "Missing or invalid API key" },

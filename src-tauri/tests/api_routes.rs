@@ -217,6 +217,16 @@ async fn metrics_prometheus_renders_gauges() {
     );
     assert!(text.contains("printninja_batches_active 0\n"), "{text}");
     assert!(text.contains("# TYPE printninja_jobs gauge"), "{text}");
+    assert!(
+        text.contains("# TYPE printninja_jobs_completed_total counter"),
+        "completed totals are counters: {text}"
+    );
+    for outcome in ["success", "failed", "cancelled"] {
+        assert!(
+            text.contains(&format!("printninja_jobs_completed_total{{outcome=\"{outcome}\"}} ")),
+            "outcome {outcome} rendered: {text}"
+        );
+    }
 }
 
 #[tokio::test]

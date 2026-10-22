@@ -27,9 +27,11 @@
 > default, session purge hardening + no-store + revoke-all +
 > password change, font size cap + orphan sweep + relative
 > paths, schema CHECKs + sanitize-first rebuild migration for
-> pre-existing DBs, API TraceLayer + readiness + metrics,
-> a11y scan + labels, desktop password-change UI). Remaining P2:
-> Prometheus export format.
+> pre-existing DBs, API TraceLayer + readiness + metrics with
+> since-boot completed counters, a11y scan + labels, desktop
+> password-change UI). P2 done; only the Prometheus client-library
+> export format was deliberately skipped (hand-rolled 0.0.4 text
+> covers the fixed label set with no new dependency).
 
 Audited from the working tree (develop). Each item names the file that proves it.
 Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt with user impact, **P2** = hardening/polish.

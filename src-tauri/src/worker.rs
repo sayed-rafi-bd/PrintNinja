@@ -71,6 +71,7 @@ impl Worker {
              WHERE status = 'printing'",
             [],
         )?;
+        crate::metrics::count_finished_n("failed", n as u64);
         Ok(n)
     }
 

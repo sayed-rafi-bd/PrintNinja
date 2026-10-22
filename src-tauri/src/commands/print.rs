@@ -1187,13 +1187,19 @@ fn close_job(
     // must not be persisted verbatim (PLANNING.md keyring/redaction).
     let redacted_html = redact_with_secrets(rendered_html, secrets);
 
-    conn.execute(
+    let transitioned = conn.execute(
         "UPDATE print_jobs
          SET status = ?2, error = ?3, rendered_html = ?4,
              finished_at = datetime('now'), duration_ms = ?5
          WHERE id = ?1 AND status = 'printing'",
         rusqlite::params![job_id, status, error, redacted_html, duration_ms],
     )?;
+
+    // Count only real transitions: a finish racing a cancel lands on an
+    // already-terminal row and must not inflate the totals.
+    if transitioned == 1 {
+        crate::metrics::count_finished(status);
+    }
 
     Ok(())
 }

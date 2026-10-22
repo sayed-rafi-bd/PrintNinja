@@ -763,6 +763,7 @@ async fn cancel_job(
             "Job is not cancellable (already started or finished)".into(),
         ));
     }
+    crate::metrics::count_finished("cancelled");
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -816,10 +817,16 @@ fn read_metric_counts(
 async fn metrics(State(state): State<ApiState>) -> Result<Json<Value>, ApiRejection> {
     let (by_status, batches_active) = read_metric_counts(&state)?;
 
+    let finished = crate::metrics::finished_counts();
     Ok(Json(json!({
         "jobs": by_status,
         "batches": { "active": batches_active },
         "printers": { "tracked": state.queue.tracked_printers().await },
+        "completed": {
+            "success": finished.0,
+            "failed": finished.1,
+            "cancelled": finished.2,
+        },
     })))
 }
 
@@ -829,22 +836,9 @@ async fn metrics(State(state): State<ApiState>) -> Result<Json<Value>, ApiReject
 async fn metrics_prometheus(State(state): State<ApiState>) -> impl IntoResponse {
     let (by_status, batches_active) = read_metric_counts(&state)?;
     let tracked = state.queue.tracked_printers().await;
-    let mut out = String::from(
-        "# HELP printninja_jobs Print jobs by status.\n# TYPE printninja_jobs gauge\n",
-    );
-    let mut statuses: Vec<(&String, &i64)> = by_status.iter().collect();
-    statuses.sort_by(|a, b| a.0.cmp(b.0));
-    for (status, count) in statuses {
-        out.push_str(&format!("printninja_jobs{{status=\"{status}\"}} {count}\n"));
-    }
-    out.push_str(
-        "# HELP printninja_batches_active Batches still printing.\n# TYPE printninja_batches_active gauge\n",
-    );
-    out.push_str(&format!("printninja_batches_active {batches_active}\n"));
-    out.push_str(
-        "# HELP printninja_printers_tracked Printers the queue currently serialises.\n# TYPE printninja_printers_tracked gauge\n",
-    );
-    out.push_str(&format!("printninja_printers_tracked {tracked}\n"));
+    let finished = crate::metrics::finished_counts();
+    let out =
+        crate::metrics::render_prometheus(&by_status, batches_active, tracked, finished);
     Ok::<_, ApiRejection>((
         [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
         out,

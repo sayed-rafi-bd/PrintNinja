@@ -4,6 +4,7 @@ mod data;
 pub mod db;
 mod deeplink;
 mod error;
+pub mod metrics;
 pub mod queue;
 pub mod readme;
 pub mod render;
