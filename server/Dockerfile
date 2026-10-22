@@ -58,6 +58,12 @@ WORKDIR /srv
 # image already ships an unprivileged `node` user (uid 1000); the service
 # writes nothing to disk (logs go to stdout) and must not run as root.
 COPY --from=build --chown=node:node /deploy ./
+# Home of the default file database (file:/data/…). It must exist and
+# belong to the service user in the image: a fresh named volume inherits
+# the image directory's ownership on first mount, while a root-owned
+# mount point leaves SQLite unable to create the file (CANTOPEN).
+RUN mkdir -p /data && chown node:node /data
+VOLUME /data
 USER node
 
 EXPOSE 3001

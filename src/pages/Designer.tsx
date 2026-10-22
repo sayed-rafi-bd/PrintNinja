@@ -1092,6 +1092,7 @@ export function DesignerPage() {
         readmeSaving={readmeSaving}
         onSaveReadme={() => void handleSaveReadme()}
         notices={<ClassWarnings html={debouncedHtml} />}
+        samplePanel={sampleDataPanel}
       />
       <DesignerActions
         onBarcode={() => setShowBarcodeDialog(true)}
@@ -1156,7 +1157,6 @@ export function DesignerPage() {
               </button>
               <ControlsAccordion
                 {...controls}
-                sampleData={sampleDataPanel}
                 openSections={openSections}
                 onOpenSectionsChange={setOpenSections}
                 onInsertHelper={insertHelper}

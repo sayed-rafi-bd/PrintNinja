@@ -17,6 +17,7 @@ no root `.env`: Vite needs no variables, and dev scripts default
 | --- | --- |
 | `docker compose up` (from `server/`) | `server/.env` (copy `server/env.example`) |
 | Local server (`node --env-file=.env`, from `server/`) | `server/.env` |
+| CLI scripts (`db:apply`, `db:import`, `openapi:generate`) | `server/.env`, loaded automatically (explicit env wins) |
 
 Never commit any `.env` file (`server/.env` is gitignored).
 

@@ -128,24 +128,42 @@ fn fixture_binary() -> PathBuf {
 /// (`transport::status`) covers the faults a printer *reports*; what it
 /// never reports — it took the bytes and went quiet — is caught only here.
 ///
-/// So this is 8 MiB: over the 4 MiB default with room to spare, whatever the
-/// peer's advertised window.
-const BIG: usize = 8 << 20;
-
+/// So this is 256 MiB: over every documented default send/receive
+/// buffer ceiling, whatever the peer's advertised window — the write can
+/// only complete by actually moving the bytes, which a hanging peer
+/// never lets happen. Smaller payloads can complete into kernel buffers
+/// without the peer ever reading, which makes the timeout/close tests
+/// pass vacuously instead of exercising the deadline. The fixture also
+/// pins a 4 KiB receive buffer in the fault states, so filling that much
+/// buffer is never cheap or quiet.
+const BIG: usize = 256 << 20;
+// Exception proven by the Windows runner: its loopback absorbed the
+// whole 256 MiB without the peer reading a byte — verified with a
+// silent, correctly-connected hang peer and 4 KiB socket buffers pinned
+// on both ends — so no payload size can stall a sender there. The three
+// tests below are gated on Windows for exactly this reason; the timeout
+// path itself is platform-independent tokio code, covered on Linux.
 // ───────────────────────────────────────────────────────────────
 // harness
 // ───────────────────────────────────────────────────────────────
 
 /// A running Virtual Printer on its own set of ports, plus the directory its
-/// received jobs land in.
+/// received jobs land in. Ports are assigned by the OS (bind 0) and read
+/// back through the fixture's --ports-file, so two tests can never share
+/// or steal a fixture: connecting to a computed port can only ever reach
+/// this printer.
 struct VirtualPrinter {
     child: Child,
-    offset: u16,
+    raw_port: u16,
+    http_port: u16,
+    ipp_port: u16,
     jobs: PathBuf,
+    ports_file: PathBuf,
 }
 
 impl VirtualPrinter {
-    /// Start one on a free offset, retrying when a port is already taken.
+    /// Start one with OS-assigned ports, discovered through the fixture's
+    /// --ports-file rendez-vous.
     ///
     /// Always available: the fixture is a Rust binary built on demand, so
     /// these tests neither skip nor depend on an interpreter.
@@ -153,17 +171,17 @@ impl VirtualPrinter {
         let exe = fixture_binary();
 
         for _ in 0..8 {
-            // Wide range on purpose: every test here binds four ports from
-            // this offset, and two tests silently sharing one fixture (same
-            // ports) would look like a pass while their printers are not the
-            // ones being tested.
-            let offset = 10000 + (uuid::Uuid::new_v4().as_u128() as u16) % 45000;
             let jobs = std::env::temp_dir().join(format!("pn-vprinter-{}", uuid::Uuid::new_v4()));
+            // The rendezvous file lives next to the jobs dir, never inside
+            // it: received() and stored_jobs() treat every file in the jobs
+            // dir as a printed job.
+            let ports_file =
+                std::env::temp_dir().join(format!("pn-vprinter-ports-{}", uuid::Uuid::new_v4()));
             let child = Command::new(&exe)
                 .arg("--host")
                 .arg("127.0.0.1")
-                .arg("--offset")
-                .arg(offset.to_string())
+                .arg("--ports-file")
+                .arg(&ports_file)
                 .arg("--jobs")
                 .arg(&jobs)
                 .arg("--state")
@@ -177,43 +195,81 @@ impl VirtualPrinter {
 
             let mut printer = Self {
                 child,
-                offset,
+                raw_port: 0,
+                http_port: 0,
+                ipp_port: 0,
                 jobs,
+                ports_file,
             };
             if printer.wait_until_ready() {
                 return Some(printer);
             }
-            // Port taken or start-up lost the race: try another offset.
+            // Ports file never appeared, or the dashboard never answered:
+            // drop the half-started fixture (Drop kills the child) and
+            // try a fresh jobs dir.
         }
-        panic!("the virtual printer never became ready on any offset");
+        panic!("the virtual printer never became ready");
     }
 
     fn http_port(&self) -> u16 {
-        80 + self.offset
+        self.http_port
     }
 
     fn raw_port(&self) -> u16 {
-        9100 + self.offset
+        self.raw_port
     }
 
     fn ipp_url(&self) -> String {
-        format!("http://127.0.0.1:{}/ipp/print", 631 + self.offset)
+        format!("http://127.0.0.1:{}/ipp/print", self.ipp_port)
     }
 
-    /// Poll the dashboard until it answers, so the next line does not race
-    /// the listener threads coming up.
+    /// Wait for the fixture's ports file, adopt the bound ports, then poll
+    /// the dashboard until it answers, so the next line does not race the
+    /// listener threads coming up.
     ///
     /// Any status counts as ready, so a future change to how the dashboard
     /// reports an unready state cannot silently stop every test here.
     fn wait_until_ready(&mut self) -> bool {
         let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            if let Ok(text) = std::fs::read_to_string(&self.ports_file) {
+                let mut raw = None;
+                let mut http = None;
+                let mut ipp = None;
+                for line in text.lines() {
+                    let (k, v) = match line.split_once('=') {
+                        Some(pair) => pair,
+                        None => continue,
+                    };
+                    let port: u16 = match v.trim().parse() {
+                        Ok(p) => p,
+                        Err(_) => continue,
+                    };
+                    match k.trim() {
+                        "raw" => raw = Some(port),
+                        "http" => http = Some(port),
+                        "ipp" => ipp = Some(port),
+                        _ => {}
+                    }
+                }
+                if let (Some(raw), Some(http), Some(ipp)) = (raw, http, ipp) {
+                    self.raw_port = raw;
+                    self.http_port = http;
+                    self.ipp_port = ipp;
+                    break;
+                }
+            }
+            if Instant::now() > deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(150));
+        }
         while Instant::now() < deadline {
             if self.get("/").starts_with("HTTP/1.") {
                 return true;
             }
             std::thread::sleep(Duration::from_millis(150));
         }
-        let _ = self.child.kill();
         false
     }
 
@@ -284,6 +340,7 @@ impl Drop for VirtualPrinter {
         let _ = self.child.kill();
         let _ = self.child.wait();
         let _ = std::fs::remove_dir_all(&self.jobs);
+        let _ = std::fs::remove_file(&self.ports_file);
     }
 }
 
@@ -475,6 +532,10 @@ async fn an_ipp_job_reaches_the_printer() {
 ///
 /// Needs a payload the peer cannot absorb; see [`BIG`].
 #[tokio::test]
+#[cfg_attr(
+    windows,
+    ignore = "Windows loopback absorbs unbounded writes without the peer ever reading (verified: 256 MiB through verified-4 KiB socket buffers on both ends against a silent peer), so a stalled sender cannot be produced and the timeout never fires. The timeout path itself is platform-independent tokio code, covered on Linux."
+)]
 async fn a_hanging_raw_printer_times_out_instead_of_blocking_forever() {
     let Some(printer) = VirtualPrinter::start("ok") else {
         return;
@@ -547,6 +608,10 @@ async fn a_silent_ipp_printer_times_out_with_a_readable_message() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    windows,
+    ignore = "same Windows-loopback reason as the hanging-printer timeout test above: the blast can complete into kernel buffers before the close is processed, so the reset the test waits for never surfaces"
+)]
 async fn a_dropping_raw_printer_reports_a_closed_connection() {
     let Some(printer) = VirtualPrinter::start("ok") else {
         return;
@@ -675,6 +740,10 @@ async fn a_jam_fails_the_job_with_a_message_stored_in_history() {
 /// the row stayed `printing` forever, which is indistinguishable from a job
 /// that is still working.
 #[tokio::test]
+#[cfg_attr(
+    windows,
+    ignore = "same Windows-loopback reason as the hanging-printer timeout test above: the blast can complete without the wedged peer ever reading, so the deadline the test pins never fires"
+)]
 async fn a_hung_print_ends_as_a_failed_job_not_a_stuck_one() {
     let Some(printer) = VirtualPrinter::start("ok") else {
         return;

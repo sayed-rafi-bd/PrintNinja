@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@libsql/client";
+import { loadEnvFile } from "../../config.js";
 
 // Applies pending migrations from prisma/migrations/ in filename order,
 // recording them in the `_prisma_migrations` table (same shape Prisma
@@ -104,6 +105,9 @@ const invokedDirectly =
   resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 
 if (invokedDirectly) {
+  // The env file lives next to the stack (server/.env), no matter which
+  // directory the command was started from.
+  loadEnvFile(resolve(here, "..", "..", ".."));
   const url = process.env.DATABASE_URL;
   if (!url) {
     console.error("migrate: DATABASE_URL is required");
