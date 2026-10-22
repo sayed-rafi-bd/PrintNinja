@@ -402,7 +402,7 @@ describe("E14 saved manifest", () => {
     expect(
       (await request("POST", `/v2/templates/${id}/unpublish`, owner.token))
         .status,
-    ).toBe(204);
+    ).toBe(200);
     expect(await manifest()).toMatchObject([
       { revision: 2, state: "withdrawn" },
     ]);

@@ -12,7 +12,7 @@ test("F1 sign up, sign in, case-duplicate, sign out, sign in again", async ({
   browser,
 }) => {
   const { apiUrl } = readStackState();
-  const handle = `F1User${Date.now().toString(36)}`;
+  const handle = `F1User${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const password = "password123";
   const seeded = await pc(browser);
   const page = await seeded.context.newPage();

@@ -255,7 +255,7 @@ describe("ported B4/P1 characterization", () => {
       url: `/v2/templates/${id}/unpublish`,
       headers: headers(token),
     });
-    expect(unpub.statusCode).toBe(204);
+    expect(unpub.statusCode).toBe(200);
     const after = await app.inject({
       method: "GET",
       url: "/v2/community/templates?page_size=100",
@@ -820,6 +820,26 @@ describe("v2 endpoint contracts", () => {
       result.status === "fulfilled" ? result.value.status : "rejected",
     );
     expect(statuses.sort()).toEqual([201, 428]);
+  });
+
+  it("gives one 200 and one 409 for concurrent same-revision updates", async () => {
+    const { token } = await register("raceretry");
+    const id = randomUUID();
+    const created = await put(id, token, tpl());
+    expect(created.status).toBe(201);
+
+    // Both writers read revision 1; only one update can win it. The
+    // bodies differ on purpose: with identical bodies a serialized run
+    // would take the intentional replay-200 path instead, making the
+    // outcome depend on scheduling rather than on the revision guard.
+    const attempts = await Promise.allSettled([
+      put(id, token, { ...tpl(), body: "<div>a</div>", if_revision: 1 }),
+      put(id, token, { ...tpl(), body: "<div>b</div>", if_revision: 1 }),
+    ]);
+    const statuses = attempts.map((result) =>
+      result.status === "fulfilled" ? result.value.status : "rejected",
+    );
+    expect(statuses.sort()).toEqual([200, 409]);
   });
 
   it("paginates, sorts and searches literally", async () => {

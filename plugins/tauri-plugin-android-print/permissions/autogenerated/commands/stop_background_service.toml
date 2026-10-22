@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-stop-background-service"
+description = "Enables the stop_background_service command without any pre-configured scope."
+commands.allow = ["stop_background_service"]
+
+[[permission]]
+identifier = "deny-stop-background-service"
+description = "Denies the stop_background_service command without any pre-configured scope."
+commands.deny = ["stop_background_service"]

@@ -84,6 +84,10 @@ export const manifestItemSchema = z.object({
 
 export const manifestResponse = z.object({
   items: z.array(manifestItemSchema),
+  page: z.number().int(),
+  page_size: z.number().int(),
+  total: z.number().int(),
+  has_more: z.boolean(),
 });
 
 export type SyncChangeResponse = z.infer<typeof changeSchema>;

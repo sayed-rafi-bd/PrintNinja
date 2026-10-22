@@ -195,6 +195,32 @@ describe("fonts", () => {
     expect(gone.statusCode).toBe(404);
   });
 
+  it("gives one 200 and one 409 for concurrent same-revision renames", async () => {
+    const token = await register("FontRacer");
+    const id = randomUUID();
+    const created = await putFont(token, id, "Body");
+    expect(created.statusCode).toBe(201);
+
+    const attempts = await Promise.allSettled([
+      app.inject({
+        method: "PUT",
+        url: `/v2/fonts/${id}`,
+        headers: headers(token),
+        payload: { name: "Renamed A", if_revision: 1 },
+      }),
+      app.inject({
+        method: "PUT",
+        url: `/v2/fonts/${id}`,
+        headers: headers(token),
+        payload: { name: "Renamed B", if_revision: 1 },
+      }),
+    ]);
+    const statuses = attempts.map((result) =>
+      result.status === "fulfilled" ? result.value.statusCode : "rejected",
+    );
+    expect(statuses.sort()).toEqual([200, 409]);
+  });
+
   it("rejects the wrong content, oversize files and other owners", async () => {
     const mine = await register("FontOwner");
     const theirs = await register("FontStranger");

@@ -117,6 +117,22 @@ describe("putDataset", () => {
     const remaining = await r.datasets.listByOwner(OWNER_ID);
     expect(remaining.map((d) => d.id)).toEqual(["d2"]);
   });
+
+  it("caps names in bytes and refuses deeply nested JSON", async () => {
+    const r = repos();
+    await expect(
+      putDataset(
+        r,
+        { id: "d1", name: "é".repeat(200), dataJson: "{}" },
+        OWNER_ID,
+      ),
+    ).rejects.toThrow(/cap/i);
+    let nested = "0";
+    for (let i = 0; i < 40; i++) nested = `[${nested}]`;
+    await expect(
+      putDataset(r, { id: "d2", name: "O", dataJson: nested }, OWNER_ID),
+    ).rejects.toThrow(/nested/i);
+  });
 });
 
 describe("putProfile", () => {
@@ -196,6 +212,26 @@ describe("putProfile", () => {
       NotFoundError,
     );
   });
+
+  it("caps printer names and settings JSON in bytes", async () => {
+    const r = repos();
+    const base = {
+      id: "p9",
+      templateId: "aaaaaaaa-1111-4111-8111-111111111111",
+      printerName: "E2E",
+      settingsJson: "{}",
+    };
+    await expect(
+      putProfile(r, { ...base, printerName: "é".repeat(100) }, OWNER_ID),
+    ).rejects.toThrow(/cap/i);
+    await expect(
+      putProfile(
+        r,
+        { ...base, settingsJson: `{"a":"${"x".repeat(70_000)}"}` },
+        OWNER_ID,
+      ),
+    ).rejects.toThrow(/cap/i);
+  });
 });
 
 describe("font files", () => {
@@ -231,5 +267,50 @@ describe("font files", () => {
     await expect(
       putFontFile({ fonts }, "f2", ttfExtra(), "other-1"),
     ).rejects.toThrow(/not allowed|forbidden/i);
+  });
+
+  it("caps font names in bytes, not UTF-16 units", async () => {
+    const { createFakeAccountRepos } = await import("./fakes/account.js");
+    const { fonts } = createFakeAccountRepos();
+    const { putFont } = await import("../src/domain/fonts.js");
+    await expect(
+      putFont({ fonts }, { id: "f3", name: "é".repeat(200) }, "owner-1"),
+    ).rejects.toThrow(/cap/i);
+  });
+});
+
+describe("account settings", () => {
+  it("caps setting values in bytes", async () => {
+    const { createFakeAccountRepos } = await import("./fakes/account.js");
+    const { settings } = createFakeAccountRepos();
+    const { putSetting } = await import("../src/domain/settings.js");
+    await expect(
+      putSetting({ settings }, "owner-1", "brand_name", "é".repeat(40_000)),
+    ).rejects.toThrow(/cap/i);
+  });
+
+  it("reports 201 on create and 200 on overwrite", async () => {
+    const { createFakeAccountRepos } = await import("./fakes/account.js");
+    const { settings } = createFakeAccountRepos();
+    const { putSetting } = await import("../src/domain/settings.js");
+    const created = await putSetting(
+      { settings },
+      "owner-1",
+      "brand_name",
+      "Acme",
+    );
+    expect(created.status).toBe(201);
+    expect(created.view.value).toBe("Acme");
+    // The fake reuses the stored object, so snapshot the revision now.
+    const firstRevision = created.view.revision;
+    const overwritten = await putSetting(
+      { settings },
+      "owner-1",
+      "brand_name",
+      "Acme Co",
+    );
+    expect(overwritten.status).toBe(200);
+    expect(overwritten.view.value).toBe("Acme Co");
+    expect(overwritten.view.revision).toBe(firstRevision + 1);
   });
 });

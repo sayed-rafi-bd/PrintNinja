@@ -172,7 +172,11 @@ describe("generated OpenAPI document", () => {
     const manifest = document.paths["/v2/saved/manifest"] as {
       get: { responses: Record<string, unknown> };
     };
-    expect(Object.keys(manifest.get.responses).sort()).toEqual(["200", "401"]);
+    expect(Object.keys(manifest.get.responses).sort()).toEqual([
+      "200",
+      "400",
+      "401",
+    ]);
   });
 });
 

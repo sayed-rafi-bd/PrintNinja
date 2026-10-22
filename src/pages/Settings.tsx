@@ -3,13 +3,31 @@ import { useSearchParams } from "react-router-dom";
 import { AppearanceSettings } from "@/components/AppearanceSettings";
 import { PageHeader } from "@/components/PageHeader";
 import { SetupChecklist } from "@/components/SetupChecklist";
+import {
+  AndroidBackgroundControls,
+  isAndroidBackground,
+} from "@/components/BackgroundAndroid";
 import { parseSection, type SettingsSection } from "@/lib/setup/checklist";
 import { agent } from "@/lib/agent/commands";
+import {
+  isWebMode,
+  readSetting,
+  settingsLsKey,
+  writeSetting,
+} from "@/lib/settings";
 import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
 import type { ApiStatus, FontRow } from "@/lib/agent/types";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +37,7 @@ import {
   Type,
   Archive,
   Activity,
+  AppWindow,
   Globe,
   Key,
   Shield,
@@ -31,44 +50,13 @@ import {
   Info,
   ListChecks,
 } from "lucide-react";
+import { ChangePasswordForm } from "@/components/ChangePasswordForm";
 import { toast } from "sonner";
 import { diagnostics } from "@/lib/diagnostics";
 import * as share from "@/lib/share/client";
 import { normalizeServiceUrl } from "@/lib/share/session";
 
 const DEFAULT_KEY = "— not generated —";
-
-/**
- * Settings are stored in SQLite via Tauri. In web mode (browser preview,
- * CI) the command is unavailable, so fall back to localStorage so the page
- * stays usable instead of silently discarding every write.
- */
-const isWebMode = () =>
-  typeof window !== "undefined" && !(window as any).__TAURI_INTERNALS__;
-
-const lsKey = (key: string) => `printninja-setting:${key}`;
-
-async function readSetting(key: string): Promise<string | null> {
-  if (isWebMode()) return localStorage.getItem(lsKey(key));
-  try {
-    return await agent("get_setting", { key });
-  } catch {
-    return localStorage.getItem(lsKey(key));
-  }
-}
-
-async function writeSetting(key: string, value: string): Promise<boolean> {
-  localStorage.setItem(lsKey(key), value);
-  if (isWebMode()) return true;
-  try {
-    await agent("set_setting", { key, value });
-    return true;
-  } catch (e) {
-    // Persisted locally at least; surface the backend problem.
-    console.warn(`set_setting(${key}) failed, kept in localStorage:`, e);
-    return true;
-  }
-}
 
 export function SettingsPage() {
   const { t } = useTranslation();
@@ -96,6 +84,21 @@ export function SettingsPage() {
 
   const [allowedDomains, setAllowedDomains] = useState("");
   const [blockPrivate, setBlockPrivate] = useState(true);
+  const [domainsError, setDomainsError] = useState("");
+  const [allowAllOpen, setAllowAllOpen] = useState(false);
+  // Last persisted value: clearing a non-empty allowlist is allow-all,
+  // which needs an explicit confirm.
+  const lastSavedDomains = useRef<string | null>(null);
+
+  const [launchAtStartup, setLaunchAtStartup] = useState(false);
+  const [startMinimized, setStartMinimized] = useState(false);
+  const [minimizeToTray, setMinimizeToTray] = useState(false);
+  const [closeToTray, setCloseToTray] = useState(true);
+  const [bgServiceRunning, setBgServiceRunning] = useState<boolean | null>(
+    null,
+  );
+  const [batteryExempt, setBatteryExempt] = useState<boolean | null>(null);
+  const [bgBusy, setBgBusy] = useState(false);
 
   const [trusted, setTrusted] = useState<string[]>([]);
   const [newTrusted, setNewTrusted] = useState("");
@@ -103,6 +106,8 @@ export function SettingsPage() {
   const [fonts, setFonts] = useState<FontRow[]>([]);
   const [fontUploadError, setFontUploadError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const [showResetDialog, setShowResetDialog] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
 
   const [shareUrl, setShareUrl] = useState("");
   const [shareHandle, setShareHandle] = useState("");
@@ -154,24 +159,48 @@ export function SettingsPage() {
   // Load persisted settings on mount.
   useEffect(() => {
     (async () => {
-      const [port, lan, days, max, domains, block] = await Promise.all([
+      const [
+        port,
+        lan,
+        days,
+        max,
+        domains,
+        block,
+        startup,
+        minimized,
+        minTray,
+        closeTray,
+      ] = await Promise.all([
         readSetting("api_port"),
         readSetting("api_lan_access"),
         readSetting("retention_days"),
         readSetting("max_records"),
         readSetting("allowed_domains"),
         readSetting("block_private_ips"),
+        readSetting("launch_at_startup"),
+        readSetting("start_minimized"),
+        readSetting("minimize_to_tray"),
+        readSetting("close_to_tray"),
       ]);
       if (port) setApiPort(port);
       if (lan) setLanAccess(lan === "true");
       if (days) setRetentionDays(days);
       if (max) setMaxRecords(max);
       if (domains) setAllowedDomains(domains);
+      lastSavedDomains.current = domains ?? "";
       if (block !== null) setBlockPrivate(block === "true");
+      if (startup !== null)
+        setLaunchAtStartup(startup === "true" || startup === "1");
+      if (minimized !== null)
+        setStartMinimized(minimized === "true" || minimized === "1");
+      if (minTray !== null)
+        setMinimizeToTray(minTray === "true" || minTray === "1");
+      if (closeTray !== null)
+        setCloseToTray(closeTray === "true" || closeTray === "1");
 
       try {
         if (isWebMode()) {
-          const raw = localStorage.getItem(lsKey("trusted_sources"));
+          const raw = localStorage.getItem(settingsLsKey("trusted_sources"));
           setTrusted(raw ? (JSON.parse(raw) as string[]) : []);
         } else {
           setTrusted((await agent("get_trusted_sources", {})) ?? []);
@@ -212,6 +241,24 @@ export function SettingsPage() {
     setErr("");
     await writeSetting(key, String(n));
     toast.success("Setting saved");
+  };
+
+  // One behavior for every background toggle: persist the key, ask the
+  // backend to re-apply autostart/tray without a restart, and say so.
+  const setBackgroundPref = async (
+    key: string,
+    value: boolean,
+    set: (v: boolean) => void,
+  ) => {
+    set(value);
+    await writeSetting(key, value ? "1" : "0");
+    try {
+      await agent("refresh_background", {});
+    } catch {
+      // Web preview or an old backend: the stored value still applies
+      // at the next launch.
+    }
+    toast.success("Background setting saved");
   };
 
   const startApi = async () => {
@@ -295,22 +342,78 @@ export function SettingsPage() {
     }
   };
 
+  // Single write path for trusted sources: the dedicated command in
+  // app mode, localStorage in web mode (or when the backend is down).
+  // Previously add/remove wrote the raw setting key while load read
+  // through get_trusted_sources — two formats that could diverge.
+  const persistTrusted = async (next: string[]) => {
+    const clean = [...new Set(next.map((s) => s.trim()).filter(Boolean))];
+    if (isWebMode()) {
+      localStorage.setItem(
+        settingsLsKey("trusted_sources"),
+        JSON.stringify(clean),
+      );
+    } else {
+      try {
+        await agent("set_trusted_sources", { sources: clean });
+      } catch {
+        localStorage.setItem(
+          settingsLsKey("trusted_sources"),
+          JSON.stringify(clean),
+        );
+      }
+    }
+    setTrusted(clean);
+  };
+
   const addTrusted = async () => {
     const value = newTrusted.trim();
     if (!value) return;
-    const next = [...trusted, value];
-    if (await writeSetting("trusted_sources", JSON.stringify(next))) {
-      setTrusted(next);
-      setNewTrusted("");
-      toast.success(`Trusted source added`);
+    if (trusted.includes(value)) {
+      toast.info("That source is already trusted");
+      return;
     }
+    await persistTrusted([...trusted, value]);
+    setNewTrusted("");
+    toast.success(`Trusted source added`);
   };
 
   const removeTrusted = async (value: string) => {
-    const next = trusted.filter((x) => x !== value);
-    if (await writeSetting("trusted_sources", JSON.stringify(next))) {
-      setTrusted(next);
+    await persistTrusted(trusted.filter((x) => x !== value));
+  };
+
+  // Hostnames only: no scheme, path, port-range or spaces. An empty
+  // field means allow-all, so clearing a non-empty list asks first.
+  const saveAllowedDomains = async (raw: string) => {
+    const entries = raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const bad = entries.find(
+      (e) =>
+        !/^(?=.{1,253}$)[a-z0-9]([a-z0-9.-]*[a-z0-9])?(?::\d{1,5})?$/i.test(
+          e,
+        ) || e.includes(".."),
+    );
+    if (bad) {
+      setDomainsError(
+        `“${bad}” is not a domain — use hostnames like api.example.com, comma-separated`,
+      );
+      return;
     }
+    setDomainsError("");
+    const normalized = entries.join(", ");
+    if (normalized === "") {
+      if (lastSavedDomains.current) {
+        setAllowAllOpen(true);
+        return;
+      }
+      return;
+    }
+    await writeSetting("allowed_domains", normalized);
+    if (normalized !== raw) setAllowedDomains(normalized);
+    lastSavedDomains.current = normalized;
+    toast.success("Allowed domains updated");
   };
 
   const saveShareUrl = async () => {
@@ -416,6 +519,13 @@ export function SettingsPage() {
           >
             <Type className="h-4 w-4 shrink-0" aria-hidden="true" />
             General
+          </TabsTrigger>
+          <TabsTrigger
+            value="background"
+            className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
+          >
+            <AppWindow className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Background
           </TabsTrigger>
           <TabsTrigger
             value="share"
@@ -545,6 +655,131 @@ export function SettingsPage() {
             </Card>
           </TabsContent>
 
+          <TabsContent value="background" className="mt-0 space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">
+                  Run in the background
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Keep the print queue alive without a window in the way.
+                  Applies on desktop; on Android the notification controls this
+                  instead.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <AndroidBackgroundControls
+                  running={bgServiceRunning}
+                  exempt={batteryExempt}
+                  busy={bgBusy}
+                  onRefresh={async () => {
+                    const bg = await import("@/lib/android/background");
+                    if (!bg.isAndroid()) return;
+                    setBgBusy(true);
+                    try {
+                      setBgServiceRunning(
+                        await bg.isBackgroundServiceRunning(),
+                      );
+                      setBatteryExempt(await bg.isBatteryExemptionGranted());
+                    } finally {
+                      setBgBusy(false);
+                    }
+                  }}
+                  onRequestExemption={async () => {
+                    const bg = await import("@/lib/android/background");
+                    setBgBusy(true);
+                    try {
+                      await bg.requestBatteryExemption();
+                      setBatteryExempt(await bg.isBatteryExemptionGranted());
+                      toast.success("Battery setting updated");
+                    } finally {
+                      setBgBusy(false);
+                    }
+                  }}
+                />
+                {!isAndroidBackground() && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="launch-at-startup"
+                        data-testid="settings-launch-at-startup"
+                        checked={launchAtStartup}
+                        onCheckedChange={(v) =>
+                          setBackgroundPref(
+                            "launch_at_startup",
+                            v,
+                            setLaunchAtStartup,
+                          )
+                        }
+                      />
+                      <Label htmlFor="launch-at-startup">
+                        Launch at startup
+                      </Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="start-minimized"
+                        data-testid="settings-start-minimized"
+                        checked={startMinimized}
+                        disabled={!launchAtStartup}
+                        onCheckedChange={(v) =>
+                          setBackgroundPref(
+                            "start_minimized",
+                            v,
+                            setStartMinimized,
+                          )
+                        }
+                      />
+                      <Label htmlFor="start-minimized">
+                        Start minimized in the notification area
+                      </Label>
+                    </div>
+                    {!launchAtStartup && (
+                      <p className="text-xs text-muted-foreground">
+                        Start minimized needs launch at startup.
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="minimize-to-tray"
+                        data-testid="settings-minimize-to-tray"
+                        checked={minimizeToTray}
+                        onCheckedChange={(v) =>
+                          setBackgroundPref(
+                            "minimize_to_tray",
+                            v,
+                            setMinimizeToTray,
+                          )
+                        }
+                      />
+                      <Label htmlFor="minimize-to-tray">
+                        Minimizing sends the app to the notification area
+                      </Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="close-to-tray"
+                        data-testid="settings-close-to-tray"
+                        checked={closeToTray}
+                        onCheckedChange={(v) =>
+                          setBackgroundPref("close_to_tray", v, setCloseToTray)
+                        }
+                      />
+                      <Label htmlFor="close-to-tray">
+                        Closing keeps the app in the notification area
+                      </Label>
+                    </div>
+                    {!closeToTray && (
+                      <p className="text-xs text-warning">
+                        Closing will quit the app and stop the print queue.
+                      </p>
+                    )}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           <TabsContent value="share" className="mt-0 space-y-4">
             <Card>
               <CardHeader>
@@ -627,6 +862,10 @@ export function SettingsPage() {
                         Sign out
                       </Button>
                     </div>
+                    <ChangePasswordForm
+                      busy={shareBusy}
+                      setBusy={setShareBusy}
+                    />
                   </div>
                 )}
               </CardContent>
@@ -806,11 +1045,25 @@ export function SettingsPage() {
                     id="allowed-domains"
                     placeholder="api.example.com, pos.local"
                     value={allowedDomains}
-                    onChange={(e) => setAllowedDomains(e.target.value)}
-                    onBlur={() =>
-                      writeSetting("allowed_domains", allowedDomains)
+                    aria-invalid={!!domainsError}
+                    aria-describedby={
+                      domainsError ? "allowed-domains-error" : undefined
                     }
+                    onChange={(e) => {
+                      setAllowedDomains(e.target.value);
+                      setDomainsError("");
+                    }}
+                    onBlur={() => void saveAllowedDomains(allowedDomains)}
                   />
+                  {domainsError && (
+                    <p
+                      id="allowed-domains-error"
+                      role="alert"
+                      className="text-xs text-danger"
+                    >
+                      {domainsError}
+                    </p>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     Comma-separated. Leave empty to allow any domain.
                   </p>
@@ -912,6 +1165,29 @@ export function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Reset this PC</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  Erases everything the app owns on this PC: templates and
+                  versions, print history, printers, fonts and their files,
+                  datasets, profiles, the sync state and every setting —
+                  including the sign-in, so the app returns to the welcome
+                  screen. The server keeps the account; signing back in pulls it
+                  down again.
+                </p>
+                <Button
+                  variant="destructive"
+                  data-testid="settings-reset-database"
+                  onClick={() => setShowResetDialog(true)}
+                >
+                  <Trash2 className="h-3 w-3 mr-2" />
+                  Reset this PC…
+                </Button>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="diagnostics" className="mt-0 space-y-4">
@@ -942,10 +1218,88 @@ export function SettingsPage() {
         </div>
       </Tabs>
 
+      {/* Clearing the allowlist means any domain can feed data URLs. */}
+      <Dialog open={allowAllOpen} onOpenChange={setAllowAllOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Allow data from any domain?</DialogTitle>
+            <DialogDescription>
+              An empty list allows every domain. Live data URLs could then pull
+              content from anywhere — keep at least your own hosts listed unless
+              you mean it.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAllowAllOpen(false)}>
+              Keep the list
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                void (async () => {
+                  await writeSetting("allowed_domains", "");
+                  lastSavedDomains.current = "";
+                  setAllowAllOpen(false);
+                  toast.success("Allowed domains cleared — any domain allowed");
+                })();
+              }}
+            >
+              Allow all
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Full-reset confirmation: the wipe cannot be undone. */}
+      <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Erase everything on this PC?</DialogTitle>
+            <DialogDescription>
+              Templates, print history, printers, fonts, datasets, profiles and
+              all settings will be permanently deleted from this PC. The server
+              keeps the account — sign back in to pull it down again.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowResetDialog(false)}
+              disabled={resetBusy}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={resetBusy}
+              onClick={() => {
+                void (async () => {
+                  setResetBusy(true);
+                  try {
+                    const report = await agent("reset_database", {});
+                    toast.success(
+                      `Cleared ${report.templates} templates, ${report.print_jobs} jobs and ${report.fonts} fonts`,
+                    );
+                    window.location.reload();
+                  } catch (e) {
+                    toast.error(`Reset failed: ${e}`);
+                  } finally {
+                    setResetBusy(false);
+                    setShowResetDialog(false);
+                  }
+                })();
+              }}
+            >
+              {resetBusy ? "Erasing…" : "Erase everything"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Version footer */}
       <div className="flex items-center justify-center gap-2 pt-4 text-xs text-muted-foreground border-t">
         <Info className="h-3 w-3" />
-        <span>PrintNinja {appVersion ? `v${appVersion}` : "v2.0.0"}</span>
+        <span>PrintNinja {appVersion ? `v${appVersion}` : "v0.5.0"}</span>
         <span className="opacity-50">·</span>
         <span className="hidden sm:inline">com.printninja.desktop</span>
       </div>

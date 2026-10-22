@@ -31,12 +31,14 @@ import {
   Usb,
   Bluetooth,
   Monitor,
+  Pencil,
   Trash2,
   TestTube,
   Scan,
   RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
+import { validatePrinterForm } from "@/lib/printerSchema";
 import type { PrinterRow } from "@/lib/agent/types";
 
 const PRINTER_TYPES = [
@@ -99,6 +101,7 @@ export function PrinterSetupPage() {
   const [removeTarget, setRemoveTarget] = useState<PrinterRow | null>(null);
 
   const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({
     name: "",
     printer_type: "ipp",
@@ -107,6 +110,34 @@ export function PrinterSetupPage() {
     paper_width_mm: "80",
     dpi: "203",
   });
+
+  const blankForm = {
+    name: "",
+    printer_type: "ipp",
+    address: "",
+    language: "pdf",
+    paper_width_mm: "80",
+    dpi: "203",
+  };
+
+  const openAdd = () => {
+    setEditingId(null);
+    setForm(blankForm);
+    setShowAdd(true);
+  };
+
+  const openEdit = (p: PrinterRow) => {
+    setEditingId(p.id);
+    setForm({
+      name: p.name,
+      printer_type: p.printer_type,
+      address: p.address,
+      language: p.language,
+      paper_width_mm: String(p.paper_width_mm ?? "80"),
+      dpi: String(p.dpi ?? "203"),
+    });
+    setShowAdd(true);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -187,45 +218,28 @@ export function PrinterSetupPage() {
   };
 
   const addPrinter = async () => {
-    if (!form.name.trim()) {
-      toast.error("Printer name is required");
+    const parsed = validatePrinterForm(form);
+    if (!parsed.ok) {
+      toast.error(parsed.error);
       return;
     }
-    if (!form.address.trim()) {
-      toast.error("Address / port is required");
-      return;
-    }
-    if (form.printer_type === "ipp" && !/^https?:\/\//i.test(form.address)) {
-      toast.error("IPP address must start with http:// or https://");
-      return;
-    }
-
+    const req = parsed.req;
     try {
-      await agent("add_printer", {
-        req: {
-          name: form.name.trim(),
-          printer_type: form.printer_type,
-          address: form.address.trim(),
-          language: form.language,
-          paper_width_mm: Number(form.paper_width_mm),
-          dpi: Number(form.dpi),
-        },
-      });
-      toast.success(`Added "${form.name.trim()}"`);
+      if (editingId === null) {
+        await agent("add_printer", { req });
+        toast.success(`Added "${form.name.trim()}"`);
+      } else {
+        await agent("update_printer", { id: editingId, req });
+        toast.success(`Saved "${form.name.trim()}"`);
+      }
       setShowAdd(false);
-      setForm({
-        name: "",
-        printer_type: "ipp",
-        address: "",
-        language: "pdf",
-        paper_width_mm: "80",
-        dpi: "203",
-      });
+      setEditingId(null);
+      setForm(blankForm);
       await load();
     } catch (e) {
       const msg = String(e);
       toast.error(
-        msg.includes("already exists") ? msg : `Failed to add printer: ${msg}`,
+        msg.includes("already exists") ? msg : `Failed to save printer: ${msg}`,
       );
     }
   };
@@ -336,6 +350,15 @@ export function PrinterSetupPage() {
           return (
             <div className="flex flex-wrap justify-end gap-2">
               <Button
+                variant="ghost"
+                size="icon"
+                aria-label={`Edit ${p.name}`}
+                title="Edit"
+                onClick={() => openEdit(p)}
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+              <Button
                 variant="outline"
                 size="sm"
                 disabled={testing === p.id}
@@ -399,7 +422,7 @@ export function PrinterSetupPage() {
           <Scan className="h-4 w-4" aria-hidden="true" />
           {scanning ? "Scanning…" : "Scan system"}
         </Button>
-        <Button size="sm" onClick={() => setShowAdd(true)}>
+        <Button size="sm" onClick={openAdd}>
           <Plus className="h-4 w-4" aria-hidden="true" />
           {t("printers.add_printer")}
         </Button>
@@ -430,7 +453,7 @@ export function PrinterSetupPage() {
                 tab === "all"
                   ? "Add a printer, or scan this computer for installed printers."
                   : "Add one, or pick another group.",
-              action: { label: "Add printer", onClick: () => setShowAdd(true) },
+              action: { label: "Add printer", onClick: openAdd },
             }}
           />
         </TabsContent>
@@ -452,10 +475,21 @@ export function PrinterSetupPage() {
       />
 
       {/* Setup lives in a side panel so the list stays in view */}
-      <Sheet open={showAdd} onOpenChange={setShowAdd}>
+      <Sheet
+        open={showAdd}
+        onOpenChange={(open) => {
+          setShowAdd(open);
+          if (!open) {
+            setEditingId(null);
+            setForm(blankForm);
+          }
+        }}
+      >
         <SheetContent className="flex w-full flex-col gap-0 overflow-y-auto p-0 sm:max-w-md">
           <DialogHeader className="border-b p-5 pr-12">
-            <DialogTitle>Add printer</DialogTitle>
+            <DialogTitle>
+              {editingId === null ? "Add printer" : "Edit printer"}
+            </DialogTitle>
             <DialogDescription>
               Connect a printer, then send a test page from the list.
             </DialogDescription>
@@ -572,40 +606,44 @@ export function PrinterSetupPage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div className={field}>
-                <Label htmlFor="printer-paper">Paper width</Label>
-                <Select
+                <Label htmlFor="printer-paper">Paper width (mm)</Label>
+                <Input
+                  id="printer-paper"
+                  type="number"
+                  min="1"
+                  max="1000"
+                  list="printer-paper-widths"
                   value={form.paper_width_mm}
-                  onValueChange={(v) =>
-                    setForm((f) => ({ ...f, paper_width_mm: v }))
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, paper_width_mm: e.target.value }))
                   }
-                >
-                  <SelectTrigger id="printer-paper" aria-label="Paper width">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAPERS.map((x) => (
-                      <SelectItem key={x.value} value={x.value}>
-                        {x.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                />
+                <datalist id="printer-paper-widths">
+                  {PAPERS.map((x) => (
+                    <option key={x.value} value={x.value}>
+                      {x.label}
+                    </option>
+                  ))}
+                </datalist>
               </div>
               <div className={field}>
                 <Label htmlFor="printer-dpi">DPI</Label>
-                <Select
+                <Input
+                  id="printer-dpi"
+                  type="number"
+                  min="50"
+                  max="2400"
+                  list="printer-dpis"
                   value={form.dpi}
-                  onValueChange={(v) => setForm((f) => ({ ...f, dpi: v }))}
-                >
-                  <SelectTrigger id="printer-dpi" aria-label="DPI">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="203">203</SelectItem>
-                    <SelectItem value="300">300</SelectItem>
-                    <SelectItem value="600">600</SelectItem>
-                  </SelectContent>
-                </Select>
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, dpi: e.target.value }))
+                  }
+                />
+                <datalist id="printer-dpis">
+                  <option value="203" />
+                  <option value="300" />
+                  <option value="600" />
+                </datalist>
               </div>
             </div>
           </div>

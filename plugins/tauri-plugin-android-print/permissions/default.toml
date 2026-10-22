@@ -1,0 +1,12 @@
+[default]
+description = "Default permissions for the Android print plugin"
+permissions = [
+  "allow-html-to-pdf",
+  "allow-enumerate-usb-printers",
+  "allow-test-printer",
+  "allow-start-background-service",
+  "allow-stop-background-service",
+  "allow-is-background-service-running",
+  "allow-request-battery-exemption",
+  "allow-is-battery-exemption-granted",
+]

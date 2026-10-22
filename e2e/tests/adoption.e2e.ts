@@ -1,7 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { apiMine, apiRegister } from "../support/api";
+import { apiMine, apiPutTemplate, apiRegister } from "../support/api";
 import { pc } from "../support/fixtures";
-import { readStackState } from "../support/stack-state";
 import { testids } from "../support/testids";
 
 // F14 (REFACTORING.md section 11): first sync of a migrated install.
@@ -13,45 +12,20 @@ import { testids } from "../support/testids";
 
 const PASSWORD = "password123";
 
-async function putTemplate(
-  apiUrl: string,
-  token: string,
-  id: string,
-  body: string,
-  ifRevision?: number,
-) {
-  const response = await fetch(`${apiUrl}/v2/templates/${id}`, {
-    method: "PUT",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      name: "Changed",
-      summary: "",
-      page_w_mm: 210,
-      page_h_mm: 297,
-      language: "html",
-      body,
-      css: "",
-      ...(ifRevision === undefined ? {} : { if_revision: ifRevision }),
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`PUT failed: ${response.status} ${await response.text()}`);
-  }
-  return (await response.json()) as { revision: number };
-}
-
 test("F14 first sync of a migrated install", async ({ browser }) => {
   test.setTimeout(240_000);
-  const { apiUrl } = readStackState();
-  const auth = await apiRegister(`f14-${Date.now().toString(36)}`, PASSWORD);
+  const auth = await apiRegister(
+    `f14-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    PASSWORD,
+  );
 
   // The server copy of a template this install tracked before the
   // cache existed; the local row carries a conflicting edit.
   const serverId = crypto.randomUUID();
-  await putTemplate(apiUrl, auth.token, serverId, "<p>server copy</p>");
+  await apiPutTemplate(auth.token, serverId, {
+    name: "Changed",
+    body: "<p>server copy</p>",
+  });
 
   const seeded = await pc(browser, {
     settings: { share_session_token: auth.token, install_migrated: "1" },
@@ -97,7 +71,7 @@ test("F14 first sync of a migrated install", async ({ browser }) => {
 
   // The changed row was not overwritten: it shows conflict, and the
   // server copy is untouched.
-  await expect(page.getByTestId("conflict-banner")).toBeVisible({
+  await expect(page.getByTestId(testids.conflictBanner)).toBeVisible({
     timeout: 30_000,
   });
   const kept = await page.evaluate(
@@ -116,4 +90,43 @@ test("F14 first sync of a migrated install", async ({ browser }) => {
   expect(kept.find((t) => t.name === "Changed")?.versions.at(-1)?.html).toBe(
     "<p>local edit</p>",
   );
+});
+
+test("F14 declining the backup leaves local templates alone", async ({
+  browser,
+}) => {
+  test.setTimeout(240_000);
+  const auth = await apiRegister(
+    `f14d-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    PASSWORD,
+  );
+
+  const seeded = await pc(browser, {
+    settings: { share_session_token: auth.token, install_migrated: "1" },
+    templates: [{ name: "Local only", html: "<p>mine</p>" }],
+  });
+  const page = await seeded.context.newPage();
+  await page.goto("/");
+  await expect(page.getByText("Back up 1 template to the server?")).toBeVisible(
+    { timeout: 30_000 },
+  );
+
+  // Declining dismisses the dialog and pushes nothing; the row stays
+  // local-only and the prompt does not return on reload.
+  await page.getByRole("button", { name: "Not now" }).click();
+  await expect(page.getByText("Back up 1 template to the server?")).toBeHidden({
+    timeout: 30_000,
+  });
+  await expect(async () => {
+    const mine = await apiMine(auth.token);
+    expect(mine.items.map((t) => t.name)).not.toContain("Local only");
+  }).toPass({ timeout: 30_000 });
+
+  await page.reload();
+  await expect(page.getByTestId(testids.shellApp)).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByText("Back up 1 template to the server?")).toBeHidden({
+    timeout: 15_000,
+  });
 });

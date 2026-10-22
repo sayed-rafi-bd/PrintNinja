@@ -94,6 +94,8 @@ export function HistoryPage() {
   const [confirm, setConfirm] = useState<
     | { kind: "bulk-reprint" }
     | { kind: "bulk-retry" }
+    | { kind: "reprint"; job: HistoryJob }
+    | { kind: "retry"; job: HistoryJob }
     | { kind: "delete"; job: HistoryJob }
     | null
   >(null);
@@ -153,12 +155,16 @@ export function HistoryPage() {
             job.source_url?.toLowerCase().includes(q) ||
             job.error?.toLowerCase().includes(q) ||
             job.id.toString().includes(q) ||
-            (job.batch_id != null && `batch ${job.batch_id}`.includes(q));
+            (job.batch_id != null && `batch ${job.batch_id}`.includes(q)) ||
+            printerName(job.printer_id).toLowerCase().includes(q) ||
+            (job.template_id != null &&
+              `template ${job.template_id}`.includes(q));
           if (!match) return false;
         }
         return true;
       }),
-    [store.jobs, store.filter],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [store.jobs, store.filter, printers],
   );
 
   const selectedJobs = filteredJobs.filter((j) => selected.has(String(j.id)));
@@ -183,6 +189,8 @@ export function HistoryPage() {
       toast.success(`Queued reprint of job #${job.id}`);
     } catch (e) {
       toast.error(`Reprint failed: ${e}`);
+    } finally {
+      setConfirm(null);
     }
   };
   const handleRetry = async (job: HistoryJob) => {
@@ -191,6 +199,8 @@ export function HistoryPage() {
       toast.success(`Job #${job.id} re-queued`);
     } catch (e) {
       toast.error(`Retry failed: ${e}`);
+    } finally {
+      setConfirm(null);
     }
   };
 
@@ -245,14 +255,64 @@ export function HistoryPage() {
       toast.error("Nothing to export");
       return;
     }
-    // RFC 4180 escaping: wrap in quotes and double any embedded quotes.
+    // Full-row export: everything the details dialog shows, with the
+    // printer name instead of a bare id. RFC 4180 escaping throughout.
     const esc = (v: unknown) => {
       const s = v === null || v === undefined ? "" : String(v);
       return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const headers = ["ID", "Status", "Source", "Printer", "Duration", "Error"];
+    const fmtTimings = (timingsJson: string | null) => {
+      if (!timingsJson) return "";
+      try {
+        const t = JSON.parse(timingsJson) as Record<string, unknown>;
+        return (
+          [
+            "fetch",
+            "template",
+            "layout",
+            "render",
+            "send",
+            "history",
+            "total",
+          ] as const
+        )
+          .map((k) => `${k}=${t[`${k}_ms`] ?? 0}ms`)
+          .join(" ");
+      } catch {
+        return timingsJson;
+      }
+    };
+    const headers = [
+      "ID",
+      "Status",
+      "Source",
+      "Printer",
+      "Template",
+      "Batch",
+      "Copies",
+      "Test",
+      "Started",
+      "Finished",
+      "DurationMs",
+      "Timings",
+      "Error",
+    ];
     const rows = filteredJobs.map((j) =>
-      [j.id, j.status, j.source, j.printer_id, j.duration_ms, j.error]
+      [
+        j.id,
+        j.status,
+        j.source,
+        printerName(j.printer_id),
+        j.template_id,
+        j.batch_id,
+        j.copies,
+        j.is_test ? "yes" : "no",
+        j.started_at,
+        j.finished_at,
+        j.duration_ms,
+        fmtTimings(j.timings_json),
+        j.error,
+      ]
         .map(esc)
         .join(","),
     );
@@ -404,7 +464,7 @@ export function HistoryPage() {
                 size="icon"
                 aria-label={`Reprint job ${job.id}`}
                 title={t("history.reprint")}
-                onClick={() => handleReprint(job)}
+                onClick={() => setConfirm({ kind: "reprint", job })}
               >
                 <RotateCcw className="h-4 w-4" />
               </Button>
@@ -412,7 +472,7 @@ export function HistoryPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => handleRetry(job)}
+                  onClick={() => setConfirm({ kind: "retry", job })}
                 >
                   {t("history.retry")}
                 </Button>
@@ -441,6 +501,7 @@ export function HistoryPage() {
     f.status !== "all",
     f.printer !== "all",
     f.source !== "all",
+    f.isTest !== null,
     !!f.dateFrom,
     !!f.dateTo,
   ].filter(Boolean).length;
@@ -448,6 +509,7 @@ export function HistoryPage() {
     f.status !== "all" ||
     f.printer !== "all" ||
     f.source !== "all" ||
+    f.isTest !== null ||
     !!f.dateFrom ||
     !!f.dateTo ||
     !!f.search;
@@ -539,6 +601,26 @@ export function HistoryPage() {
               </SelectContent>
             </Select>
             <Select
+              value={f.isTest === null ? "all" : f.isTest ? "yes" : "no"}
+              onValueChange={(v) =>
+                store.setFilter({
+                  isTest: v === "all" ? null : v === "yes",
+                })
+              }
+            >
+              <SelectTrigger
+                aria-label="Filter test jobs"
+                className="w-full sm:w-[130px]"
+              >
+                <SelectValue placeholder="Test jobs" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All jobs</SelectItem>
+                <SelectItem value="yes">Test only</SelectItem>
+                <SelectItem value="no">Hide test</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
               value={f.printer}
               onValueChange={(v) => store.setFilter({ printer: v })}
             >
@@ -568,14 +650,14 @@ export function HistoryPage() {
             <Input
               type="date"
               aria-label="From date"
-              className="w-full sm:w-[140px]"
+              className="w-full sm:w-[150px]"
               value={f.dateFrom}
               onChange={(e) => store.setFilter({ dateFrom: e.target.value })}
             />
             <Input
               type="date"
               aria-label="To date"
-              className="w-full sm:w-[140px]"
+              className="w-full sm:w-[150px]"
               value={f.dateTo}
               onChange={(e) => store.setFilter({ dateTo: e.target.value })}
             />
@@ -703,6 +785,30 @@ export function HistoryPage() {
         confirmLabel="Retry"
         busy={busy}
         onConfirm={() => runBulk(retryOne, selectedFailed, "Re-queued")}
+      />
+      <ConfirmDialog
+        open={confirm?.kind === "reprint"}
+        onOpenChange={(o) => !o && setConfirm(null)}
+        title={
+          confirm?.kind === "reprint" ? `Reprint job #${confirm.job.id}?` : ""
+        }
+        description="The job is sent to its printer again."
+        confirmLabel="Reprint"
+        busy={busy}
+        onConfirm={() =>
+          confirm?.kind === "reprint" ? handleReprint(confirm.job) : undefined
+        }
+      />
+      <ConfirmDialog
+        open={confirm?.kind === "retry"}
+        onOpenChange={(o) => !o && setConfirm(null)}
+        title={confirm?.kind === "retry" ? `Retry job #${confirm.job.id}?` : ""}
+        description="The failed job is queued to print again."
+        confirmLabel="Retry"
+        busy={busy}
+        onConfirm={() =>
+          confirm?.kind === "retry" ? handleRetry(confirm.job) : undefined
+        }
       />
       <ConfirmDialog
         open={confirm?.kind === "delete"}

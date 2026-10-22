@@ -590,6 +590,96 @@ fn font_upload_refuses_the_wrong_content() {
 }
 
 #[test]
+fn sync_rejects_fonts_with_bad_format_or_size() {
+    use printninja_lib::commands::cache::ApplyReport;
+    use printninja_lib::commands::font::{apply_font_upsert, FontDataIn};
+    let conn = db();
+    let bad_format = FontDataIn {
+        id: "srv-x".into(),
+        name: "X".into(),
+        format: "exe".into(),
+        size_bytes: 10,
+        sha256: "0".repeat(64),
+        revision: 1,
+    };
+    let mut report = ApplyReport {
+        applied_upserts: 0,
+        applied_deletes: 0,
+        skipped_dirty: 0,
+    };
+    // No commit: the transaction rolls back on drop, like a failed page.
+    let tx = conn.unchecked_transaction().unwrap();
+    let err = apply_font_upsert(&tx, &bad_format, &mut report).unwrap_err();
+    assert!(
+        format!("{err:?}").contains("format"),
+        "bad format must fail loudly: {err:?}"
+    );
+    let bad_size = FontDataIn {
+        size_bytes: -5,
+        format: "ttf".into(),
+        ..bad_format
+    };
+    let err = apply_font_upsert(&tx, &bad_size, &mut report).unwrap_err();
+    assert!(
+        format!("{err:?}").contains("size"),
+        "bad size must fail loudly: {err:?}"
+    );
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM fonts", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 0, "rejected rows must not be stored");
+}
+
+#[test]
+fn font_upload_refuses_oversize_files() {
+    let mut huge = vec![0x00, 0x01, 0x00, 0x00];
+    huge.resize(font::MAX_FONT_BYTES + 1, 0xAA);
+    let err = font::check_upload_bytes("huge.ttf", &huge).unwrap_err();
+    assert!(
+        format!("{err:?}").contains("max"),
+        "oversize must name the cap: {err:?}"
+    );
+    // Exactly at the cap is accepted.
+    huge.resize(font::MAX_FONT_BYTES, 0xAA);
+    assert!(font::check_upload_bytes("huge.ttf", &huge).is_ok());
+}
+
+#[test]
+fn font_sweep_removes_only_unreferenced_files() {
+    let conn = db();
+    let dir = font::fonts_dir_for_tests();
+    std::fs::create_dir_all(&dir).unwrap();
+    // Referenced by absolute path (old rows) and by bare name.
+    std::fs::write(dir.join("keep-abs.ttf"), b"keep").unwrap();
+    std::fs::write(dir.join("keep-rel.otf"), b"keep").unwrap();
+    std::fs::write(dir.join("orphan.woff"), b"drop").unwrap();
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    for (name, path) in [
+        (
+            "Abs",
+            dir.join("keep-abs.ttf").to_string_lossy().to_string(),
+        ),
+        ("Rel", "keep-rel.otf".to_string()),
+    ] {
+        conn.execute(
+            "INSERT INTO fonts (family, style, weight, file_path, format, server_id, sync_state)
+             VALUES (?1, 'normal', '400', ?2, 'ttf', lower(hex(randomblob(16))), 'synced')",
+            rusqlite::params![name, path],
+        )
+        .unwrap();
+    }
+    let removed = font::sweep_orphan_font_files(&conn, &dir).expect("sweep works");
+    assert_eq!(removed, 1);
+    assert!(dir.join("keep-abs.ttf").exists());
+    assert!(dir.join("keep-rel.otf").exists());
+    assert!(!dir.join("orphan.woff").exists());
+    assert!(dir.join("sub").exists(), "directories are never removed");
+    // Missing dir is fine (fresh install, nothing to sweep).
+    let missing = dir.join("nope");
+    assert_eq!(font::sweep_orphan_font_files(&conn, &missing).unwrap(), 0);
+}
+
+#[test]
 fn font_store_verifies_the_hash() {
     let conn = db();
     let dir = font::fonts_dir_for_tests();
@@ -620,7 +710,9 @@ fn font_store_verifies_the_hash() {
         .unwrap();
     assert_eq!(size, 6);
     assert_eq!(state, "ready");
-    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    // Stored as a bare filename; the directory resolves at use.
+    assert_eq!(path, format!("{server_id}.ttf"));
+    assert_eq!(std::fs::read(dir.join(&path)).unwrap(), bytes);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -646,17 +738,47 @@ fn font_cache_roundtrip_and_forget_removes_the_file() {
     assert_eq!(font::list_synced_fonts(&conn).unwrap().len(), 1);
 
     // Forget removes the row and its bytes.
-    let path: String = conn
+    let stored: String = conn
         .query_row(
             "SELECT file_path FROM fonts WHERE server_id = ?1",
             [&server_id],
             |r| r.get(0),
         )
         .unwrap();
-    assert!(font::forget_font(&conn, &server_id).unwrap());
-    assert!(!std::path::Path::new(&path).exists());
-    assert!(!font::forget_font(&conn, &server_id).unwrap());
+    let on_disk = dir.join(&stored);
+    assert!(on_disk.exists(), "bytes must be on disk before forget");
+    assert!(font::forget_font(&conn, dir.as_path(), &server_id).unwrap());
+    assert!(!on_disk.exists(), "forget must remove the bytes");
+    assert!(!font::forget_font(&conn, dir.as_path(), &server_id).unwrap());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn font_paths_survive_a_profile_move() {
+    // Old rows hold absolute paths. After a move/restore the absolute
+    // location is dead, but the basename still resolves in the new dir.
+    let conn = db();
+    let old_dir = font::fonts_dir_for_tests();
+    let new_dir = font::fonts_dir_for_tests();
+    std::fs::create_dir_all(&old_dir).unwrap();
+    std::fs::create_dir_all(&new_dir).unwrap();
+    let bytes = vec![0x00, 0x01, 0x00, 0x00, 0xAA];
+    let stale = old_dir.join("dead.ttf");
+    std::fs::write(&stale, &bytes).unwrap();
+    let server_id = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO fonts (family, style, weight, file_path, format,
+                server_id, sync_state, sha256, size_bytes)
+         VALUES ('Old', 'normal', '400', ?1, 'ttf', ?2, 'synced', 'x', 5)",
+        rusqlite::params![stale.to_string_lossy().to_string(), server_id],
+    )
+    .unwrap();
+    // The file also exists under the new profile dir (restored backup).
+    std::fs::write(new_dir.join("dead.ttf"), &bytes).unwrap();
+    let read = font::read_font_file(&conn, &new_dir, &server_id).expect("resolves by basename");
+    assert_eq!(read, bytes);
+    let _ = std::fs::remove_dir_all(&old_dir);
+    let _ = std::fs::remove_dir_all(&new_dir);
 }
 
 #[test]
@@ -688,7 +810,7 @@ fn clear_account_wipes_the_library() {
     font::store_font_file_bytes(&conn, &dir, &server_id, &bytes).unwrap();
     settings::write_setting(&conn, "ui_density", "compact").unwrap();
 
-    clear_account(&conn).unwrap();
+    clear_account(&conn, dir.as_path()).unwrap();
 
     for table in ["synced_datasets", "synced_profiles", "fonts"] {
         let n: i64 = conn

@@ -12,7 +12,7 @@ import { testids } from "../support/testids";
 test("F13 no network at print time", async ({ browser }) => {
   const { apiUrl } = readStackState();
   const auth = await apiRegister(
-    `f13-${Date.now().toString(36)}`,
+    `f13-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
     "password123",
   );
   const seeded = await pc(browser, {

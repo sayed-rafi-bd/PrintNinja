@@ -5,7 +5,7 @@
 // account allow-list matches the server (ui_density, brand_name,
 // brand_logo); device keys are never dirty.
 
-import { getSetting, setSetting } from "./store.js";
+import { getSetting, seedPrinters, setSetting } from "./store.js";
 import type { ApplyReport } from "./cache.js";
 
 export const ACCOUNT_SETTING_KEYS = ["ui_density", "brand_name", "brand_logo"];
@@ -50,6 +50,9 @@ export interface FakeFontRow {
 export interface FakePrinterRow {
   id: number;
   name: string;
+  printer_type: string;
+  address: string;
+  language: string;
 }
 
 const DATASETS_KEY = "fake-agent:datasets";
@@ -162,19 +165,26 @@ export function createFakeLibrary(deps: {
   const persistedPrinters = readRows<FakePrinterRow>(PRINTERS_KEY);
   if (persistedPrinters) {
     for (const row of persistedPrinters) {
-      printers.set(row.id, row);
+      printers.set(row.id, {
+        id: row.id,
+        name: row.name,
+        printer_type: row.printer_type ?? "ipp",
+        address: row.address ?? "",
+        language: row.language ?? "pdf",
+      });
       nextPrinterId = Math.max(nextPrinterId, row.id + 1);
     }
   } else {
     try {
-      const seed = JSON.parse(
-        localStorage.getItem("fake-agent:seed") ?? "{}",
-      ) as {
-        printers?: Array<{ name?: string }>;
-      };
-      for (const p of seed.printers ?? []) {
+      for (const p of seedPrinters()) {
         const id = nextPrinterId++;
-        printers.set(id, { id, name: String(p.name ?? `E2E Printer ${id}`) });
+        printers.set(id, {
+          id,
+          name: String(p["name"] ?? `E2E Printer ${id}`),
+          printer_type: String(p["printer_type"] ?? "ipp"),
+          address: String(p["address"] ?? ""),
+          language: String(p["language"] ?? "pdf"),
+        });
       }
       if (printers.size > 0) persistAll();
     } catch {
@@ -223,6 +233,69 @@ export function createFakeLibrary(deps: {
     return row.server_id;
   };
 
+  function upsertPrinter(
+    id: number | undefined,
+    input: {
+      name: string;
+      printer_type?: string;
+      address?: string;
+      language?: string;
+    },
+  ): FakePrinterRow {
+    // Mirrors the Rust validation in commands/printer.rs so the
+    // printers spec pins the same error paths: empty name, unknown
+    // type/language, and case-insensitive duplicate names. Updates
+    // exclude the edited row from the duplicate check.
+    const name = (input.name ?? "").trim();
+    if (!name) {
+      throw new Error("Printer name required");
+    }
+    const printer_type = input.printer_type ?? "ipp";
+    if (
+      !["ipp", "raw_tcp", "usb", "bluetooth", "system"].includes(printer_type)
+    ) {
+      throw new Error(
+        `Invalid printer type '${printer_type}'. Expected one of ["ipp", "raw_tcp", "usb", "bluetooth", "system"]`,
+      );
+    }
+    const language = input.language ?? "pdf";
+    if (
+      !["pdf", "escpos", "tspl", "zpl", "cpcl", "raster"].includes(language)
+    ) {
+      throw new Error(
+        `Invalid language '${language}'. Expected one of ["pdf", "escpos", "tspl", "zpl", "cpcl", "raster"]`,
+      );
+    }
+    const lower = name.toLowerCase();
+    for (const row of printers.values()) {
+      if (row.id !== id && row.name.toLowerCase() === lower) {
+        throw new Error(`A printer named '${name}' already exists`);
+      }
+    }
+    if (id === undefined) {
+      const created: FakePrinterRow = {
+        id: nextPrinterId++,
+        name,
+        printer_type,
+        address: input.address ?? "",
+        language,
+      };
+      printers.set(created.id, created);
+      persistAll();
+      return created;
+    }
+    const row = printers.get(id);
+    if (!row) {
+      throw new Error(`Printer ${id} not found`);
+    }
+    row.name = name;
+    row.printer_type = printer_type;
+    if (input.address !== undefined) row.address = input.address;
+    row.language = language;
+    persistAll();
+    return row;
+  }
+
   return {
     /** Test seam: the raw stores plus id allocators. */
     _store: {
@@ -241,12 +314,24 @@ export function createFakeLibrary(deps: {
     listPrinters(): FakePrinterRow[] {
       return [...printers.values()];
     },
-    addPrinter(name: string): FakePrinterRow {
-      const id = nextPrinterId++;
-      const row = { id, name };
-      printers.set(id, row);
-      persistAll();
-      return row;
+    addPrinter(input: {
+      name: string;
+      printer_type?: string;
+      address?: string;
+      language?: string;
+    }): FakePrinterRow {
+      return upsertPrinter(undefined, input);
+    },
+    updatePrinter(
+      id: number,
+      input: {
+        name: string;
+        printer_type?: string;
+        address?: string;
+        language?: string;
+      },
+    ): FakePrinterRow {
+      return upsertPrinter(id, input);
     },
     deletePrinter(id: number): void {
       // No foreign keys: profiles keyed at this printer stay dormant.
@@ -837,10 +922,13 @@ export function createFakeLibrary(deps: {
       throw new Error(`unsupported sync entity '${entity}'`);
     },
 
-    clearLibrary(): void {
+    clearLibrary(includePrinters = false): void {
       datasets.clear();
       profiles.clear();
       fonts.clear();
+      if (includePrinters) {
+        printers.clear();
+      }
       dirtySettings.clear();
       persistAll();
     },

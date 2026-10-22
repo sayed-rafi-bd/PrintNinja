@@ -146,7 +146,11 @@ function tidy(css: string): string {
 }
 
 const MEMO_LIMIT = 24;
-const memo = new Map<string, Promise<string>>();
+// Settled results stay cached; in-flight compiles are shared but never
+// evicted out from under their waiters (the old code dropped the oldest
+// entry blindly, so a burst could discard a compile still running and
+// redo the work on the next call).
+const memo = new Map<string, { promise: Promise<string>; settled: boolean }>();
 
 async function build(candidates: string[]): Promise<string> {
   // A fresh compiler per call: `build()` is incremental and would otherwise
@@ -174,20 +178,44 @@ export async function compileTemplateCss(
   const { candidates } = extractClasses(html);
   const key = classSetKey(candidates);
 
-  let pending = memo.get(key);
-  if (!pending) {
-    pending = build(candidates);
-    memo.set(key, pending);
+  let entry = memo.get(key);
+  if (!entry) {
+    const fresh: { promise: Promise<string>; settled: boolean } = {
+      promise: build(candidates),
+      settled: false,
+    };
+    entry = fresh;
+    // Refresh recency: re-insert so a hit template is not evicted first.
+    memo.delete(key);
+    memo.set(key, entry);
+    fresh.promise.then(
+      () => {
+        fresh.settled = true;
+      },
+      () => {
+        // Failures are not cached: callers fall back to the shared bundle
+        // and a later call may succeed.
+        if (memo.get(key) === fresh) memo.delete(key);
+      },
+    );
     if (memo.size > MEMO_LIMIT) {
-      const oldest = memo.keys().next().value;
-      if (oldest !== undefined) memo.delete(oldest);
+      // Evict the oldest *settled* entry; in-flight work is never dropped.
+      for (const [k, v] of memo) {
+        if (v.settled) {
+          memo.delete(k);
+          break;
+        }
+      }
     }
+  } else {
+    // Refresh recency on hits too.
+    memo.delete(key);
+    memo.set(key, entry);
   }
 
   try {
-    return { css: await pending, key };
+    return { css: await entry.promise, key };
   } catch (e) {
-    memo.delete(key);
     console.warn("Template CSS compile failed; using the shared bundle:", e);
     return { css: "", key: "" };
   }

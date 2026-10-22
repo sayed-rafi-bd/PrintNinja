@@ -13,6 +13,7 @@ export const ERROR_CODES = [
   "revision_conflict",
   "revision_required",
   "quota_exceeded",
+  "service_unavailable",
   "rate_limited",
   "internal_error",
 ] as const;
@@ -100,6 +101,22 @@ export class RevisionRequiredError extends DomainError {
 export class QuotaExceededError extends DomainError {
   constructor(message: string) {
     super("quota_exceeded", 409, message);
+  }
+}
+
+/** A per-window budget is spent (daily use-count cap). Retrying after
+ * the window rolls over is the fix; the message says which window. */
+export class RateLimitedError extends DomainError {
+  constructor(message = "Too many requests") {
+    super("rate_limited", 429, message);
+  }
+}
+
+/** A dependency the request needs is down (database for /v2/ready).
+ * Message names the dependency; no details. */
+export class ServiceUnavailableError extends DomainError {
+  constructor(message: string) {
+    super("service_unavailable", 503, message);
   }
 }
 

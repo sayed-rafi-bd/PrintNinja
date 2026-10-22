@@ -24,6 +24,12 @@ export const testids = {
   offlineBanner: "offline-banner",
   /** Banner on Templates when rows are conflicted. */
   conflictBanner: "conflict-banner",
+  /** Designer version row N (parameterized in the app). */
+  versionRow: (versionNo: number) => `version-row-${versionNo}`,
+  /** Settings font row id (parameterized in the app). */
+  fontRow: (id: number | string) => `font-row-${id}`,
+  /** Prefix for "any font row" locators. */
+  fontRowPrefix: "font-row-",
   /** The three-way conflict dialog. */
   conflictDialog: "conflict-dialog",
   /** Conflict dialog: keep pushing the local edits. */
@@ -46,6 +52,12 @@ export const testids = {
   templateUnpublish: "template-unpublish",
   /** Designer version panel: list container. */
   versionList: "version-list",
+  /** Designer version row N diff viewer opener. */
+  versionDiff: (versionNo: number) => `version-diff-${versionNo}`,
+  /** Designer version row N restore button. */
+  versionRestore: (versionNo: number) => `version-restore-${versionNo}`,
+  /** Designer version row N delete button. */
+  versionDelete: (versionNo: number) => `version-delete-${versionNo}`,
   /** Save-version dialog: label input. */
   versionLabel: "version-label",
   /** Designer actions: open the save-version dialog. */
@@ -60,6 +72,23 @@ export const testids = {
   settingsLogoUpload: "settings-logo-upload",
   /** Settings local API: port field (device-local, never syncs). */
   settingsApiPort: "settings-api-port",
+  /** Settings background: launch at startup toggle. */
+  settingsLaunchAtStartup: "settings-launch-at-startup",
+  /** Settings background: start minimized toggle. */
+  settingsStartMinimized: "settings-start-minimized",
+  /** Settings background: minimize-to-tray toggle. */
+  settingsMinimizeToTray: "settings-minimize-to-tray",
+  /** Settings background: close-to-tray toggle. */
+  settingsCloseToTray: "settings-close-to-tray",
+  /** Settings background (Android only): battery exemption button. */
+  settingsBatteryExemption: "settings-battery-exemption",
   /** Settings fonts: upload button. */
   settingsFontUpload: "settings-font-upload",
+  /** Settings retention: open the full-reset confirmation. */
+  settingsResetDatabase: "settings-reset-database",
+  /** Settings share: change-password fields and submit. */
+  settingsChangePasswordCurrent: "settings-change-password-current",
+  settingsChangePasswordNew: "settings-change-password-new",
+  settingsChangePasswordConfirm: "settings-change-password-confirm",
+  settingsChangePasswordSubmit: "settings-change-password-submit",
 } as const;

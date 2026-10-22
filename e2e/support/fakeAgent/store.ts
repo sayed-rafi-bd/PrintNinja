@@ -32,26 +32,35 @@ function defaultSettings(): Record<string, string | null> {
 
 export const SEED_KEY = "fake-agent:seed";
 
+/** Reads the one-shot seed. Fixtures write it base64-encoded (raw JSON
+ * breaks the init script on quotes and </script>); raw JSON still
+ * parses for hand-written seeds and older bundles. */
+function readSeedValue(): AgentSeed {
+  try {
+    const raw = localStorage.getItem(SEED_KEY);
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw) as AgentSeed;
+    } catch {
+      return JSON.parse(atob(raw)) as AgentSeed;
+    }
+  } catch {
+    return {};
+  }
+}
+
 function loadSeed(): AgentSeed {
   // One-shot: the bundle entry removes the key after every module has
   // evaluated, so settings and templates hydrate from the same seed
   // regardless of module evaluation order.
-  try {
-    const raw = localStorage.getItem(SEED_KEY);
-    if (!raw) return {};
-    return JSON.parse(raw) as AgentSeed;
-  } catch {
-    return {};
-  }
+  return readSeedValue();
 }
 
 /** Templates pre-seeded for this context (F-series specs). Read live so
  * unit tests can seed after import; the bundle consumes the key once. */
 export function seedTemplates(): Array<Record<string, unknown>> {
   try {
-    const raw = localStorage.getItem(SEED_KEY);
-    if (!raw) return [];
-    const seed = JSON.parse(raw) as AgentSeed;
+    const seed = readSeedValue();
     return Array.isArray(seed.templates) ? seed.templates : [];
   } catch {
     return [];
@@ -61,9 +70,7 @@ export function seedTemplates(): Array<Record<string, unknown>> {
 /** System printers pre-seeded for this context (F-series specs). */
 export function seedPrinters(): Array<Record<string, unknown>> {
   try {
-    const raw = localStorage.getItem(SEED_KEY);
-    if (!raw) return [];
-    const seed = JSON.parse(raw) as AgentSeed;
+    const seed = readSeedValue();
     return Array.isArray(seed.printers) ? seed.printers : [];
   } catch {
     return [];
@@ -101,6 +108,13 @@ export function getSetting(key: string): string | null {
 
 export function setSetting(key: string, value: string | null): void {
   state.settings[key] = value;
+  save();
+}
+
+/** Wipe every setting, including the seeded defaults: a full reset
+ * leaves no account, no server address and no onboarding flag behind. */
+export function clearAllSettings(): void {
+  state.settings = {};
   save();
 }
 

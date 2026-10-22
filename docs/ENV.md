@@ -6,18 +6,19 @@ this file explains what each one does.
 
 ## Which file goes where
 
-Nothing loads any of these automatically — except docker compose, which
-reads `server/.env` on its own (it sits next to
-`server/docker-compose.yml`).
+There is exactly one live env file: **`server/.env`** (next to
+`server/docker-compose.yml`). Compose reads it on its own; local server
+runs use `node --env-file=.env` from `server/`. There is intentionally
+no root `.env`: Vite needs no variables, and dev scripts default
+`BASE_URL` to `http://localhost:1420` when unset (set it in a root
+`.env` you create yourself only to override that).
 
 | Run | Env source |
 | --- | --- |
 | `docker compose up` (from `server/`) | `server/.env` (copy `server/env.example`) |
 | Local server (`node --env-file=.env`, from `server/`) | `server/.env` |
-| Dev scripts from the repo root | `./.env`, loaded by hand (`set -a; . ./.env; set +a`) |
-| Vite dev (`pnpm dev`) | `./.env`, loaded by Vite itself |
 
-Never commit any `.env` file.
+Never commit any `.env` file (`server/.env` is gitignored).
 
 ## Database
 
@@ -115,8 +116,8 @@ passwords still verify and are rehashed to `argon2id` on first login.)
 ## Docs and logging
 
 ### `DOCS_ENABLED`
-Serve `/docs` and `/openapi.json`. Default: `true`; consider `false`
-in production.
+Serve `/docs` and `/openapi.json`. Default: `false`; set `true`
+explicitly for a dev/staging host that needs the browser UI.
 
 ### `LOG_LEVEL`
 Pino log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`.

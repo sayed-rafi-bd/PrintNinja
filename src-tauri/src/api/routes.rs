@@ -56,8 +56,13 @@ pub fn router_with_state(state: ApiState, lan_access: bool) -> Router {
         .route("/v1/jobs", get(list_jobs))
         .route("/v1/jobs/{id}", get(get_job).delete(cancel_job))
         .route("/v1/jobs/{id}/retry", post(retry_job))
+        .route("/v1/metrics", get(metrics))
+        .route("/v1/metrics/prometheus", get(metrics_prometheus))
         .route("/v1/openapi.json", get(openapi))
         .with_state(state.clone())
+        // Per-request spans (method, path, status, latency): the only way
+        // to join a slow print across middleware and handler in the logs.
+        .layer(tower_http::trace::TraceLayer::new_for_http())
         .layer(middleware::from_fn(
             move |req: axum::extract::Request, next: Next| {
                 let auth = auth_ctx.clone();
@@ -246,11 +251,26 @@ use axum::response::IntoResponse;
 
 // ── Handlers ────────────────────────────────────────────────────────────────
 
-async fn health() -> Json<Value> {
+/// Liveness plus the dependencies a print needs: the database answers
+/// and the queue lock is acquirable. A wedged DB (or a poisoned lock)
+/// reports degraded instead of a lying "ok".
+async fn health(State(state): State<ApiState>) -> Json<Value> {
+    let db_ok = state
+        .db
+        .lock()
+        .ok()
+        .and_then(|guard| {
+            guard
+                .connection()
+                .query_row("SELECT 1", [], |_| Ok(()))
+                .ok()
+        })
+        .is_some();
     Json(json!({
-        "status": "ok",
+        "status": if db_ok { "ok" } else { "degraded" },
         "version": env!("CARGO_PKG_VERSION"),
-        "app": "PrintNinja"
+        "app": "PrintNinja",
+        "db": if db_ok { "up" } else { "down" },
     }))
 }
 
@@ -433,6 +453,15 @@ async fn print_job(
         fit_mode: settings
             .get("fit")
             .and_then(|f| f.as_str())
+            .map(str::to_string),
+        page_range: settings
+            .get("page_range")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        grayscale: settings.get("grayscale").and_then(|v| v.as_bool()),
+        http_method: settings
+            .get("http_method")
+            .and_then(|v| v.as_str())
             .map(str::to_string),
         template_id,
         template_version_id: version_id,
@@ -737,8 +766,88 @@ async fn cancel_job(
             "Job is not cancellable (already started or finished)".into(),
         ));
     }
+    crate::metrics::count_finished("cancelled");
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Operational counters for dashboards and smoke checks: jobs by
+/// status, active batches, and printers the queue currently serialises.
+/// One GROUP BY plus two cheap counts — no per-row work.
+/// Shared by the JSON and Prometheus renderings: job counts per
+/// status plus the number of batches still printing.
+fn read_metric_counts(
+    state: &ApiState,
+) -> Result<(std::collections::HashMap<String, i64>, i64), ApiRejection> {
+    let guard = state.db.lock().map_err(ApiRejection::from)?;
+    let conn = guard.connection();
+
+    let mut by_status: std::collections::HashMap<String, i64> = [
+        ("queued", 0),
+        ("printing", 0),
+        ("success", 0),
+        ("failed", 0),
+        ("cancelled", 0),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), *v))
+    .collect();
+    let mut stmt = conn
+        .prepare("SELECT status, COUNT(*) FROM print_jobs GROUP BY status")
+        .map_err(ApiRejection::from)?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map_err(ApiRejection::from)?;
+    for row in rows {
+        let (status, count) = row.map_err(ApiRejection::from)?;
+        by_status.insert(status, count);
+    }
+    let batches_active: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM batches WHERE status IN ('queued', 'printing')",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(ApiRejection::from)?;
+    Ok((by_status, batches_active))
+}
+
+/// Operational counters for dashboards and smoke checks: jobs by
+/// status, active batches, and printers the queue currently serialises.
+/// One GROUP BY plus two cheap counts — no per-row work.
+async fn metrics(State(state): State<ApiState>) -> Result<Json<Value>, ApiRejection> {
+    let (by_status, batches_active) = read_metric_counts(&state)?;
+
+    let finished = crate::metrics::finished_counts();
+    Ok(Json(json!({
+        "jobs": by_status,
+        "batches": { "active": batches_active },
+        "printers": { "tracked": state.queue.tracked_printers().await },
+        "completed": {
+            "success": finished.0,
+            "failed": finished.1,
+            "cancelled": finished.2,
+        },
+    })))
+}
+
+/// Prometheus text exposition (no client library: the shape is three
+/// gauges and the label set is a fixed enum, so rendering is trivial).
+/// Same numbers as `/v1/metrics`, scrapable by any collector.
+async fn metrics_prometheus(State(state): State<ApiState>) -> impl IntoResponse {
+    let (by_status, batches_active) = read_metric_counts(&state)?;
+    let tracked = state.queue.tracked_printers().await;
+    let finished = crate::metrics::finished_counts();
+    let out = crate::metrics::render_prometheus(&by_status, batches_active, tracked, finished);
+    Ok::<_, ApiRejection>((
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
+        out,
+    ))
 }
 
 async fn openapi() -> Json<Value> {

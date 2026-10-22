@@ -178,3 +178,165 @@ export function apiVersion(
     token,
   });
 }
+
+export interface ApiPutTemplateInput {
+  name: string;
+  summary?: string;
+  page_w_mm?: number;
+  page_h_mm?: number;
+  language?: string;
+  body: string;
+  css?: string;
+  readme?: string;
+  if_revision?: number;
+}
+
+export function apiPutTemplate(
+  token: string,
+  id: string,
+  input: ApiPutTemplateInput,
+): Promise<{ id: string; revision: number }> {
+  const { if_revision, name, ...rest } = input;
+  return request("PUT", `/v2/templates/${id}`, {
+    token,
+    body: {
+      name,
+      summary: "",
+      page_w_mm: 210,
+      page_h_mm: 297,
+      language: "html",
+      css: "",
+      ...rest,
+      ...(if_revision === undefined ? {} : { if_revision }),
+    },
+  });
+}
+
+export function apiPublish(
+  token: string,
+  id: string,
+): Promise<{ id: string; revision: number }> {
+  return request("POST", `/v2/templates/${id}/publish`, { token });
+}
+
+export function apiUnpublish(
+  token: string,
+  id: string,
+): Promise<{ id: string; revision: number }> {
+  return request("POST", `/v2/templates/${id}/unpublish`, { token });
+}
+
+export function apiSaveTemplate(token: string, id: string): Promise<void> {
+  return request("PUT", `/v2/saved/${id}`, { token });
+}
+
+export function apiUnsaveTemplate(token: string, id: string): Promise<void> {
+  return request("DELETE", `/v2/saved/${id}`, { token });
+}
+
+export function apiPutDataset(
+  token: string,
+  id: string,
+  input: { name: string; dataJson?: string; if_revision?: number },
+): Promise<{ id: string; revision: number }> {
+  const { if_revision, ...rest } = input;
+  return request("PUT", `/v2/datasets/${id}`, {
+    token,
+    body: {
+      ...rest,
+      ...(if_revision === undefined ? {} : { if_revision }),
+    },
+  });
+}
+
+export function apiDeleteDataset(token: string, id: string): Promise<void> {
+  return request("DELETE", `/v2/datasets/${id}`, { token });
+}
+
+export function apiPutProfile(
+  token: string,
+  id: string,
+  input: {
+    template_id: string;
+    printer_name: string;
+    settings_json?: string;
+    if_revision?: number;
+  },
+): Promise<{ id: string; revision: number }> {
+  const { if_revision, ...rest } = input;
+  return request("PUT", `/v2/profiles/${id}`, {
+    token,
+    body: {
+      ...rest,
+      ...(if_revision === undefined ? {} : { if_revision }),
+    },
+  });
+}
+
+export function apiDeleteProfile(token: string, id: string): Promise<void> {
+  return request("DELETE", `/v2/profiles/${id}`, { token });
+}
+
+export function apiPutSetting(
+  token: string,
+  key: string,
+  value: string,
+): Promise<{ key: string; value: string }> {
+  return request("PUT", `/v2/settings/${key}`, { token, body: { value } });
+}
+
+export function apiDeleteSetting(token: string, key: string): Promise<void> {
+  return request("DELETE", `/v2/settings/${key}`, { token });
+}
+
+export function apiPutFont(
+  token: string,
+  id: string,
+  input: { name: string; if_revision?: number },
+): Promise<{ id: string; revision: number }> {
+  const { if_revision, ...rest } = input;
+  return request("PUT", `/v2/fonts/${id}`, {
+    token,
+    body: {
+      ...rest,
+      ...(if_revision === undefined ? {} : { if_revision }),
+    },
+  });
+}
+
+/** Raw octet-stream upload (the JSON helper cannot carry font bytes). */
+export async function apiPutFontFile(
+  token: string,
+  id: string,
+  bytes: Uint8Array,
+): Promise<{ id: string; size_bytes: number }> {
+  const response = await fetch(`${apiUrl()}/v2/fonts/${id}/file`, {
+    method: "PUT",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/octet-stream",
+    },
+    body: bytes as unknown as BodyInit,
+  });
+  if (response.ok) {
+    return (await response.json().catch(() => ({}))) as {
+      id: string;
+      size_bytes: number;
+    };
+  }
+  const payload = (await response.json().catch(() => ({}))) as {
+    error?: { code?: string; message?: string };
+  };
+  throw Object.assign(
+    new Error(
+      `API PUT /v2/fonts/${id}/file: ${response.status} ${payload.error?.code ?? response.statusText}`,
+    ),
+    {
+      apiError: {
+        status: response.status,
+        code: payload.error?.code ?? "unknown",
+        message: payload.error?.message ?? response.statusText,
+      } satisfies ApiError,
+    },
+  );
+}

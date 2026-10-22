@@ -136,6 +136,16 @@ export interface TemplateRepository {
   /** Adds to use_count for a published template only. False means
    * missing or private — the domain answers 404 either way. */
   incrementUseCount(id: string, by: number): Promise<boolean>;
+  /** UTC-day counter behind the per-user use cap. Returns the day's new
+   * total for this user and template. */
+  addDailyUse(
+    userId: string,
+    templateId: string,
+    day: Date,
+    by: number,
+  ): Promise<number>;
+  /** Reads the UTC-day counter without writing. */
+  getDailyUse(userId: string, templateId: string, day: Date): Promise<number>;
   listVersions(
     templateId: string,
     query: PageQuery,

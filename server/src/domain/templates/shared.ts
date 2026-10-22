@@ -12,10 +12,63 @@ export const PAGE_MM_MAX = 2000;
 export const BODY_MAX_BYTES = 512 * 1024;
 export const CSS_MAX_BYTES = 256 * 1024;
 export const README_MAX_BYTES = 64 * 1024;
+export const VERSION_LABEL_MAX_BYTES = 200;
+export const VERSION_NOTE_MAX_BYTES = 2000;
 export const REVISION_MIN = 1;
 
 export function byteLength(value: string): number {
   return Buffer.byteLength(value, "utf8");
+}
+
+/**
+ * Names and summaries pass the schema's UTF-16 .max() check, so a
+ * multibyte string within the char limit can exceed the same number in
+ * bytes. The byte caps are authoritative: a 120-char CJK name is 360
+ * bytes and is refused here, not truncated downstream.
+ */
+export function assertNameCaps(name: string, summary: string): void {
+  const over =
+    [
+      { path: "name", bytes: byteLength(name), cap: TEMPLATE_NAME_MAX },
+      {
+        path: "summary",
+        bytes: byteLength(summary),
+        cap: TEMPLATE_SUMMARY_MAX,
+      },
+    ].find((field) => field.bytes > field.cap) ?? null;
+  if (over) {
+    throw new PayloadTooLargeError([
+      {
+        path: over.path,
+        message: `${over.path} is ${over.bytes} bytes, limit ${over.cap}`,
+      },
+    ]);
+  }
+}
+
+/** Version labels/notes were unbounded TEXT. Cap them like the rest. */
+export function assertVersionCaps(label?: string, note?: string): void {
+  const over =
+    [
+      {
+        path: "version.label",
+        bytes: byteLength(label ?? ""),
+        cap: VERSION_LABEL_MAX_BYTES,
+      },
+      {
+        path: "version.note",
+        bytes: byteLength(note ?? ""),
+        cap: VERSION_NOTE_MAX_BYTES,
+      },
+    ].find((field) => field.bytes > field.cap) ?? null;
+  if (over) {
+    throw new PayloadTooLargeError([
+      {
+        path: over.path,
+        message: `${over.path} is ${over.bytes} bytes, limit ${over.cap}`,
+      },
+    ]);
+  }
 }
 
 export function assertSizeCaps(

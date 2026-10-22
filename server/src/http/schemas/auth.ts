@@ -30,6 +30,13 @@ export const authCredentials = z.object({
     }),
 });
 
+export const changePasswordBody = z.object({
+  current_password: z.string().min(1, "Current password is required"),
+  new_password: z.string().min(PASSWORD_MIN_LENGTH).max(PASSWORD_MAX_LENGTH),
+});
+
+export type ChangePasswordBody = z.infer<typeof changePasswordBody>;
+
 export const userSchema = z.object({
   id: z.string().uuid(),
   handle: z.string(),

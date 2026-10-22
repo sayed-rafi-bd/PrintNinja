@@ -115,6 +115,7 @@ jobs:
       - run: pnpm --filter server typecheck
       - run: pnpm --filter server arch
       - run: pnpm --filter server test
+      - run: pnpm --filter server test:coverage
       - name: OpenAPI drift check
         run: |
           DATABASE_URL=postgresql://user:pass@localhost:5432/printninja \
@@ -302,6 +303,40 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  linux-build:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    needs: [web-check, rust-check, version-check]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - run: pnpm install --frozen-lockfile
+      # deb + AppImage only (no rpm/Flatpak — see docs/IMPROVEMENTS.md §5).
+      # Without --target, output lands in target/release/bundle.
+      - run: pnpm exec tauri build --bundles deb appimage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+          retention-days: 30
+
   android-build:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -368,7 +403,7 @@ jobs:
   github-release:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    needs: [windows-build, android-build]
+    needs: [windows-build, linux-build, android-build]
     permissions:
       contents: write
     steps:
@@ -385,5 +420,7 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             dist-artifacts/*.msi
+            dist-artifacts/*.deb
+            dist-artifacts/*.AppImage
             dist-artifacts/**/*.apk
             dist-artifacts/**/*.aab

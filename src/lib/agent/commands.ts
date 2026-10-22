@@ -20,6 +20,7 @@ import type {
   PrintResponse,
   ProfileRow,
   QueuedUseRow,
+  ResetReport,
   SaveDatasetReq,
   SaveProfileReq,
   SyncStateRow,
@@ -99,7 +100,12 @@ export interface AgentCommands {
   clear_publish_info: [{ req: { id: number } }, TemplateRow];
   // Versions
   list_versions: [{ template_id: number }, TemplateVersionRow[]];
+  list_latest_versions: [{ template_ids: number[] }, TemplateVersionRow[]];
   create_version: [{ req: CreateVersionReq }, TemplateVersionRow];
+  set_version_compiled: [
+    { id: number; compiled_css: string; compiled_key: string },
+    TemplateVersionRow,
+  ];
   restore_version: [{ id: number }, TemplateVersionRow];
   delete_version: [{ id: number }, null];
   diff_versions: [{ from_id: number; to_id: number }, VersionDiff];
@@ -124,6 +130,7 @@ export interface AgentCommands {
   cache_queue_use: [{ server_id: string; delta: number }, number];
   cache_list_queued_uses: [{}, QueuedUseRow[]];
   cache_clear_account: [{}, number];
+  reset_database: [{}, ResetReport];
   cache_list_tombstoned: [{}, string[]];
   cache_list_synced: [{}, string[]];
   cache_forget_template: [{ server_id: string }, boolean];
@@ -133,9 +140,11 @@ export interface AgentCommands {
   set_setting: [{ key: string; value: string }, null];
   get_trusted_sources: [{}, string[]];
   set_trusted_sources: [{ sources: string[] }, null];
+  refresh_background: [{}, null];
   // Printers
   list_printers: [{}, PrinterRow[]];
   add_printer: [{ req: AddPrinterReq }, PrinterRow];
+  update_printer: [{ id: number; req: AddPrinterReq }, PrinterRow];
   delete_printer: [{ id: number }, null];
   get_printer: [{ id: number }, PrinterRow];
   test_printer: [{ id: number }, null];

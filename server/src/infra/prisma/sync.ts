@@ -89,6 +89,22 @@ export function createSyncRepository(db: DbClient) {
           }),
         ]);
 
+      // Per-stream overflow, decided before merging: each stream reads
+      // limit+1, so a stream longer than limit has more rows beyond this
+      // page. Judging the merged list instead (candidates.length > limit)
+      // reported hasMore whenever two short streams added up past the
+      // limit, even with every stream exhausted.
+      const streamHasMore = [
+        templates.length > query.limit,
+        datasets.length > query.limit,
+        profiles.length > query.limit,
+        settings.length > query.limit,
+        fonts.length > query.limit,
+        tombstones.length > query.limit,
+      ].some(Boolean);
+      const cap = <T>(rows: T[]): T[] =>
+        rows.length > query.limit ? rows.slice(0, query.limit) : rows;
+
       type Candidate =
         | {
             seq: bigint;
@@ -122,37 +138,37 @@ export function createSyncRepository(db: DbClient) {
           }
         | { seq: bigint; kind: "delete"; entity: string; entityKey: string };
       const candidates: Candidate[] = [
-        ...templates.map((t) => ({
+        ...cap(templates).map((t) => ({
           seq: t.changeSeq,
           kind: "upsert" as const,
           entity: "template" as const,
           template: t,
         })),
-        ...datasets.map((d) => ({
+        ...cap(datasets).map((d) => ({
           seq: d.changeSeq,
           kind: "upsert" as const,
           entity: "dataset" as const,
           dataset: d,
         })),
-        ...profiles.map((p) => ({
+        ...cap(profiles).map((p) => ({
           seq: p.changeSeq,
           kind: "upsert" as const,
           entity: "profile" as const,
           profile: p,
         })),
-        ...settings.map((s) => ({
+        ...cap(settings).map((s) => ({
           seq: s.changeSeq,
           kind: "upsert" as const,
           entity: "setting" as const,
           setting: s,
         })),
-        ...fonts.map((f) => ({
+        ...cap(fonts).map((f) => ({
           seq: f.changeSeq,
           kind: "upsert" as const,
           entity: "font" as const,
           font: f,
         })),
-        ...tombstones.map((t) => ({
+        ...cap(tombstones).map((t) => ({
           seq: t.seq,
           kind: "delete" as const,
           entity: t.entity,
@@ -160,7 +176,6 @@ export function createSyncRepository(db: DbClient) {
         })),
       ].sort((a, b) => (a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0));
 
-      const hasMoreProbe = candidates.length > query.limit;
       const page = candidates.slice(0, query.limit);
 
       // Byte budget: stop before exceeding it, but never return an
@@ -177,9 +192,31 @@ export function createSyncRepository(db: DbClient) {
         used += size;
       }
       const trimmed = page.slice(0, kept);
-      const hasMore = hasMoreProbe || kept < page.length;
+      const hasMore = streamHasMore || kept < page.length;
 
       const changes: SyncChange[] = [];
+      // One grouped query for every template on the page: the per-row
+      // aggregate used to cost a round trip per template.
+      const templateIds = [
+        ...new Set(
+          trimmed.flatMap((candidate) =>
+            candidate.kind === "upsert" && candidate.entity === "template"
+              ? [candidate.template.id]
+              : [],
+          ),
+        ),
+      ];
+      const headVersions =
+        templateIds.length > 0
+          ? await db.templateVersion.groupBy({
+              by: ["templateId"],
+              where: { templateId: { in: templateIds } },
+              _max: { versionNo: true },
+            })
+          : [];
+      const headByTemplate = new Map(
+        headVersions.map((row) => [row.templateId, row._max.versionNo ?? 0]),
+      );
       for (const candidate of trimmed) {
         if (candidate.kind === "delete") {
           changes.push({
@@ -262,15 +299,12 @@ export function createSyncRepository(db: DbClient) {
           });
           continue;
         }
-        const head = await db.templateVersion.aggregate({
-          where: { templateId: candidate.template.id },
-          _max: { versionNo: true },
-        });
+        const headVersionNo = headByTemplate.get(candidate.template.id) ?? 0;
         changes.push({
           seq: candidate.seq,
           entity: "template",
           data: toTemplateView(candidate.template),
-          headVersionNo: head._max.versionNo ?? 0,
+          headVersionNo,
         });
       }
 

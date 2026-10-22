@@ -1,0 +1,16 @@
+[package]
+name = "tauri-plugin-android-print"
+version = "0.5.0"
+authors = ["PrintNinja"]
+description = "Android printing and background print service for PrintNinja"
+edition = "2021"
+rust-version = "1.77"
+links = "tauri-plugin-android-print"
+
+[dependencies]
+tauri = { version = "2" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }

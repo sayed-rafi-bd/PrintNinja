@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertNameCaps,
   assertSizeCaps,
+  assertVersionCaps,
   BODY_MAX_BYTES,
   CSS_MAX_BYTES,
   findRemoteRefs,
   README_MAX_BYTES,
+  TEMPLATE_NAME_MAX,
+  TEMPLATE_SUMMARY_MAX,
+  VERSION_LABEL_MAX_BYTES,
+  VERSION_NOTE_MAX_BYTES,
 } from "../src/domain/templates/shared.js";
 import { PayloadTooLargeError } from "../src/domain/errors.js";
 
@@ -107,5 +113,28 @@ describe("assertSizeCaps", () => {
         { path: "body", message: expect.stringContaining("limit") },
       ]);
     }
+  });
+});
+
+describe("assertNameCaps and assertVersionCaps", () => {
+  it("measures names, summaries, labels and notes in bytes", () => {
+    // Within the char limits but over in bytes.
+    expect(() => assertNameCaps("é".repeat(TEMPLATE_NAME_MAX), "")).toThrow(
+      PayloadTooLargeError,
+    );
+    expect(() =>
+      assertNameCaps("", "é".repeat(TEMPLATE_SUMMARY_MAX + 1)),
+    ).toThrow(PayloadTooLargeError);
+    expect(() =>
+      assertVersionCaps("é".repeat(VERSION_LABEL_MAX_BYTES + 1), undefined),
+    ).toThrow(PayloadTooLargeError);
+    expect(() =>
+      assertVersionCaps(undefined, "é".repeat(VERSION_NOTE_MAX_BYTES + 1)),
+    ).toThrow(PayloadTooLargeError);
+    // Exactly at the byte caps is accepted.
+    expect(() =>
+      assertNameCaps("é".repeat(TEMPLATE_NAME_MAX / 2), "s"),
+    ).not.toThrow();
+    expect(() => assertVersionCaps("l", "n")).not.toThrow();
   });
 });

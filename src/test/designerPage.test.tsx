@@ -39,7 +39,8 @@ const EMPTY_LISTS = new Set([
   "list_datasets",
   "list_profiles",
 ]);
-const invoke = vi.fn(async (cmd: string) => {
+const invoke = vi.fn(async (...args: any[]): Promise<any> => {
+  const cmd = args[0] as string;
   if (EMPTY_LISTS.has(cmd)) return [];
   if (cmd === "create_template") return { ...TEMPLATE_ROW, id: ++templateId };
   if (cmd === "get_template")
@@ -56,7 +57,7 @@ const invoke = vi.fn(async (cmd: string) => {
 });
 vi.mock("@tauri-apps/api/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tauri-apps/api/core")>();
-  return { ...actual, invoke: (...a: unknown[]) => invoke(a[0] as string) };
+  return { ...actual, invoke: (...a: unknown[]) => invoke(...a) };
 });
 
 // Which layout the page renders: `lg` and up is the desktop workspace, below it the tabs.
@@ -224,7 +225,138 @@ describe("Designer page layout on a phone", () => {
     await screen.findByTitle("Canvas preview");
     openTab("README");
     fireEvent.click(await screen.findByRole("button", { name: "Save README" }));
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith("update_readme"));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("update_readme", expect.anything()),
+    );
+  });
+
+  it("loads all rows' content with one batched query, not one call per template", async () => {
+    // ensureStarterTemplates memoizes per module: earlier tests already
+    // settled it, so import a fresh page for a true mount.
+    vi.resetModules();
+    const { DesignerPage: FreshDesigner } = await import("@/pages/Designer");
+    invoke.mockImplementation(async (...args: any[]): Promise<any> => {
+      const cmd = args[0] as string;
+      if (cmd === "list_templates")
+        return [
+          { ...TEMPLATE_ROW, id: 1, name: "One" },
+          { ...TEMPLATE_ROW, id: 2, name: "Two" },
+          { ...TEMPLATE_ROW, id: 3, name: "Three" },
+        ];
+      if (cmd === "list_latest_versions") return [];
+      if (cmd === "list_versions") return [];
+      if (cmd === "get_template")
+        return {
+          ...TEMPLATE_ROW,
+          summary: "",
+          readme: "",
+          remote_id: null,
+          published_at: null,
+          origin: "own",
+          withdrawn: false,
+        };
+      return null;
+    });
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/"]}>
+          <Routes>
+            <Route path="/" element={<FreshDesigner />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await screen.findByTitle("Canvas preview");
+    await waitFor(() =>
+      expect(
+        invoke.mock.calls.filter((c) => c[0] === "list_latest_versions"),
+      ).toHaveLength(1),
+    );
+    expect(
+      invoke.mock.calls.filter((c) => c[0] === "list_latest_versions")[0][1],
+    ).toMatchObject({ template_ids: [1, 2, 3] });
+    // The versions panel loads once for the opened row — never one call
+    // per template.
+    await waitFor(() =>
+      expect(
+        invoke.mock.calls.filter((c) => c[0] === "list_versions"),
+      ).toHaveLength(1),
+    );
+    expect(
+      invoke.mock.calls.filter((c) => c[0] === "list_versions")[0][1],
+    ).toMatchObject({ template_id: 1 });
+  });
+
+  it("shows version diffs in the Pavilion viewer, not raw dumps", async () => {
+    vi.resetModules();
+    const { DesignerPage: FreshDesigner } = await import("@/pages/Designer");
+    const v = (no: number, html: string) => ({
+      id: no,
+      template_id: 1,
+      version_no: no,
+      html,
+      css: ".a{}",
+      label: null,
+      note: null,
+      created_at: "2026-01-01T00:00:00Z",
+      created_by: "manual",
+      compiled_css: "",
+      compiled_key: "",
+    });
+    invoke.mockImplementation(async (...args: any[]): Promise<any> => {
+      const cmd = args[0] as string;
+      if (cmd === "list_templates") return [{ ...TEMPLATE_ROW, id: 1 }];
+      if (cmd === "list_latest_versions") return [v(2, "<p>beta</p>")];
+      if (cmd === "list_versions")
+        return [v(2, "<p>beta</p>"), v(1, "<p>alpha</p>")];
+      if (cmd === "diff_versions")
+        return {
+          from_version_no: 1,
+          to_version_no: 2,
+          html_from: "<p>alpha</p>",
+          html_to: "<p>beta</p>",
+          css_from: "",
+          css_to: "",
+          html_changed: true,
+          css_changed: false,
+        };
+      if (cmd === "get_template")
+        return {
+          ...TEMPLATE_ROW,
+          summary: "",
+          readme: "",
+          remote_id: null,
+          published_at: null,
+          origin: "own",
+          withdrawn: false,
+        };
+      return null;
+    });
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/"]}>
+          <Routes>
+            <Route path="/" element={<FreshDesigner />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await screen.findByTitle("Canvas preview");
+    fireEvent.click(await screen.findByRole("button", { name: "Versions" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Diff v1 to v2" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Compare v1 → v2")).toBeInTheDocument();
+    // Both sides render through the diff viewer.
+    expect(within(dialog).getByText("alpha")).toBeInTheDocument();
+    expect(within(dialog).getByText("beta")).toBeInTheDocument();
   });
 });
 

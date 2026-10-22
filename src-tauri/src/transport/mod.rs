@@ -97,6 +97,11 @@ pub struct RenderedJob {
     pub data: Vec<u8>,
     pub mime_type: String,
     pub copies: u32,
+    /// The printer's own command language, which a raw transport needs to
+    /// know *before* the job: it decides which status query, if any, the
+    /// printer is asked whether it can actually print. `Pdf` — the language
+    /// of a printer row that carries none — asks nothing.
+    pub language: PrinterLanguage,
 }
 
 #[async_trait]
@@ -117,10 +122,12 @@ pub trait PrinterTransport: Send + Sync {
 }
 
 pub mod android_bridge;
+pub mod cups;
 pub mod escpos;
 pub mod ipp;
 pub mod label_langs;
 pub mod raw_tcp;
+pub mod status;
 pub mod windows_bluetooth;
 pub mod windows_spooler;
 pub mod windows_usb;
@@ -177,6 +184,11 @@ pub fn create_transport(
         PrinterType::System => Some(Box::new(windows_spooler::WindowsSpooler::new(
             name.to_string(),
         ))),
+        #[cfg(target_os = "linux")]
+        PrinterType::System => Some(Box::new(cups::CupsPrinter::new(
+            name.to_string(),
+            address.to_string(),
+        ))),
         #[cfg(windows)]
         PrinterType::Usb => Some(Box::new(windows_usb::WindowsUsbPrinter::new(
             name.to_string(),
@@ -188,8 +200,9 @@ pub fn create_transport(
             name.to_string(),
             address.to_string(),
         ))),
-        // Off Windows there is no spooler and no USB/Bluetooth transport, so
-        // every other variant is unsupported here.
+        // Off Windows there is no spooler and no USB/Bluetooth
+        // transport (Linux serves system printers through CUPS, matched
+        // above), so every other variant is unsupported here.
         #[cfg(not(windows))]
         _ => None,
     }
@@ -227,9 +240,17 @@ impl TransportRegistry {
                 None => Vec::new(),
             }
         }
-        #[cfg(not(windows))]
+        #[cfg(target_os = "linux")]
         {
-            // No system enumeration off Windows; IPP discovery runs through
+            // CUPS queues are the system printers.
+            match create_transport(&PrinterType::System, "", "") {
+                Some(t) => t.discover().await,
+                None => Vec::new(),
+            }
+        }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        {
+            // No system enumeration here; IPP discovery runs through
             // the platform bridge (NsdManager on Android).
             android_bridge::AndroidBridge::new().discover().await
         }
@@ -393,21 +414,35 @@ mod tests {
             data: vec![0x25, 0x50, 0x44, 0x46],
             mime_type: "application/pdf".into(),
             copies: 1,
+            language: PrinterLanguage::Pdf,
         };
         // No IPP server on the loopback test port: must be Err, not Ok.
         assert!(t.send(job).await.is_err());
     }
 
-    #[cfg(not(windows))]
+    #[cfg(all(not(windows), not(target_os = "linux")))]
     #[tokio::test]
     async fn unsupported_platform_names_the_type_that_failed() {
-        // Off Windows there is no spooler, so `system` must say so rather
-        // than reporting a successful print.
+        // Off Windows (and off Linux, which serves system printers
+        // through CUPS) there is no spooler, so `system` must say so
+        // rather than reporting a successful print.
         let err = TransportRegistry::test_printer(&PrinterType::System, "p", "")
             .await
             .unwrap_err();
         assert!(err.contains("system"), "{err}");
         assert!(err.contains("not supported"), "{err}");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn system_transport_probes_cups_without_printing() {
+        // Read-only probe: absent daemon and unknown queue both fail
+        // without submitting anything.
+        let err =
+            TransportRegistry::test_printer(&PrinterType::System, "no-such-queue-printninja", "")
+                .await
+                .unwrap_err();
+        assert!(err.contains("CUPS"), "{err}");
     }
 
     #[cfg(windows)]

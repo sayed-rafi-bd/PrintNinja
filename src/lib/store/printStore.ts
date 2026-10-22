@@ -28,7 +28,7 @@ interface PrintState {
   printerId: string;
   templateId: string;
   dataUrl: string;
-  httpMethod: string;
+  httpMethod: "GET" | "POST";
   orientation: "portrait" | "landscape";
   marginTop: number;
   marginRight: number;
@@ -37,21 +37,18 @@ interface PrintState {
   fitMode: "actual" | "fit-width" | "fit-page" | "shrink" | "fill";
   copies: number;
   useTestData: boolean;
-  selectedDataset: string;
   pageRange: string;
   grayscale: boolean;
   status: "idle" | "queued" | "printing" | "success" | "failed";
   error: string;
   durationMs: number;
   timings: StageTimings | null;
-  batchMode: boolean;
-  batchData: string;
   batchMode2: "single_job" | "per_record";
 
   setPrinterId: (v: string) => void;
   setTemplateId: (v: string) => void;
   setDataUrl: (v: string) => void;
-  setHttpMethod: (v: string) => void;
+  setHttpMethod: (v: "GET" | "POST") => void;
   setOrientation: (v: "portrait" | "landscape") => void;
   setMarginTop: (v: number) => void;
   setMarginRight: (v: number) => void;
@@ -62,15 +59,12 @@ interface PrintState {
   ) => void;
   setCopies: (v: number) => void;
   setUseTestData: (v: boolean) => void;
-  setSelectedDataset: (v: string) => void;
   setPageRange: (v: string) => void;
   setGrayscale: (v: boolean) => void;
   setStatus: (v: "idle" | "queued" | "printing" | "success" | "failed") => void;
   setError: (v: string) => void;
   setDurationMs: (v: number) => void;
   setTimings: (v: StageTimings | null) => void;
-  setBatchMode: (v: boolean) => void;
-  setBatchData: (v: string) => void;
   setBatchMode2: (v: "single_job" | "per_record") => void;
 }
 
@@ -87,15 +81,12 @@ export const usePrintStore = create<PrintState>((set) => ({
   fitMode: "fit-width",
   copies: 1,
   useTestData: false,
-  selectedDataset: "Sample Order",
   pageRange: "",
   grayscale: false,
   status: "idle",
   error: "",
   durationMs: 0,
   timings: null,
-  batchMode: false,
-  batchData: "",
   batchMode2: "per_record",
 
   setPrinterId: (printerId) => set({ printerId }),
@@ -111,14 +102,11 @@ export const usePrintStore = create<PrintState>((set) => ({
   setCopies: (copies) =>
     set({ copies: Math.max(1, Math.floor(Number(copies) || 1)) }),
   setUseTestData: (useTestData) => set({ useTestData }),
-  setSelectedDataset: (selectedDataset) => set({ selectedDataset }),
   setPageRange: (pageRange) => set({ pageRange }),
   setGrayscale: (grayscale) => set({ grayscale }),
   setStatus: (status) => set({ status }),
   setError: (error) => set({ error }),
   setDurationMs: (durationMs) => set({ durationMs }),
   setTimings: (timings) => set({ timings }),
-  setBatchMode: (batchMode) => set({ batchMode }),
-  setBatchData: (batchData) => set({ batchData }),
   setBatchMode2: (batchMode2) => set({ batchMode2 }),
 }));

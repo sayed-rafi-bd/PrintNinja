@@ -29,10 +29,13 @@ export interface ConflictedRow {
  */
 export function ConflictDialog({
   conflict,
+  position,
   onOpenChange,
   onResolved,
 }: {
   conflict: ConflictedRow | null;
+  /** 0-based position in the conflict queue, for "2 of 5" labelling. */
+  position?: { index: number; total: number } | null;
   onOpenChange: (open: boolean) => void;
   onResolved: () => void;
 }) {
@@ -46,8 +49,9 @@ export function ConflictDialog({
     setError("");
     try {
       await fn();
+      // The parent advances to the next conflict (or closes): the
+      // dialog stays mounted so a queue of N resolves without flashing.
       onResolved();
-      onOpenChange(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -138,7 +142,12 @@ export function ConflictDialog({
     <Dialog open={conflict !== null} onOpenChange={onOpenChange}>
       <DialogContent data-testid="conflict-dialog">
         <DialogHeader>
-          <DialogTitle>“{conflict?.name}” changed on another PC</DialogTitle>
+          <DialogTitle>
+            “{conflict?.name}” changed on another PC
+            {position && position.total > 1
+              ? ` (${position.index + 1} of ${position.total})`
+              : ""}
+          </DialogTitle>
           <DialogDescription>
             Your edits and the server copy disagree. Take the server copy, keep
             pushing yours, or keep both. Keeping yours is safe: the other PC's

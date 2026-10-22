@@ -17,6 +17,8 @@ import type { FontRepository, FontView, UploadedFont } from "./libraryPorts.js";
  */
 export const FONT_MAX_BYTES = 5 * 1024 * 1024;
 export const FONTS_PER_USER_MAX = 50;
+/** Mirror the schema char cap in bytes. */
+export const FONT_NAME_MAX_BYTES = 200;
 
 export type FontFormat = "ttf" | "otf" | "woff2";
 
@@ -60,6 +62,14 @@ export async function putFont(
   if (name.length === 0 || name.length > 200) {
     throw new ValidationError("Font name required (1-200 chars)", [
       { path: "name", message: "Required" },
+    ]);
+  }
+  if (Buffer.byteLength(name, "utf8") > FONT_NAME_MAX_BYTES) {
+    throw new PayloadTooLargeError([
+      {
+        path: "name",
+        message: `Over the ${FONT_NAME_MAX_BYTES} byte cap`,
+      },
     ]);
   }
   const existing = await repos.fonts.findById(input.id);

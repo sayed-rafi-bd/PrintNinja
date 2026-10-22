@@ -64,14 +64,11 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { PanelLeftClose, QrCode } from "lucide-react";
-import {
-  useTemplateStore,
-  type Template,
-  type TemplateVersion,
-} from "@/lib/store/templateStore";
+import type { TemplateRow, TemplateVersionRow } from "@/lib/agent/types";
 import { toast } from "sonner";
 import CodeMirror from "@uiw/react-codemirror";
-import { html } from "@codemirror/lang-html";
+import { json } from "@codemirror/lang-json";
+import ReactDiffViewer, { DiffMethod } from "react-diff-viewer-continued";
 import {
   BARCODE_TYPES,
   buildBarcodeSnippet,
@@ -95,7 +92,6 @@ import {
   saveToServer,
   type SaveOptions,
 } from "@/lib/share/sync";
-import type { TemplateRow } from "@/lib/agent/types";
 
 const PAGE_PRESETS = [
   { label: "A4", width: 210, height: 297 },
@@ -111,7 +107,6 @@ type SyncAction = "save" | "publish" | "unpublish" | "sync";
 
 export function DesignerPage() {
   const { t } = useTranslation();
-  const store = useTemplateStore();
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [showVersionDialog, setShowVersionDialog] = useState(false);
   const [versionLabel, setVersionLabel] = useState("");
@@ -221,6 +216,14 @@ export function DesignerPage() {
   const [_templatesLoading, setTemplatesLoading] = useState(true);
   void _templatesLoading;
 
+  // Template ids whose html/css in `templates` is real content, not the
+  // placeholder defaults. Hydration fetches only the opened row; other
+  // rows load on selection through the versions effect. loadTemplate
+  // leaves the editors alone for unloaded rows so they never flash
+  // defaults, and create/import paths mark their ids up front because
+  // their content is already known.
+  const contentLoaded = useRef<Set<number>>(new Set());
+
   // Sample datasets (variables). Persisted through the agent and
   // synced like templates; the built-in Sample Order is the fallback
   // when the cache holds none yet.
@@ -285,8 +288,13 @@ export function DesignerPage() {
   }) => {
     setCurrentTemplateId(tpl.id);
     setTemplateName(tpl.name);
-    setHtmlCode(formatHtml(tpl.html));
-    setCssCode(formatCss(tpl.css));
+    // Rows beyond the opened one carry placeholder content until their
+    // versions load (see contentLoaded): leave the editors alone and let
+    // the versions effect fill them, instead of flashing defaults.
+    if (contentLoaded.current.has(tpl.id)) {
+      setHtmlCode(formatHtml(tpl.html));
+      setCssCode(formatCss(tpl.css));
+    }
     if (tpl.page_w_mm) setPageWidth(tpl.page_w_mm);
     if (tpl.page_h_mm) setPageHeight(tpl.page_h_mm);
     if (tpl.orientation)
@@ -524,6 +532,7 @@ export function DesignerPage() {
         page_h_mm: created.page_h_mm,
         orientation: created.orientation,
       };
+      contentLoaded.current.add(tpl.id);
       setTemplates((prev) => [...prev, tpl]);
       loadTemplate(tpl);
       setVersions([]);
@@ -544,6 +553,7 @@ export function DesignerPage() {
         page_h_mm: STARTER_TEMPLATES[0].page_h_mm,
         orientation: STARTER_TEMPLATES[0].orientation,
       };
+      contentLoaded.current.add(tpl.id);
       setTemplates((prev) => [...prev, tpl]);
       loadTemplate(tpl);
       setVersions([]);
@@ -588,36 +598,35 @@ export function DesignerPage() {
         const rows = await ensureStarterTemplates();
         if (cancelled) return;
         if (rows && rows.length > 0) {
-          // For each persisted template, fetch its current version to get html/css.
-          const hydrated = await Promise.all(
-            rows.map(async (r) => {
-              try {
-                const versions = await agent("list_versions", {
-                  template_id: r.id,
-                });
-                const latest = versions?.[0];
-                return {
-                  id: r.id,
-                  name: r.name,
-                  html: latest?.html ?? DEFAULT_TEMPLATE_HTML,
-                  css: latest?.css ?? DEFAULT_TEMPLATE_CSS,
-                  page_w_mm: r.page_w_mm,
-                  page_h_mm: r.page_h_mm,
-                  orientation: r.orientation,
-                };
-              } catch {
-                return {
-                  id: r.id,
-                  name: r.name,
-                  html: DEFAULT_TEMPLATE_HTML,
-                  css: DEFAULT_TEMPLATE_CSS,
-                  page_w_mm: r.page_w_mm,
-                  page_h_mm: r.page_h_mm,
-                  orientation: r.orientation,
-                };
+          // One batched query carries every row's current content — not
+          // one list_versions per template (N+1).
+          const hydrated = rows.map((r) => ({
+            id: r.id,
+            name: r.name,
+            html: DEFAULT_TEMPLATE_HTML,
+            css: DEFAULT_TEMPLATE_CSS,
+            page_w_mm: r.page_w_mm,
+            page_h_mm: r.page_h_mm,
+            orientation: r.orientation,
+          }));
+          try {
+            const latest = await agent("list_latest_versions", {
+              template_ids: rows.map((r) => r.id),
+            });
+            const byTemplate = new Map(
+              (latest ?? []).map((v) => [v.template_id, v]),
+            );
+            for (const h of hydrated) {
+              const v = byTemplate.get(h.id);
+              if (v) {
+                h.html = v.html;
+                h.css = v.css;
               }
-            }),
-          );
+              contentLoaded.current.add(h.id);
+            }
+          } catch {
+            /* placeholders stand; selection retries through the versions effect */
+          }
           setTemplates(hydrated);
           setCurrentTemplateId(hydrated[0].id);
           setTemplateName(hydrated[0].name);
@@ -653,6 +662,7 @@ export function DesignerPage() {
             page_h_mm: t.page_h_mm,
             orientation: t.orientation,
           }));
+          starters.forEach((t) => contentLoaded.current.add(t.id));
           setTemplates(starters);
           setCurrentTemplateId(starters[0].id);
         }
@@ -666,6 +676,7 @@ export function DesignerPage() {
           page_h_mm: t.page_h_mm,
           orientation: t.orientation,
         }));
+        starters.forEach((t) => contentLoaded.current.add(t.id));
         setTemplates(starters);
         setCurrentTemplateId(starters[0].id);
       } finally {
@@ -686,27 +697,9 @@ export function DesignerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTemplateDbId, remoteId]);
 
-  useEffect(() => {
-    const template: Template = {
-      id: 1,
-      name: templateName,
-      current_version_id: null,
-      page_w_mm: pageWidth,
-      page_h_mm: pageHeight,
-      orientation,
-      readme: "",
-      summary: "",
-      remote_id: null,
-      server_id: null,
-      published_at: null,
-      origin: "own",
-      origin_owner: null,
-      withdrawn: false,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    store.setCurrentTemplate(template);
-  }, []);
+  // (No shared template store: the local template row lives in the
+  // component state above, so there is no cross-page cache to keep
+  // in sync here.)
 
   /**
    * A labelled version goes through the server when the template is
@@ -754,7 +747,7 @@ export function DesignerPage() {
       toast.success(`Version ${version.version_no} saved`);
     } catch (e) {
       // Web mode / no backend: keep a local snapshot so the UI stays usable.
-      const local: TemplateVersion = {
+      const local: TemplateVersionRow = {
         id: Date.now(),
         template_id: currentTemplateDbId,
         version_no: versions.length + 1,
@@ -941,6 +934,7 @@ export function DesignerPage() {
           to_id: to.localId,
         });
         setDiff(d);
+        setShowDiff(true);
         return;
       }
       setDiff({
@@ -953,6 +947,7 @@ export function DesignerPage() {
         html_changed: f.html !== t.html,
         css_changed: f.css !== t.css,
       });
+      setShowDiff(true);
     } catch {
       const [f, t] = await Promise.all([
         bodies(from).catch(() => ({ html: "", css: "" })),
@@ -968,6 +963,7 @@ export function DesignerPage() {
         html_changed: f.html !== t.html,
         css_changed: f.css !== t.css,
       });
+      setShowDiff(true);
     }
   };
 
@@ -1296,52 +1292,44 @@ export function DesignerPage() {
           </DialogHeader>
           {diff && (
             <div className="space-y-4 max-h-[70vh] overflow-auto">
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <Badge variant={diff.html_changed ? "warning" : "secondary"}>
-                    {diff.html_changed ? "HTML changed" : "HTML identical"}
-                  </Badge>
-                  <Badge variant={diff.css_changed ? "warning" : "secondary"}>
-                    {diff.css_changed ? "CSS changed" : "CSS identical"}
-                  </Badge>
-                </div>
+              <div className="flex items-center gap-2 mb-2">
+                <Badge variant={diff.html_changed ? "warning" : "secondary"}>
+                  {diff.html_changed ? "HTML changed" : "HTML identical"}
+                </Badge>
+                <Badge variant={diff.css_changed ? "warning" : "secondary"}>
+                  {diff.css_changed ? "CSS changed" : "CSS identical"}
+                </Badge>
               </div>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                <div>
-                  <p className="text-xs font-semibold mb-1">
-                    v{diff.from_version_no} (before)
-                  </p>
-                  <pre className="text-xs bg-muted p-2 rounded overflow-auto max-h-72 whitespace-pre-wrap">
-                    {diff.html_from || "(empty)"}
-                  </pre>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold mb-1">
-                    v{diff.to_version_no} (after)
-                  </p>
-                  <pre className="text-xs bg-muted p-2 rounded overflow-auto max-h-72 whitespace-pre-wrap">
-                    {diff.html_to || "(empty)"}
-                  </pre>
-                </div>
+              <div>
+                <p className="text-xs font-semibold mb-1">
+                  HTML v{diff.from_version_no} → v{diff.to_version_no}
+                </p>
+                <ReactDiffViewer
+                  oldValue={diff.html_from || "(empty)"}
+                  newValue={diff.html_to || "(empty)"}
+                  splitView
+                  leftTitle={`v${diff.from_version_no}`}
+                  rightTitle={`v${diff.to_version_no}`}
+                  compareMethod={DiffMethod.WORDS}
+                  hideLineNumbers={false}
+                  showDiffOnly={false}
+                />
               </div>
               {(diff.html_changed || diff.css_changed) && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  <div>
-                    <p className="text-xs font-semibold mb-1">
-                      CSS v{diff.from_version_no}
-                    </p>
-                    <pre className="text-xs bg-muted p-2 rounded overflow-auto max-h-48 whitespace-pre-wrap">
-                      {diff.css_from || "(empty)"}
-                    </pre>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold mb-1">
-                      CSS v{diff.to_version_no}
-                    </p>
-                    <pre className="text-xs bg-muted p-2 rounded overflow-auto max-h-48 whitespace-pre-wrap">
-                      {diff.css_to || "(empty)"}
-                    </pre>
-                  </div>
+                <div>
+                  <p className="text-xs font-semibold mb-1">
+                    CSS v{diff.from_version_no} → v{diff.to_version_no}
+                  </p>
+                  <ReactDiffViewer
+                    oldValue={diff.css_from || "(empty)"}
+                    newValue={diff.css_to || "(empty)"}
+                    splitView
+                    leftTitle={`v${diff.from_version_no}`}
+                    rightTitle={`v${diff.to_version_no}`}
+                    compareMethod={DiffMethod.WORDS}
+                    hideLineNumbers={false}
+                    showDiffOnly={false}
+                  />
                 </div>
               )}
             </div>
@@ -1504,7 +1492,7 @@ export function DesignerPage() {
                 <CodeMirror
                   value={datasetJson}
                   height="160px"
-                  extensions={[html()]}
+                  extensions={[json()]}
                   onChange={setDatasetJson}
                   theme="dark"
                   basicSetup={{ lintKeymap: true }}
@@ -1575,7 +1563,7 @@ export function DesignerPage() {
               <CodeMirror
                 value={editJson}
                 height="200px"
-                extensions={[html()]}
+                extensions={[json()]}
                 onChange={setEditJson}
                 theme="dark"
               />

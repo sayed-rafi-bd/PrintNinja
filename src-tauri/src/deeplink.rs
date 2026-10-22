@@ -164,4 +164,45 @@ mod tests {
             _ => panic!("expected Print"),
         }
     }
+
+    /// The contract the e2e fake mirrors (e2e/tests/deeplink.e2e.ts
+    /// pins the same table against the JS implementation): garbage
+    /// copies drop to None, confirm defaults on, open/template split
+    /// on the first slash, unknown actions error.
+    #[test]
+    fn parse_deep_link_contract_table() {
+        let print = |url: &str| match parse_deep_link(url).unwrap() {
+            DeepLinkAction::Print(p) => p,
+            other => panic!("expected Print for {url}, got {other:?}"),
+        };
+
+        let garbage = print("printninja://print?copies=lots");
+        assert_eq!(garbage.copies, None);
+        let negative = print("printninja://print?copies=-3");
+        assert_eq!(negative.copies, None);
+        let overflow = print("printninja://print?copies=99999999999");
+        assert_eq!(overflow.copies, None);
+        let defaults = print("printninja://print?template=Label");
+        assert_eq!(defaults.copies, None);
+        assert!(!defaults.test);
+        assert!(defaults.confirm);
+        assert_eq!(defaults.callback, None);
+        let explicit =
+            print("printninja://print?callback=https%3A%2F%2Fexample.com%2Fdone&confirm=0");
+        assert!(!explicit.confirm);
+        assert_eq!(
+            explicit.callback.as_deref(),
+            Some("https://example.com/done")
+        );
+
+        match parse_deep_link("printninja://open/history").unwrap() {
+            DeepLinkAction::Open(destination) => assert_eq!(destination, "history"),
+            other => panic!("expected Open, got {other:?}"),
+        }
+        match parse_deep_link("printninja://template/abc-123").unwrap() {
+            DeepLinkAction::Template(id) => assert_eq!(id, "abc-123"),
+            other => panic!("expected Template, got {other:?}"),
+        }
+        assert!(parse_deep_link("printninja://explode/now").is_err());
+    }
 }

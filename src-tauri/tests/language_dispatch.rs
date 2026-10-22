@@ -11,7 +11,8 @@ use printninja_lib::db::Database;
 use printninja_lib::queue::PrintQueue;
 use printninja_lib::render::raster::RasterImage;
 use std::sync::{Arc, Mutex};
-use tokio::io::AsyncReadExt;
+use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 type Db = Arc<Mutex<Database>>;
 
@@ -101,36 +102,79 @@ fn print_request(printer: &str) -> PrintRequest {
         margin_bottom: None,
         margin_left: None,
         fit_mode: None,
+        page_range: None,
+        grayscale: None,
         template_id: None,
         template_version_id: None,
         data: None,
         data_url: None,
+        http_method: None,
         test: None,
         source: Some("ui".to_string()),
         idempotency_key: None,
     }
 }
 
+/// What a healthy printer says to a status query, in each dialect that has
+/// one — written out by hand, so the assertion about being able to print is
+/// not derived from the code under test.
+fn healthy_answer(language: &str) -> &'static [u8] {
+    match language {
+        "escpos" => &[0x12, 0x12, 0x12, 0x12],
+        "zpl" => b"\x02030,0,0,0\x03\r\n\x02000,0\x03\r\n\x020000,0\x03\r\n",
+        "tspl" => &[0x00],
+        _ => &[],
+    }
+}
+
 /// Bind a loopback listener on a random port: `(port, capture task)`.
-async fn loopback() -> (u16, tokio::task::JoinHandle<Vec<u8>>) {
+///
+/// A job does not arrive on the connection that opens the conversation
+/// anymore: a printer that speaks a status dialect is asked whether it can
+/// print first, on its own connection. So this accepts until the client goes
+/// away and returns the last thing it was sent — the job — while answering
+/// the probe healthily, which is what lets the job go out at all.
+async fn loopback(language: &str) -> (u16, tokio::task::JoinHandle<Vec<u8>>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind loopback");
     let port = listener.local_addr().unwrap().port();
+    let answer = healthy_answer(language).to_vec();
     let handle = tokio::spawn(async move {
-        let (mut sock, _) = listener.accept().await.expect("accept");
-        let mut buf = Vec::new();
-        sock.read_to_end(&mut buf).await.expect("read");
-        buf
+        let mut last = Vec::new();
+        let mut first = true;
+        loop {
+            let accepted =
+                tokio::time::timeout(Duration::from_millis(250), listener.accept()).await;
+            let Ok(Ok((mut sock, _))) = accepted else {
+                break;
+            };
+            if first && !answer.is_empty() {
+                sock.write_all(&answer)
+                    .await
+                    .expect("answer the status query");
+            }
+            first = false;
+            let mut buf = Vec::new();
+            sock.read_to_end(&mut buf).await.expect("read");
+            if !buf.is_empty() {
+                last = buf;
+            }
+        }
+        last
     });
     (port, handle)
 }
 
 /// Print one job to a loopback printer speaking `language` and return the
-/// exact bytes the transport wrote.
+/// exact bytes of the job.
+///
+/// The status query that a dialect-speaking printer is asked first comes on
+/// its own connection and is answered, not returned: what is asserted here
+/// is what the printer was sent to print.
 async fn capture(language: &str) -> (Vec<u8>, Option<(usize, usize)>) {
     let db = test_db();
-    let (port, capture) = loopback().await;
+    let (port, capture) = loopback(language).await;
     seed_printer(&db, "Thermal", language, port);
     let queue = PrintQueue::new();
     let cache = cache_dir();
@@ -233,7 +277,7 @@ async fn raster_language_sends_the_packed_dots_alone() {
 #[tokio::test]
 async fn pdf_printers_still_receive_pdf() {
     let db = test_db();
-    let (port, capture) = loopback().await;
+    let (port, capture) = loopback("pdf").await;
     seed_printer(&db, "Office", "pdf", port);
     let queue = PrintQueue::new();
     let cache = cache_dir();
@@ -253,7 +297,7 @@ async fn an_unrecognised_language_falls_back_to_the_pdf_path() {
     // The schema's CHECK constraint stops this through the app; a hand-edited
     // row can still carry anything. It must behave like `pdf`, not crash.
     let db = test_db();
-    let (port, capture) = loopback().await;
+    let (port, capture) = loopback("telepathy").await;
     {
         let guard = db.lock().unwrap();
         // The schema's CHECK stops 'telepathy' through the app; a hand-edited

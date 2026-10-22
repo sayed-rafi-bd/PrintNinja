@@ -19,14 +19,10 @@ interface HistoryState {
   jobs: HistoryJob[];
   filter: HistoryFilter;
   selectedJob: HistoryJob | null;
-  retentionDays: number;
-  maxRecords: number;
 
   setJobs: (jobs: HistoryJob[]) => void;
   setFilter: (filter: Partial<HistoryFilter>) => void;
   setSelectedJob: (job: HistoryJob | null) => void;
-  setRetentionDays: (days: number) => void;
-  setMaxRecords: (max: number) => void;
   clearFilter: () => void;
 }
 
@@ -44,14 +40,10 @@ export const useHistoryStore = create<HistoryState>((set) => ({
   jobs: [],
   filter: defaultFilter,
   selectedJob: null,
-  retentionDays: 30,
-  maxRecords: 10000,
 
   setJobs: (jobs) => set({ jobs }),
   setFilter: (filter) =>
     set((state) => ({ filter: { ...state.filter, ...filter } })),
   setSelectedJob: (selectedJob) => set({ selectedJob }),
-  setRetentionDays: (retentionDays) => set({ retentionDays }),
-  setMaxRecords: (maxRecords) => set({ maxRecords }),
   clearFilter: () => set({ filter: defaultFilter }),
 }));

@@ -7,6 +7,16 @@ import { agent } from "@/lib/agent/commands";
 
 const lsKey = (key: string) => `printninja-setting:${key}`;
 
+/** True in the browser preview/CI, where no Tauri backend answers. */
+export function isWebMode(): boolean {
+  return typeof window !== "undefined" && !(window as any).__TAURI_INTERNALS__;
+}
+
+/** localStorage key backing one setting in web mode. */
+export function settingsLsKey(key: string): string {
+  return lsKey(key);
+}
+
 export async function readSetting(key: string): Promise<string | null> {
   try {
     const v = await agent("get_setting", { key });

@@ -357,8 +357,8 @@ fn batch_retry_only_touches_failed_records() {
     let tpl = seed_template(&conn, "Receipt");
 
     conn.execute(
-        "INSERT INTO batches (template_id, printer_id, total, mode, status, failed)
-         VALUES (?1, ?2, 3, 'per_record', 'failed', 2)",
+        "INSERT INTO batches (template_id, printer_id, total, done, mode, status, failed)
+         VALUES (?1, ?2, 3, 3, 'per_record', 'failed', 2)",
         [tpl, printer],
     )
     .unwrap();

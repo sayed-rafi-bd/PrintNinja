@@ -152,10 +152,13 @@ export interface PrintHtmlReq {
   margin_bottom?: number | null;
   margin_left?: number | null;
   fit_mode?: string | null;
+  page_range?: string | null;
+  grayscale?: boolean | null;
   template_id?: number | null;
   template_version_id?: number | null;
   data?: unknown;
   data_url?: string | null;
+  http_method?: string | null;
   test?: boolean | null;
   source?: string | null;
   idempotency_key?: string | null;
@@ -270,6 +273,18 @@ export interface DirtyFontRow {
 export interface FontDownloadReport {
   downloaded: number;
   failed: number;
+}
+
+/** Counts from a full local wipe: everything the app owned on this PC. */
+export interface ResetReport {
+  templates: number;
+  template_versions: number;
+  print_jobs: number;
+  fonts: number;
+  datasets: number;
+  profiles: number;
+  printers: number;
+  batches: number;
 }
 
 export interface SaveProfileReq {

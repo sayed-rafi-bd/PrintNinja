@@ -43,7 +43,7 @@ const job = (over: Partial<HistoryJob>): HistoryJob => ({
 const JOBS = [
   job({ id: 1 }),
   job({ id: 2, status: "failed", error: "Paper out" }),
-  job({ id: 3, printer_id: 2 }),
+  job({ id: 3, printer_id: 2, is_test: true }),
 ];
 
 beforeAll(() => {
@@ -52,6 +52,8 @@ beforeAll(() => {
     unobserve() {}
     disconnect() {}
   };
+  Element.prototype.hasPointerCapture = () => false;
+  Element.prototype.scrollIntoView = () => {};
 });
 
 beforeEach(() => {
@@ -101,6 +103,24 @@ describe("History page", () => {
     ).toBeInTheDocument();
   });
 
+  it("asks before reprinting a single job, then reprints it", async () => {
+    renderPage();
+    await screen.findByText("#1");
+    fireEvent.click(screen.getByRole("button", { name: "Reprint job 1" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Reprint job #1?")).toBeInTheDocument();
+    // Nothing sent until confirmed.
+    expect(
+      invoke.mock.calls.filter((c) => c[0] === "reprint_job"),
+    ).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Reprint" }));
+    await waitFor(() =>
+      expect(
+        invoke.mock.calls.filter((c) => c[0] === "reprint_job"),
+      ).toHaveLength(1),
+    );
+  });
+
   it("asks before reprinting a selection, then reprints each job", async () => {
     renderPage();
     await screen.findByText("#2");
@@ -121,6 +141,20 @@ describe("History page", () => {
     );
   });
 
+  it("filters by test jobs with the toggle", async () => {
+    renderPage();
+    await screen.findByText("#2");
+    const visible = () =>
+      ["#1", "#2", "#3"].filter((id) => screen.queryByText(id) !== null);
+    expect(visible()).toEqual(["#1", "#2", "#3"]);
+    fireEvent.click(screen.getByLabelText("Filter test jobs"));
+    fireEvent.click(await screen.findByText("Test only"));
+    await waitFor(() => expect(visible()).toEqual(["#3"]));
+    fireEvent.click(screen.getByLabelText("Filter test jobs"));
+    fireEvent.click(await screen.findByText("Hide test"));
+    await waitFor(() => expect(visible()).toEqual(["#1", "#2"]));
+  });
+
   it("only offers retry for failed jobs in the selection", async () => {
     renderPage();
     await screen.findByText("#2");
@@ -132,6 +166,16 @@ describe("History page", () => {
     expect(
       screen.getByRole("button", { name: /Retry failed \(1\)/ }),
     ).toBeEnabled();
+  });
+
+  it("searches printer names and template ids", async () => {
+    renderPage();
+    await screen.findByText("#2");
+    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), {
+      target: { value: "front desk" },
+    });
+    expect(await screen.findByText("#3")).toBeInTheDocument();
+    expect(screen.queryByText("#1")).not.toBeInTheDocument();
   });
 
   it("names the job in the delete confirmation and does not delete until confirmed", async () => {

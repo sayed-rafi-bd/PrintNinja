@@ -1,4 +1,5 @@
 import { useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import {
   flexRender,
   getCoreRowModel,
@@ -72,6 +73,7 @@ export function DataTable<T>({
   className,
   footer,
 }: DataTableProps<T>) {
+  const { t } = useTranslation();
   const [sorting, setSorting] = useState<SortingState>([]);
   // Sorting is opt in per column: `enableSorting: true`.
   const cols = useMemo(() => {
@@ -149,7 +151,7 @@ export function DataTable<T>({
                         <label className={CHECK_HIT}>
                           <input
                             type="checkbox"
-                            aria-label="Select all rows"
+                            aria-label={t("common.select_all_rows")}
                             className="h-5 w-5 accent-primary"
                             checked={
                               rows.length > 0 &&
@@ -186,6 +188,12 @@ export function DataTable<T>({
                           type="button"
                           onClick={header.column.getToggleSortingHandler()}
                           className="inline-flex min-h-9 items-center gap-1 rounded-sm hover:text-foreground"
+                          aria-label={t("common.sort_by", {
+                            column:
+                              typeof header.column.columnDef.header === "string"
+                                ? header.column.columnDef.header
+                                : header.column.id,
+                          })}
                         >
                           {flexRender(
                             header.column.columnDef.header,
@@ -269,7 +277,7 @@ export function DataTable<T>({
                         <label className={CHECK_HIT}>
                           <input
                             type="checkbox"
-                            aria-label={`Select row ${row.id}`}
+                            aria-label={t("common.select_row", { id: row.id })}
                             className="h-5 w-5 accent-primary"
                             checked={selection.selectedIds.has(row.id)}
                             onChange={(e) => {

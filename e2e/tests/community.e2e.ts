@@ -11,7 +11,10 @@ import { testids } from "../support/testids";
 test("F7 publish, find, save, withdraw, republish", async ({ browser }) => {
   test.setTimeout(240_000);
   const password = "password123";
-  const auth = await apiRegister(`f7-${Date.now().toString(36)}`, password);
+  const auth = await apiRegister(
+    `f7-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    password,
+  );
   const pcA = await pc(browser, {
     settings: { share_session_token: auth.token },
   });
@@ -69,7 +72,10 @@ test("F7 publish, find, save, withdraw, republish", async ({ browser }) => {
   // in Saved as read-only.
   // B (a different account — the community is public) finds it by
   // search and sort, saves it, and sees it in Saved as read-only.
-  const authB = await apiRegister(`f7b-${Date.now().toString(36)}`, password);
+  const authB = await apiRegister(
+    `f7b-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
+    password,
+  );
   const pcB = await pc(browser, {
     settings: { share_session_token: authB.token },
   });

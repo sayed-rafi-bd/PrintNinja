@@ -134,7 +134,6 @@ export async function saveToServer(
     } catch (err) {
       // A fuller conflict dialog arrives with the sync engine; until then,
       // say what happened in words the toast can show.
-      console.log("[dbg] saveToServer update threw", String(err));
       if (err instanceof ApiError && err.code === "revision_conflict") {
         throw new Error("Changed on another PC — refresh and try again");
       }

@@ -1,0 +1,58 @@
+# Nightly e2e: the full Playwright suite in two ways the PR run skips.
+#
+# 1. Prod parity — the stack's relaxed knobs (rate limits, argon2,
+#    docs) are tightened to production values, so throttling and auth
+#    regressions surface here instead of in production.
+# 2. Firefox — E2E_BROWSERS runs the Desktop Firefox project alongside
+#    Chromium (PRs stay Chromium-only for speed).
+name: e2e-nightly
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  e2e-nightly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # Production parity: real rate limits, real hashing cost, docs on.
+      E2E_RATE_LIMIT_MAX: "120"
+      E2E_RATE_LIMIT_AUTH_MAX: "10"
+      E2E_RATE_LIMIT_AUTH_WINDOW_SECONDS: "300"
+      E2E_ARGON2_MEMORY_KIB: "19456"
+      E2E_ARGON2_TIME_COST: "2"
+      E2E_ARGON2_PARALLELISM: "1"
+      E2E_DOCS_ENABLED: "true"
+      E2E_BROWSERS: "chromium,firefox"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generate the Prisma client and build the service
+        run: |
+          DATABASE_URL=postgresql://localhost:5432/printninja_ci_dummy \
+          pnpm --filter server db:generate
+          pnpm --filter server build
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-nightly-${{ hashFiles('pnpm-lock.yaml') }}
+      - name: Install Chromium and Firefox with system dependencies
+        run: pnpm --filter e2e exec playwright install --with-deps chromium firefox
+      - run: pnpm e2e
+      - name: Upload the HTML report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-nightly
+          path: e2e/playwright-report
+          retention-days: 30

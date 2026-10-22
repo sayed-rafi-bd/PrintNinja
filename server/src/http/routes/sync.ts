@@ -5,7 +5,6 @@ import {
   parseTypes,
   readChanges,
 } from "../../domain/sync/index.js";
-import { listManifest } from "../../domain/templates/index.js";
 import { UnauthorizedError } from "../../domain/errors.js";
 import type { AuthDeps } from "../../domain/ports.js";
 import { encodeCursor } from "../../domain/syncPorts.js";
@@ -14,14 +13,10 @@ import type {
   TemplateRepository,
 } from "../../domain/templatePorts.js";
 import type { SyncRepository } from "../../domain/syncPorts.js";
-import { toManifestItem, toSyncChange } from "../mappers.js";
+import { toSyncChange } from "../mappers.js";
 import { requireAuth } from "../plugins/auth.js";
 import { errorBody } from "../schemas/error.js";
-import {
-  changesResponse,
-  manifestResponse,
-  syncQuery,
-} from "../schemas/sync.js";
+import { changesResponse, syncQuery } from "../schemas/sync.js";
 
 export interface SyncRouteOptions {
   deps: AuthDeps & {
@@ -79,31 +74,6 @@ export async function syncRoutes(
         has_more: result.hasMore,
         reset: result.reset,
       };
-    },
-  );
-
-  typed.get(
-    "/v2/saved/manifest",
-    {
-      preHandler: [requireAuth(deps)],
-      schema: {
-        description:
-          "Revision and state of every saved template, including withdrawn and deleted.",
-        response: {
-          200: manifestResponse,
-          401: errorBody,
-        },
-      },
-    },
-    async (request) => {
-      if (!request.authUser) {
-        throw new UnauthorizedError();
-      }
-      const items = await listManifest(
-        { saved: deps.saved },
-        request.authUser.id,
-      );
-      return { items: items.map(toManifestItem) };
     },
   );
 }
