@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ServerUnreachableError, SessionExpiredError } from "@/lib/api/errors";
+import { SessionExpiredError } from "@/lib/api/errors";
 import * as share from "@/lib/share/client";
 
 export type ShareStatus =
@@ -9,6 +9,11 @@ export type ShareStatus =
   | { state: "offline" };
 
 const POLL_MS = 120_000;
+// One immediate retry before reporting offline: a single failed check
+// (cold server, dropped packet, one 5xx) must not park the badge on
+// "offline" until the next poll or window focus. Only a second
+// consecutive failure counts.
+const RETRY_MS = 5_000;
 
 /** Connection to the share service, for the top bar. Never throws. */
 export function useShareStatus(): ShareStatus {
@@ -26,26 +31,35 @@ export function useShareStatus(): ShareStatus {
           if (!token) {
             next = { state: "signed_out" };
           } else {
-            try {
-              const me = await share.fetchMe();
-              next = { state: "online", handle: me.handle ?? "" };
-            } catch (err) {
-              if (err instanceof SessionExpiredError) {
-                // The server no longer accepts this session: back to sign-in
-                // (callApi already cleared the token through onUnauthorized).
-                next = { state: "signed_out" };
-              } else if (err instanceof ServerUnreachableError) {
-                next = { state: "offline" };
-              } else {
-                next = { state: "offline" };
-              }
-            }
+            next = (await checkOnline()) ?? next;
           }
         }
       } catch {
         next = { state: "unconfigured" };
       }
       if (!cancelled) setStatus(next);
+    };
+
+    /** Online unless the session died (signed out) or two consecutive
+     * checks failed (offline). Returns null when unmounted mid-retry. */
+    const checkOnline = async (): Promise<ShareStatus | null> => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const me = await share.fetchMe();
+          return { state: "online", handle: me.handle ?? "" };
+        } catch (err) {
+          if (err instanceof SessionExpiredError) {
+            // The server no longer accepts this session: back to sign-in
+            // (callApi already cleared the token through onUnauthorized).
+            return { state: "signed_out" };
+          }
+          if (attempt >= 1 || cancelled) {
+            return { state: "offline" };
+          }
+          await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+          if (cancelled) return null;
+        }
+      }
     };
 
     void check();

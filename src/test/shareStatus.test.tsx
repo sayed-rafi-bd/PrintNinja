@@ -60,13 +60,29 @@ describe("useShareStatus", () => {
     );
   });
 
-  it("is offline when the server cannot be reached", async () => {
+  it("is offline when the server cannot be reached twice in a row", async () => {
     share.fetchMe.mockRejectedValue(
       new ServerUnreachableError("https://srv.test"),
     );
     render(<Probe />);
-    await waitFor(() =>
-      expect(screen.getByTestId("status")).toHaveTextContent("offline"),
+    await waitFor(
+      () => expect(screen.getByTestId("status")).toHaveTextContent("offline"),
+      { timeout: 10_000 },
     );
-  });
+    // First check plus the one automatic retry.
+    expect(share.fetchMe).toHaveBeenCalledTimes(2);
+  }, 15_000);
+
+  it("recovers without ever showing offline on a single failed check", async () => {
+    share.fetchMe
+      .mockRejectedValueOnce(new ServerUnreachableError("https://srv.test"))
+      .mockResolvedValue({ id: "u1", handle: "rafi" });
+    render(<Probe />);
+    await waitFor(
+      () =>
+        expect(screen.getByTestId("status")).toHaveTextContent("online:rafi"),
+      { timeout: 10_000 },
+    );
+    expect(share.fetchMe).toHaveBeenCalledTimes(2);
+  }, 15_000);
 });
