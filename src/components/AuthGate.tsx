@@ -30,6 +30,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [gate, setGate] = useState<Gate>({ kind: "checking" });
   const [opened, setOpened] = useState(false);
 
+  // Latch, applied during render rather than in an effect: the app must
+  // mount in the same commit that first reports ready. A useEffect here
+  // can flush after a later transition already unmounted the subtree,
+  // and the remount comes back empty — losing unsaved edits. Render-phase
+  // updates are synchronous, so there is no window to lose.
+  if (gate.kind === "ready" && !opened) {
+    setOpened(true);
+  }
+
   const apply = useCallback((result: SessionCheck) => {
     if (result.state === "signed_in") {
       setGate({ kind: "ready" });
@@ -82,10 +91,6 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       }),
     [],
   );
-
-  useEffect(() => {
-    if (gate.kind === "ready") setOpened(true);
-  }, [gate.kind]);
 
   const retry = async () => {
     setGate((g) => (g.kind === "unreachable" ? { ...g, retrying: true } : g));
