@@ -207,8 +207,23 @@ fn raw_replies(p: &Printer, chunk: &[u8]) -> Vec<Vec<u8>> {
 // --------------------------------------------------------------------------
 pub fn handle(p: &Printer, mut stream: TcpStream) {
     match p.state() {
-        State::Drop => return,
+        State::Drop => {
+            // Shrink the receive buffer before closing: on a fast loopback
+            // the client can otherwise push the whole test payload through
+            // before this close is processed, and the close test passes
+            // vacuously instead of on the reset.
+            let _ =
+                socket2::SockRef::from(&stream).set_recv_buffer_size(4096);
+            return;
+        }
         State::Hang => {
+            // Never read, and leave no room to absorb the write: the
+            // client must block in the kernel (and hit its deadline)
+            // instead of completing into loopback buffers. Without this
+            // a fast loopback swallows even multi-megabyte payloads and
+            // the timeout test passes vacuously.
+            let _ =
+                socket2::SockRef::from(&stream).set_recv_buffer_size(4096);
             thread::sleep(Duration::from_secs(60));
             return;
         }

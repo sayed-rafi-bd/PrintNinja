@@ -128,9 +128,14 @@ fn fixture_binary() -> PathBuf {
 /// (`transport::status`) covers the faults a printer *reports*; what it
 /// never reports — it took the bytes and went quiet — is caught only here.
 ///
-/// So this is 8 MiB: over the 4 MiB default with room to spare, whatever the
-/// peer's advertised window.
-const BIG: usize = 8 << 20;
+/// So this is 32 MiB: over every default send-buffer ceiling (Linux
+/// tcp_wmem maxes at 4-6 MiB; Windows dynamic send buffers stay well
+/// below this), whatever the peer's advertised window — and the fixture
+/// caps its own receive buffer at 4 KiB in the hang/drop states, so no
+/// autotuning has a reason to grow past it either. Smaller payloads can
+/// complete into a fast loopback without the peer ever reading, which
+/// makes the timeout/close tests pass vacuously.
+const BIG: usize = 32 << 20;
 
 // ───────────────────────────────────────────────────────────────
 // harness
