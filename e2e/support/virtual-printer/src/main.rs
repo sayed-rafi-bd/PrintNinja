@@ -53,6 +53,11 @@ struct Args {
     state: State,
     name: String,
     idle: f64,
+    /// Write the actually-bound ports here (`raw=…`, `lpd=…`, `ipp=…`,
+    /// `http=…`, one per line) for harness discovery. When set, every
+    /// listener binds port 0 and any bind failure is fatal, so a test
+    /// can never talk to a half-started or foreign fixture.
+    ports_file: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -63,6 +68,7 @@ fn parse_args() -> Result<Args, String> {
         state: State::Ready,
         name: "Virtual Printer".into(),
         idle: 2.0,
+        ports_file: None,
     };
     let mut it = env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -89,6 +95,7 @@ fn parse_args() -> Result<Args, String> {
                 a.state = State::parse(&s).ok_or_else(|| format!("--state must be one of: {}", State::names()))?;
             }
             "--name" => a.name = value(&key)?,
+            "--ports-file" => a.ports_file = Some(PathBuf::from(value(&key)?)),
             "--idle" => {
                 a.idle = value(&key)?.parse().map_err(|_| "--idle must be a number".to_string())?;
                 if !a.idle.is_finite() || a.idle <= 0.0 {
@@ -148,27 +155,72 @@ fn main() {
         ("HTTP", 80, Kind::Http),
     ];
     for (name, base, kind) in services {
-        let port = base + args.offset;
-        if port > 65535 {
-            eprintln!("! {}: port {} is out of range, lower --offset", name, port);
-            continue;
-        }
-        let port = port as u16;
-        match TcpListener::bind((args.host.as_str(), port)) {
+        // With --ports-file the OS picks every port (0) so parallel tests
+        // can never share or steal one; otherwise the requested offset
+        // applies and a clashing service fails that listener loudly below.
+        let requested: u16 = if args.ports_file.is_some() {
+            0
+        } else {
+            let port = base + args.offset;
+            if port > 65535 {
+                eprintln!(
+                    "! {}: port {} is out of range, lower --offset",
+                    name, port
+                );
+                continue;
+            }
+            port as u16
+        };
+        match TcpListener::bind((args.host.as_str(), requested)) {
             Ok(l) => {
-                printer.add_port(name, port);
+                let bound = l
+                    .local_addr()
+                    .map(|a| a.port())
+                    .unwrap_or(requested);
+                printer.add_port(name, bound);
                 serve(Arc::clone(&printer), l, kind);
-                println!("  {:14} listening on {}:{}", name, args.host, port);
+                println!("  {:14} listening on {}:{}", name, args.host, bound);
             }
             Err(e) if e.kind() == ErrorKind::PermissionDenied => {
-                eprintln!("! {}: port {} needs root. Re-run with sudo or use a higher --offset", name, port);
+                eprintln!("! {}: port {} needs root. Re-run with sudo or use a higher --offset", name, requested);
+                if args.ports_file.is_some() {
+                    process::exit(1);
+                }
             }
-            Err(e) => eprintln!("! {}: port {}: {}", name, port, e),
+            Err(e) => {
+                eprintln!("! {}: port {}: {}", name, requested, e);
+                if args.ports_file.is_some() {
+                    process::exit(1);
+                }
+            }
         }
     }
     if printer.ports().is_empty() {
         eprintln!("no listener could be started");
         process::exit(1);
+    }
+    if let Some(path) = &args.ports_file {
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+        }
+        let mut out = String::new();
+        for (name, port) in printer.ports() {
+            // Keys are the test harness's port names, not display labels.
+            let key = match name {
+                "raw/JetDirect" => "raw",
+                "LPD" => "lpd",
+                "IPP" => "ipp",
+                "HTTP" => "http",
+                other => other,
+            };
+            out.push_str(&format!("{}={}\n", key.to_lowercase(), port));
+        }
+        if std::fs::write(path, out).is_err() {
+            eprintln!("cannot write ports file {}", path.display());
+            process::exit(1);
+        }
     }
     let abs = std::fs::canonicalize(&args.jobs).unwrap_or_else(|_| env::current_dir().unwrap_or_default().join(&args.jobs));
     println!("State: {}   Jobs saved to: {}", printer.state().name(), abs.display());
