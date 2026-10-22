@@ -86,4 +86,9 @@ export const testids = {
   settingsFontUpload: "settings-font-upload",
   /** Settings retention: open the full-reset confirmation. */
   settingsResetDatabase: "settings-reset-database",
+  /** Settings share: change-password fields and submit. */
+  settingsChangePasswordCurrent: "settings-change-password-current",
+  settingsChangePasswordNew: "settings-change-password-new",
+  settingsChangePasswordConfirm: "settings-change-password-confirm",
+  settingsChangePasswordSubmit: "settings-change-password-submit",
 } as const;

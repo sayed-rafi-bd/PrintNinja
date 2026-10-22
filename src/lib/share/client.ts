@@ -198,6 +198,22 @@ export async function logout(): Promise<void> {
   }
 }
 
+/**
+ * Change the account password. The server revokes every other session;
+ * the caller keeps working. Throws on a wrong current password or a
+ * too-short replacement (server enforces 8+ chars too).
+ */
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<{ revoked: number }> {
+  return callApi<{ revoked: number }>(apiDeps(), {
+    method: "PUT",
+    path: "/v2/auth/password",
+    body: { current_password: currentPassword, new_password: newPassword },
+  });
+}
+
 /** A template as the v2 service stores it. `published_at` is null when
  * private (v1 used an empty string); every existing falsy check keeps
  * working unchanged. */

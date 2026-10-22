@@ -27,9 +27,9 @@
 > default, session purge hardening + no-store + revoke-all +
 > password change, font size cap + orphan sweep + relative
 > paths, schema CHECKs, API TraceLayer + readiness + metrics,
-> a11y scan + labels). Remaining P2: Prometheus export format,
-> CHECK rebuild migrations for pre-existing DBs, desktop
-> password-change UI.
+> a11y scan + labels, desktop password-change UI). Remaining P2:
+> Prometheus export format, CHECK rebuild migrations for
+> pre-existing DBs.
 
 Audited from the working tree (develop). Each item names the file that proves it.
 Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt with user impact, **P2** = hardening/polish.

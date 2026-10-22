@@ -50,6 +50,7 @@ import {
   Info,
   ListChecks,
 } from "lucide-react";
+import { ChangePasswordForm } from "@/components/ChangePasswordForm";
 import { toast } from "sonner";
 import { diagnostics } from "@/lib/diagnostics";
 import * as share from "@/lib/share/client";
@@ -861,6 +862,10 @@ export function SettingsPage() {
                         Sign out
                       </Button>
                     </div>
+                    <ChangePasswordForm
+                      busy={shareBusy}
+                      setBusy={setShareBusy}
+                    />
                   </div>
                 )}
               </CardContent>
