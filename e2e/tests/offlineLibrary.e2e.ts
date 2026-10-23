@@ -73,7 +73,11 @@ test("offline library edits queue dirty and replay on recovery", async ({
   // reads the stack state for the same reason).
   await blockApi(seeded.context, readStackState().apiUrl);
   await page.goto("/templates");
-  await expect(page.getByTestId(testids.offlineBanner)).toBeVisible();
+  // The share-status check retries once before declaring offline, so the
+  // banner can take a few seconds to appear after the block starts.
+  await expect(page.getByTestId(testids.offlineBanner)).toBeVisible({
+    timeout: 15_000,
+  });
 
   const run = invoke(page);
   const templates = (await run("list_templates", {})) as Array<{

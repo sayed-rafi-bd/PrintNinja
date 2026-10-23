@@ -51,7 +51,11 @@ test("F12 offline start, pending edits, and recovery", async ({ browser }) => {
   await expect(page.getByTestId(testids.shellApp)).toBeVisible({
     timeout: 15_000,
   });
-  await expect(page.getByTestId(testids.offlineBanner)).toBeVisible();
+  // The share-status check retries once before declaring offline, so the
+  // banner can take a few seconds to appear after the block starts.
+  await expect(page.getByTestId(testids.offlineBanner)).toBeVisible({
+    timeout: 15_000,
+  });
   await expect(page.getByText("Offline Invoice")).toBeVisible();
   // The share is down, so the shell shows the offline badge (the sync
   // chip renders once the share is back online).
