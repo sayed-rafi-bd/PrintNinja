@@ -51,6 +51,7 @@ import {
   ListChecks,
 } from "lucide-react";
 import { ChangePasswordForm } from "@/components/ChangePasswordForm";
+import { UpdateSettings } from "@/components/UpdateSettings";
 import { toast } from "sonner";
 import { diagnostics } from "@/lib/diagnostics";
 import * as share from "@/lib/share/client";
@@ -653,6 +654,7 @@ export function SettingsPage() {
                 )}
               </CardContent>
             </Card>
+            <UpdateSettings appVersion={appVersion} />
           </TabsContent>
 
           <TabsContent value="background" className="mt-0 space-y-4">

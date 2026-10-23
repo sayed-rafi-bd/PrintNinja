@@ -122,6 +122,14 @@ pub fn run() {
         Some(vec!["--minimized"]),
     ));
 
+    // In-place updates from GitHub Releases (desktop only; Android uses
+    // the store / APK flow). The endpoint + pubkey live in
+    // tauri.conf.json `plugins.updater`; `process` provides relaunch.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_process::init());
+
     builder
         .setup(|app| {
             let db_path = app.path().app_data_dir()?.join("printninja.db");

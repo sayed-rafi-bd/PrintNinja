@@ -2,5 +2,5 @@
   "identifier": "default",
   "description": "Lets the main window set its own title (Settings → Branding). App commands are unaffected.",
   "windows": ["main"],
-  "permissions": ["core:window:allow-set-title", "android-print:default"]
+  "permissions": ["core:window:allow-set-title", "android-print:default", "updater:default", "process:allow-restart"]
 }

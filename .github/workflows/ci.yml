@@ -295,11 +295,20 @@ jobs:
         run: rm -rf src-tauri/target/release/build/printninja-* src-tauri/target/release/bundle || true
       - run: pnpm install --frozen-lockfile
       # MSI only. Without --target, output lands in target/release/bundle.
+      # The updater plugin is active, so a signed `.msi.zip` (+ `.sig`) is
+      # emitted alongside for the auto-update feed. Secrets come from the
+      # repo settings (TAURI_SIGNING_PRIVATE_KEY[_PASSWORD]).
       - run: pnpm exec tauri build --bundles msi
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - uses: actions/upload-artifact@v4
         with:
           name: windows-msi
-          path: src-tauri/target/release/bundle/msi/*.msi
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/msi/*.msi.zip
+            src-tauri/target/release/bundle/msi/*.msi.zip.sig
           if-no-files-found: error
           retention-days: 30
 
@@ -327,13 +336,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # deb + AppImage only (no rpm/Flatpak — see docs/IMPROVEMENTS.md §5).
       # Without --target, output lands in target/release/bundle.
+      # The updater plugin is active, so a signed `.AppImage.tar.gz`
+      # (+ `.sig`) is emitted alongside for the auto-update feed.
       - run: pnpm exec tauri build --bundles deb appimage
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - uses: actions/upload-artifact@v4
         with:
           name: linux
           path: |
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz
+            src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz.sig
           if-no-files-found: error
           retention-days: 30
 
@@ -407,10 +423,21 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist-artifacts
           merge-multiple: true
+      # Updater feed for the Tauri updater plugin (desktop only). Consumes
+      # the signed .msi.zip + .AppImage.tar.gz (+ .sig files) emitted by
+      # the OS builds; the raw .msi/.deb/.AppImage/APK stay manual-only.
+      # Note: `…/releases/latest/download/latest.json` only resolves on a
+      # published release — updates start flowing when the draft below is
+      # published.
+      - name: Generate latest.json updater feed
+        run: |
+          node scripts/generate-latest-json.mjs "${GITHUB_REF_NAME#v}" dist-artifacts latest.json
+          cat latest.json
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -420,7 +447,12 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             dist-artifacts/*.msi
+            dist-artifacts/*.msi.zip
+            dist-artifacts/*.msi.zip.sig
             dist-artifacts/**/*.deb
             dist-artifacts/**/*.AppImage
+            dist-artifacts/**/*.AppImage.tar.gz
+            dist-artifacts/**/*.AppImage.tar.gz.sig
             dist-artifacts/**/*.apk
             dist-artifacts/**/*.aab
+            latest.json
