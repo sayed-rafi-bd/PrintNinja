@@ -3,9 +3,7 @@ import type {
   AddPrinterReq,
   ApiStatus,
   ApplyReport,
-  BatchRow,
   ConflictedRow,
-  CreateBatchReq,
   DeeplinkResult,
   DirtyDatasetRow,
   DirtyFontRow,
@@ -176,11 +174,6 @@ export interface AgentCommands {
   reprint_job: [{ id: number }, HistoryJob];
   retry_job: [{ id: number }, HistoryJob];
   delete_job: [{ id: number }, null];
-  create_batch: [{ req: CreateBatchReq }, BatchRow];
-  list_batches: [{}, BatchRow[]];
-  get_batch: [{ id: number }, BatchRow];
-  cancel_batch: [{ id: number }, null];
-  retry_batch: [{ id: number }, null];
   // Local API server
   start_api_server: [{ port: number; lan_access: boolean }, string];
   stop_api_server: [{}, null];

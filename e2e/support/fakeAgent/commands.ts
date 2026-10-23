@@ -11,79 +11,6 @@ import { createFakeCache, type SyncChangeIn } from "./cache.js";
 // The sync cache is the exception: one module holds the whole behavior
 // so the shared cache_cases.json runs identically here and in Rust.
 
-// In-memory batch store. Mirrors the Rust validation in
-// commands/batch.rs (mode, JSON array, non-empty, 5k records) and the
-// cancel/retry state rules. There is no worker here: rows stay queued
-// until cancelled, and retry re-queues — the worker drain itself is
-// covered by src-tauri worker tests, and the virtual-printer suite
-// covers the device half.
-interface FakeBatchRow {
-  id: number;
-  total: number;
-  done: number;
-  failed: number;
-  mode: string;
-  status: "queued" | "printing" | "success" | "failed" | "cancelled";
-}
-
-const batches = new Map<number, FakeBatchRow>();
-let nextBatchId = 1;
-
-function getBatchOrThrow(id: number): FakeBatchRow {
-  const row = batches.get(id);
-  if (!row) {
-    throw new Error(`Batch ${id} not found`);
-  }
-  return row;
-}
-
-const batchHandlers: Record<string, Handler> = {
-  create_batch: (args) => {
-    const req = (args["req"] ?? args) as Record<string, unknown>;
-    const mode = String(req["mode"] ?? "");
-    if (mode !== "per_record") {
-      throw new Error(`Invalid mode '${mode}'. Only "per_record" is supported`);
-    }
-    const data = req["data"];
-    if (!Array.isArray(data)) {
-      throw new Error("Batch data must be a JSON array");
-    }
-    if (data.length === 0) {
-      throw new Error("Batch contains no records");
-    }
-    if (data.length > 5000) {
-      throw new Error(`Batch too large: ${data.length} records (max 5000)`);
-    }
-    const id = nextBatchId++;
-    const row: FakeBatchRow = {
-      id,
-      total: data.length,
-      done: 0,
-      failed: 0,
-      mode,
-      status: "queued",
-    };
-    batches.set(id, row);
-    return { ...row };
-  },
-  list_batches: () => [...batches.values()].map((row) => ({ ...row })),
-  get_batch: (args) => ({ ...getBatchOrThrow(Number(args["id"] ?? 0)) }),
-  cancel_batch: (args) => {
-    const row = getBatchOrThrow(Number(args["id"] ?? 0));
-    if (row.status === "queued" || row.status === "printing") {
-      row.status = "cancelled";
-    }
-    return null;
-  },
-  retry_batch: (args) => {
-    const row = getBatchOrThrow(Number(args["id"] ?? 0));
-    row.status = "queued";
-    row.failed = 0;
-    row.done = 0;
-    return null;
-  },
-};
-
 /**
  * Mirrors parse_deep_link in src-tauri/src/deeplink.rs: same actions,
  * same defaults (confirm unless 0/false, test only on 1/true, copies
@@ -182,14 +109,7 @@ const implemented: Record<string, Handler> = {
     return null;
   },
   reset_database: () => {
-    const report = cache.resetDatabase() as Record<string, number>;
-    // The fake runs no worker, so there are no print-job rows — but
-    // batches are real here, unlike print_jobs. Report their count so
-    // the wipe path is pinned instead of masked as zero.
-    report["batches"] = batches.size;
-    batches.clear();
-    nextBatchId = 1;
-    return report;
+    return cache.resetDatabase();
   },
   ping: () => null,
   enumerate_system_printers: () =>
@@ -487,7 +407,6 @@ const acknowledgedStubs: string[] = [
 
 const commands: Record<string, Handler> = {
   ...implemented,
-  ...batchHandlers,
   parse_deeplink: (args) => parseDeepLink(String(args["url"] ?? "")),
 };
 for (const name of acknowledgedStubs) {

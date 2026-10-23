@@ -87,6 +87,7 @@ fn print_request(printer: &str) -> PrintRequest {
         page_height_mm: Some(150.0),
         orientation: Some("portrait".to_string()),
         copies: Some(1),
+        records: None,
         margin_top: None,
         margin_right: None,
         margin_bottom: None,
@@ -683,6 +684,26 @@ async fn a_running_job_shows_as_printing_and_then_finishes() {
     assert!(error.is_none());
 }
 
+/// Captures the final document instead of rendering it, so tests can
+/// count pages and records without a browser.
+#[derive(Default)]
+struct CapturingHtml {
+    html: Mutex<Option<String>>,
+}
+#[async_trait::async_trait]
+impl JobRenderer for CapturingHtml {
+    async fn render(
+        &self,
+        final_html: &str,
+        _w_mm: f64,
+        _h_mm: f64,
+        _orientation: &str,
+    ) -> anyhow::Result<Vec<u8>> {
+        *self.html.lock().unwrap() = Some(final_html.to_string());
+        Ok(b"%PDF-1.4 fake-render".to_vec())
+    }
+}
+
 /// An array payload prints one page per record in a single document:
 /// one object → one page, N objects → N pages joined with a page break.
 #[tokio::test]
@@ -693,26 +714,7 @@ async fn an_array_payload_prints_one_page_per_record() {
     seed_printer(&db, "Good", &good);
     let queue = PrintQueue::new();
 
-    struct CapturingRenderer {
-        html: Mutex<Option<String>>,
-    }
-    #[async_trait::async_trait]
-    impl JobRenderer for CapturingRenderer {
-        async fn render(
-            &self,
-            final_html: &str,
-            _w_mm: f64,
-            _h_mm: f64,
-            _orientation: &str,
-        ) -> anyhow::Result<Vec<u8>> {
-            *self.html.lock().unwrap() = Some(final_html.to_string());
-            Ok(b"%PDF-1.4 fake-render".to_vec())
-        }
-    }
-
-    let renderer = CapturingRenderer {
-        html: Mutex::new(None),
-    };
+    let renderer = CapturingHtml::default();
     let mut req = print_request("Good");
     req.html = "<p>Hello {{name}}!</p>".to_string();
     req.data = Some(serde_json::json!([{ "name": "Ana" }, { "name": "Bo" }]));
@@ -750,6 +752,87 @@ async fn an_empty_array_payload_fails_the_job() {
         res.error
             .as_deref()
             .is_some_and(|e| e.contains("empty array")),
+        "clear error, got {:?}",
+        res.error
+    );
+}
+
+/// A single object with `records = N` prints N identical pages in one
+/// document — the repeat control for test-data and data-URL objects.
+#[tokio::test]
+async fn a_single_object_with_records_prints_n_pages() {
+    let _finishes = lock_finishes().await;
+    let db = test_db();
+    let good = mock_ipp_server(0x0000);
+    seed_printer(&db, "Good", &good);
+    let queue = PrintQueue::new();
+    let renderer = CapturingHtml::default();
+
+    let mut req = print_request("Good");
+    req.html = "<p>Hello {{name}}!</p>".to_string();
+    req.data = Some(serde_json::json!({ "name": "Ana" }));
+    req.records = Some(3);
+
+    let res = run_print_with(&cache_dir(), &db, &queue, req, &renderer)
+        .await
+        .expect("repeated print succeeds");
+    assert!(res.success, "{:?}", res.error);
+
+    let html = renderer.html.lock().unwrap().clone().expect("rendered");
+    assert_eq!(html.matches("Hello Ana!").count(), 3);
+    assert_eq!(
+        html.matches(r#"<div style="break-before:page"></div>"#)
+            .count(),
+        2,
+        "pages are page-separated"
+    );
+}
+
+/// An array ignores `records`: the data's own length decides the pages.
+#[tokio::test]
+async fn an_array_ignores_records_and_prints_its_own_length() {
+    let _finishes = lock_finishes().await;
+    let db = test_db();
+    let good = mock_ipp_server(0x0000);
+    seed_printer(&db, "Good", &good);
+    let queue = PrintQueue::new();
+    let renderer = CapturingHtml::default();
+
+    let mut req = print_request("Good");
+    req.html = "<p>Hi {{name}}!</p>".to_string();
+    req.data = Some(serde_json::json!([{ "name": "Ana" }, { "name": "Bo" }]));
+    req.records = Some(7);
+
+    let res = run_print_with(&cache_dir(), &db, &queue, req, &renderer)
+        .await
+        .expect("array print succeeds");
+    assert!(res.success, "{:?}", res.error);
+
+    let html = renderer.html.lock().unwrap().clone().expect("rendered");
+    assert_eq!(html.matches("Hi ").count(), 2);
+}
+
+/// More than MAX_RECORDS pages is rejected instead of building a giant PDF.
+#[tokio::test]
+async fn too_many_records_fails_the_job() {
+    let _finishes = lock_finishes().await;
+    let db = test_db();
+    let good = mock_ipp_server(0x0000);
+    seed_printer(&db, "Good", &good);
+    let queue = PrintQueue::new();
+
+    let mut req = print_request("Good");
+    req.data = Some(serde_json::json!({ "name": "Ana" }));
+    req.records = Some(501);
+
+    let res = run_print_with(&cache_dir(), &db, &queue, req, &FakeRenderer)
+        .await
+        .expect("over-limit is an outcome, not a pipeline error");
+    assert!(!res.success);
+    assert!(
+        res.error
+            .as_deref()
+            .is_some_and(|e| e.contains("Too many pages")),
         "clear error, got {:?}",
         res.error
     );

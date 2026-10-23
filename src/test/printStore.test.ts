@@ -15,6 +15,7 @@ describe("printStore", () => {
       marginLeft: 5,
       fitMode: "fit-width",
       copies: 1,
+      records: 1,
       useTestData: false,
       pageRange: "",
       grayscale: false,
@@ -47,6 +48,15 @@ describe("printStore", () => {
   it("sets copies", () => {
     usePrintStore.getState().setCopies(3);
     expect(usePrintStore.getState().copies).toBe(3);
+  });
+
+  it("sets records clamped to 1..500 for pages per print", () => {
+    usePrintStore.getState().setRecords(3);
+    expect(usePrintStore.getState().records).toBe(3);
+    usePrintStore.getState().setRecords(0);
+    expect(usePrintStore.getState().records).toBe(1);
+    usePrintStore.getState().setRecords(9999);
+    expect(usePrintStore.getState().records).toBe(500);
   });
 
   it("sets margins", () => {

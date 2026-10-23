@@ -311,6 +311,7 @@ pub async fn test_printer(
         page_height_mm: None,
         orientation: Some("portrait".into()),
         copies: Some(1),
+        records: None,
         margin_top: None,
         margin_right: None,
         margin_bottom: None,
