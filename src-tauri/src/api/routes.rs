@@ -52,7 +52,6 @@ pub fn router_with_state(state: ApiState, lan_access: bool) -> Router {
         .route("/v1/printers", get(list_printers))
         .route("/v1/templates", get(list_templates))
         .route("/v1/print", post(print_job))
-        .route("/v1/print/batch", post(batch_print))
         .route("/v1/jobs", get(list_jobs))
         .route("/v1/jobs/{id}", get(get_job).delete(cancel_job))
         .route("/v1/jobs/{id}/retry", post(retry_job))
@@ -105,7 +104,7 @@ async fn auth_middleware_inner(
     // held across an await point.
 
     // GET reads; every other method changes what gets printed — a print,
-    // a batch, a re-queue or a cancel — so it needs the `print` scope.
+    // a re-queue or a cancel — so it needs the `print` scope.
     let required_scope = if request.method() == axum::http::Method::GET {
         "read"
     } else {
@@ -435,6 +434,7 @@ async fn print_job(
             .and_then(|o| o.as_str())
             .map(str::to_string),
         copies: Some(copies),
+        records: None,
         margin_top: None,
         margin_right: None,
         margin_bottom: None,
@@ -493,115 +493,6 @@ async fn print_job(
         )),
         Err(e) => Err(ApiRejection::from(e)),
     }
-}
-
-#[derive(Deserialize)]
-struct BatchPrintRequest {
-    template: Option<String>,
-    printer: String,
-    data: Value,
-    mode: Option<String>,
-}
-
-async fn batch_print(
-    State(state): State<ApiState>,
-    Json(req): Json<BatchPrintRequest>,
-) -> Result<(StatusCode, Json<Value>), ApiRejection> {
-    let db = state.db.clone();
-    let records = req
-        .data
-        .as_array()
-        .ok_or_else(|| ApiRejection::BadRequest("data must be a JSON array".into()))?;
-
-    // Validate the request shape before touching the database (P3): an
-    // empty batch queues nothing to print, and a 5,000-record cap is what
-    // the IPC batch command enforces too.
-    if records.is_empty() {
-        return Err(ApiRejection::BadRequest(
-            "data must contain at least one record".into(),
-        ));
-    }
-    if records.len() > crate::commands::batch::DEFAULT_MAX_RECORDS {
-        return Err(ApiRejection::BadRequest(format!(
-            "batch too large: {} records (max {})",
-            records.len(),
-            crate::commands::batch::DEFAULT_MAX_RECORDS
-        )));
-    }
-    let mode = req.mode.unwrap_or_else(|| "per_record".into());
-    if mode != "per_record" {
-        return Err(ApiRejection::BadRequest(format!(
-            "invalid mode '{}': only 'per_record' is supported",
-            mode
-        )));
-    }
-
-    let guard = db.lock().map_err(ApiRejection::from)?;
-    let conn = guard.connection();
-    let tx = conn.unchecked_transaction().map_err(ApiRejection::from)?;
-
-    let template_id: i64 = match &req.template {
-        Some(n) if !n.is_empty() => tx
-            .query_row(
-                "SELECT id FROM templates WHERE name = ?1 COLLATE NOCASE AND sync_state <> 'deleted_pending'",
-                [n],
-                |r| r.get(0),
-            )
-            .map_err(|_| ApiRejection::NotFound(format!("Template '{}' not found", n)))?,
-        _ => return Err(ApiRejection::BadRequest("template is required".into())),
-    };
-
-    let printer_id: i64 = tx
-        .query_row(
-            "SELECT id FROM printers WHERE name = ?1 COLLATE NOCASE",
-            [&req.printer],
-            |r| r.get(0),
-        )
-        .map_err(|_| ApiRejection::NotFound(format!("Printer '{}' not found", req.printer)))?;
-
-    tx.execute(
-        "INSERT INTO batches (template_id, printer_id, total, mode, status)
-         VALUES (?1, ?2, ?3, ?4, 'queued')",
-        rusqlite::params![template_id, printer_id, records.len() as i64, mode],
-    )
-    .map_err(ApiRejection::from)?;
-    let batch_id = tx.last_insert_rowid();
-
-    // per_record only: one queued job per record, each carrying its
-    // own payload in `data_json` — without it the worker would have
-    // nothing to render (P3).
-    for (i, record) in records.iter().enumerate() {
-        tx.execute(
-            "INSERT INTO print_jobs
-                   (batch_id, record_index, template_id,
-                    printer_id, source, status, copies, is_test, data_json)
-                 VALUES (?1, ?2, ?3, ?4, 'api', 'queued', 1, 0, ?5)",
-            rusqlite::params![
-                batch_id,
-                i as i64,
-                template_id,
-                printer_id,
-                record.to_string()
-            ],
-        )
-        .map_err(ApiRejection::from)?;
-    }
-
-    tx.commit().map_err(ApiRejection::from)?;
-    drop(guard);
-
-    // The rows are `queued`; wake the worker that prints them (P3).
-    state.queue.kick();
-
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(json!({
-            "batch_id": batch_id.to_string(),
-            "status": "queued",
-            "records": records.len(),
-            "mode": mode,
-        })),
-    ))
 }
 
 async fn get_job(

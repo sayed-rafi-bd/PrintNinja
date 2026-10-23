@@ -693,112 +693,6 @@ async fn print_rejects_unknown_printer() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
-#[tokio::test]
-async fn batch_print_creates_one_job_per_record() {
-    let (db, key) = setup();
-    seed_printers_and_templates(&db);
-
-    let app = router(&db);
-    let res = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/v1/print/batch")
-                .header("authorization", format!("Bearer {}", key))
-                .header("content-type", "application/json")
-                .body(axum::body::Body::from(
-                    serde_json::json!({
-                        "template": "Receipt",
-                        "printer": "Desk",
-                        "mode": "per_record",
-                        "data": [{"n":1},{"n":2},{"n":3}]
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::ACCEPTED);
-
-    let guard = db.lock().unwrap();
-    let c = guard.connection();
-    let n: i64 = c
-        .query_row(
-            "SELECT COUNT(*) FROM print_jobs WHERE source='api'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(n, 3);
-
-    // Each record's own payload is stored on its row — that is what the
-    // worker renders (P3). It used to be dropped, so queued rows had
-    // nothing to print.
-    let stored = {
-        let mut stmt = c
-            .prepare("SELECT data_json FROM print_jobs WHERE source='api' ORDER BY record_index")
-            .unwrap();
-        let rows = stmt.query_map([], |r| r.get::<_, String>(0)).unwrap();
-        rows.collect::<Result<Vec<_>, _>>().unwrap()
-    };
-    assert_eq!(stored, vec!["{\"n\":1}", "{\"n\":2}", "{\"n\":3}"]);
-}
-
-/// An empty batch queues nothing to print, and the same 5,000-record cap
-/// the IPC batch command enforces applies to the API (both return 400,
-/// not a cheerful 202 with rows nobody will ever run).
-#[tokio::test]
-async fn batch_print_validates_record_count() {
-    let (db, key) = setup();
-    seed_printers_and_templates(&db);
-
-    for (label, data) in [
-        ("empty", serde_json::json!([])),
-        (
-            "oversized",
-            serde_json::json!((0..=5000)
-                .map(|i| serde_json::json!({ "n": i }))
-                .collect::<Vec<_>>()),
-        ),
-    ] {
-        let app = router(&db);
-        let res = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/print/batch")
-                    .header("authorization", format!("Bearer {}", key))
-                    .header("content-type", "application/json")
-                    .body(axum::body::Body::from(
-                        serde_json::json!({
-                            "template": "Receipt",
-                            "printer": "Desk",
-                            "mode": "per_record",
-                            "data": data
-                        })
-                        .to_string(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            res.status(),
-            StatusCode::BAD_REQUEST,
-            "{label} batch rejected"
-        );
-    }
-
-    let guard = db.lock().unwrap();
-    let n: i64 = guard
-        .connection()
-        .query_row("SELECT COUNT(*) FROM batches", [], |r| r.get(0))
-        .unwrap();
-    assert_eq!(n, 0, "a rejected batch must insert nothing at all");
-}
-
 /// Retry re-queues only terminal rows: a `queued` or running job must not
 /// be re-queued (it would print twice), and an unknown id stays a 404 (P3).
 #[tokio::test]
@@ -1063,9 +957,8 @@ async fn openapi_documents_the_print_response_codes() {
 }
 
 /// P12: the hand-written document must describe what the router really
-/// returns — batch queues rows for the worker and answers `202`, cancel
-/// answers `204` with no body, and the jobs endpoints answer `404`/`400`
-/// for missing or non-terminal jobs.
+/// returns — cancel answers `204` with no body, and the jobs endpoints
+/// answer `404`/`400` for missing or non-terminal jobs.
 #[tokio::test]
 async fn the_openapi_document_matches_the_router() {
     let (db, key) = setup();
@@ -1095,19 +988,6 @@ async fn the_openapi_document_matches_the_router() {
             .cloned()
             .collect()
     };
-
-    // Batch really queues for the worker: 202, not a "created" 200.
-    let batch = codes("/v1/print/batch", "post");
-    for want in ["202", "400", "401", "404"] {
-        assert!(
-            batch.contains(&want.to_string()),
-            "batch must document {want}: {batch:?}"
-        );
-    }
-    assert!(
-        !batch.iter().any(|c| c == "200"),
-        "batch answers 202, not 200: {batch:?}"
-    );
 
     // Cancel answers 204 with no body.
     let delete = codes("/v1/jobs/{id}", "delete");

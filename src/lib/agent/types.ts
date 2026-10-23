@@ -141,6 +141,8 @@ export interface PrintHtmlReq {
   page_height_mm?: number | null;
   orientation?: string | null;
   copies?: number | null;
+  /** Pages per print: a single object repeats this many times (max 500). Arrays ignore it. */
+  records?: number | null;
   margin_top?: number | null;
   margin_right?: number | null;
   margin_bottom?: number | null;
@@ -284,25 +286,6 @@ export interface SaveProfileReq {
   printer_id: number;
   template_id: number;
   settings_json: string;
-}
-
-export interface BatchRow {
-  id: number;
-  name: string;
-  status: string;
-  mode: string;
-  total: number;
-  done: number;
-  failed: number;
-}
-
-export interface CreateBatchReq {
-  template_id: number;
-  printer_id: number;
-  data: unknown;
-  mode: string;
-  settings_json?: string | null;
-  stop_on_error?: boolean | null;
 }
 
 export interface ApiStatus {

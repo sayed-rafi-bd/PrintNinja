@@ -875,9 +875,7 @@ export function createFakeCache() {
      * tables the fake does not implement), every dataset, profile, font
      * and printer, the sync state and every setting — including the
      * session, so the app returns to sign-in. Counts mirror the Rust
-     * ResetReport; print_jobs stays 0 (no worker, no job rows) while
-     * batches are real in the fake — the reset_database command
-     * overwrites that count after clearing them.
+     * ResetReport; print_jobs stays 0 (no worker, no job rows).
      */
     resetDatabase(): Record<string, number> {
       let versions = 0;

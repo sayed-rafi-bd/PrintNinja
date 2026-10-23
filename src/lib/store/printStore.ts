@@ -15,15 +15,6 @@ export interface PrintJob {
   duration_ms?: number;
 }
 
-export interface Batch {
-  id: number;
-  total: number;
-  done: number;
-  failed: number;
-  mode: "per_record";
-  status: "queued" | "printing" | "success" | "failed" | "cancelled";
-}
-
 interface PrintState {
   printerId: string;
   templateId: string;
@@ -36,6 +27,7 @@ interface PrintState {
   marginLeft: number;
   fitMode: "actual" | "fit-width" | "fit-page" | "shrink" | "fill";
   copies: number;
+  records: number;
   useTestData: boolean;
   pageRange: string;
   grayscale: boolean;
@@ -57,6 +49,7 @@ interface PrintState {
     v: "actual" | "fit-width" | "fit-page" | "shrink" | "fill",
   ) => void;
   setCopies: (v: number) => void;
+  setRecords: (v: number) => void;
   setUseTestData: (v: boolean) => void;
   setPageRange: (v: string) => void;
   setGrayscale: (v: boolean) => void;
@@ -78,6 +71,7 @@ export const usePrintStore = create<PrintState>((set) => ({
   marginLeft: 5,
   fitMode: "fit-width",
   copies: 1,
+  records: 1,
   useTestData: false,
   pageRange: "",
   grayscale: false,
@@ -98,6 +92,10 @@ export const usePrintStore = create<PrintState>((set) => ({
   setFitMode: (fitMode) => set({ fitMode }),
   setCopies: (copies) =>
     set({ copies: Math.max(1, Math.floor(Number(copies) || 1)) }),
+  setRecords: (records: number) =>
+    set({
+      records: Math.min(500, Math.max(1, Math.floor(Number(records) || 1))),
+    }),
   setUseTestData: (useTestData) => set({ useTestData }),
   setPageRange: (pageRange) => set({ pageRange }),
   setGrayscale: (grayscale) => set({ grayscale }),

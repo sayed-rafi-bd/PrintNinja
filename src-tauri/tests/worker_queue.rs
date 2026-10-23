@@ -6,7 +6,6 @@
 //! claim, batch counters, history write, transport — with only the render
 //! substituted, the same seam item 0.3 built.
 
-use printninja_lib::commands::batch::{create_batch_conn, CreateBatchRequest};
 use printninja_lib::commands::history::{reprint_job_conn, retry_job_conn};
 use printninja_lib::commands::print::JobRenderer;
 use printninja_lib::db::Database;
@@ -55,7 +54,7 @@ fn seed_template(db: &Db) -> i64 {
     conn.last_insert_rowid()
 }
 
-/// A queued row the way reprint/batch write one: the content already rendered,
+/// A queued row the way reprint writes one: the content already rendered,
 /// waiting for the worker.
 fn queued_rendered_job(db: &Db, printer_id: i64, html: &str) -> i64 {
     let guard = db.lock().unwrap();
@@ -272,22 +271,28 @@ async fn a_queued_batch_prints_every_record_and_the_counters_move() {
     let printer_id = seed_printer(&db, "Desk", &mock_ipp_server(0x0000));
     let template_id = seed_template(&db);
 
-    let batch = {
+    let batch_id = {
         let guard = db.lock().unwrap();
-        create_batch_conn(
-            guard.connection(),
-            CreateBatchRequest {
-                template_id,
-                printer_id,
-                data: serde_json::json!([{"n": 1}, {"n": 2}, {"n": 3}]),
-                mode: "per_record".into(),
-                settings_json: None,
-                stop_on_error: None,
-            },
+        let conn = guard.connection();
+        conn.execute(
+            "INSERT INTO batches (template_id, printer_id, total, mode, status) VALUES (?1, ?2, 3, 'per_record', 'queued')",
+            rusqlite::params![template_id, printer_id],
         )
-        .expect("batch is created")
+        .unwrap();
+        let batch_id = conn.last_insert_rowid();
+        for (i, record) in [r#"{"n":1}"#, r#"{"n":2}"#, r#"{"n":3}"#]
+            .iter()
+            .enumerate()
+        {
+            conn.execute(
+                "INSERT INTO print_jobs (batch_id, record_index, template_id, printer_id, source, status, copies, is_test, data_json)
+                 VALUES (?1, ?2, ?3, ?4, 'batch', 'queued', 1, 0, ?5)",
+                rusqlite::params![batch_id, i as i64, template_id, printer_id, record],
+            )
+            .unwrap();
+        }
+        batch_id
     };
-    assert_eq!(batch.total, 3);
 
     // Each record's own data is stored on its row (P3: it used to be
     // dropped, leaving nothing to print).
@@ -298,7 +303,7 @@ async fn a_queued_batch_prints_every_record_and_the_counters_move() {
             .prepare("SELECT data_json FROM print_jobs WHERE batch_id = ?1 ORDER BY record_index")
             .unwrap();
         let rows = stmt
-            .query_map([batch.id], |r| r.get::<_, String>(0))
+            .query_map([batch_id], |r| r.get::<_, String>(0))
             .unwrap();
         rows.collect::<Result<Vec<_>, _>>().unwrap()
     };
@@ -312,7 +317,7 @@ async fn a_queued_batch_prints_every_record_and_the_counters_move() {
     let ran = worker.drain(Arc::new(CountingRenderer::default())).await;
     assert_eq!(ran, 3, "every record of the batch was claimed");
 
-    let (status, done, failed) = batch_state(&db, batch.id);
+    let (status, done, failed) = batch_state(&db, batch_id);
     assert_eq!((status.as_str(), done, failed), ("success", 3, 0));
 }
 
@@ -324,26 +329,30 @@ async fn a_batch_whose_records_fail_ends_failed() {
     let printer_id = seed_printer(&db, "Desk", &mock_ipp_server(0x0502));
     let template_id = seed_template(&db);
 
-    let batch = {
+    let batch_id = {
         let guard = db.lock().unwrap();
-        create_batch_conn(
-            guard.connection(),
-            CreateBatchRequest {
-                template_id,
-                printer_id,
-                data: serde_json::json!([{"n": 1}, {"n": 2}]),
-                mode: "per_record".into(),
-                settings_json: None,
-                stop_on_error: None,
-            },
+        let conn = guard.connection();
+        conn.execute(
+            "INSERT INTO batches (template_id, printer_id, total, mode, status) VALUES (?1, ?2, 2, 'per_record', 'queued')",
+            rusqlite::params![template_id, printer_id],
         )
-        .expect("batch is created")
+        .unwrap();
+        let batch_id = conn.last_insert_rowid();
+        for i in 0..2 {
+            conn.execute(
+                "INSERT INTO print_jobs (batch_id, record_index, template_id, printer_id, source, status, copies, is_test, data_json)
+                 VALUES (?1, ?2, ?3, ?4, 'batch', 'queued', 1, 0, ?5)",
+                rusqlite::params![batch_id, i as i64, template_id, printer_id, r#"{"n":1}"#],
+            )
+            .unwrap();
+        }
+        batch_id
     };
 
     let worker = Worker::new(db.clone(), PrintQueue::new(), cache_dir());
     worker.drain(Arc::new(CountingRenderer::default())).await;
 
-    let (status, done, failed) = batch_state(&db, batch.id);
+    let (status, done, failed) = batch_state(&db, batch_id);
     assert_eq!(
         (status.as_str(), done, failed),
         ("failed", 2, 2),

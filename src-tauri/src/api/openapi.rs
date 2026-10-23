@@ -138,38 +138,6 @@ impl Default for OpenApiSpec {
                         }
                     }
                 },
-                "/v1/print/batch": {
-                    "post": {
-                        "summary": "Queue a batch print",
-                        "description": "Queues one row per record (`per_record`), stores each row's payload so retry/reprint can run it again, and wakes the worker that prints it. `202` reports the batch the worker will take — the print itself happens in the background.",
-                        "requestBody": {
-                            "required": true,
-                            "content": {
-                                "application/json": {
-                                    "schema": {
-                                        "type": "object",
-                                        "required": ["template", "printer", "data"],
-                                        "properties": {
-                                            "template": { "type": "string", "description": "Template name (case-insensitive)" },
-                                            "printer": { "type": "string", "description": "Printer name (case-insensitive)" },
-                                            "data": { "type": "array", "description": "1 to 5,000 records", "minItems": 1, "maxItems": 5000 },
-                                            "mode": { "type": "string", "enum": ["per_record"], "default": "per_record" }
-                                        }
-                                    }
-                                }
-                            }
-                        },
-                        "responses": {
-                            "202": { "description": "Batch queued: `{ batch_id, status, records, mode }`; the worker prints it" },
-                            "400": { "description": "`data` is not an array, is empty, exceeds 5,000 records, `mode` is invalid, or `template` is missing" },
-                            "401": { "description": "Missing or invalid API key" },
-                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" },
-                            "404": { "description": "Printer or template not found" },
-                            "415": { "description": "Wrong or missing `Content-Type`" },
-                            "422": { "description": "Malformed JSON, or `printer`/`data` missing" }
-                        }
-                    }
-                },
                 "/v1/jobs": {
                     "get": {
                         "summary": "List jobs",

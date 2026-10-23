@@ -14,23 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Printer,
-  Zap,
-  CheckCircle2,
-  XCircle,
-  Play,
-  ChevronDown,
-} from "lucide-react";
-import { JobStatusBadge } from "@/components/StatusBadge";
+import { Printer, Zap, CheckCircle2, XCircle, ChevronDown } from "lucide-react";
 import { TimingBreakdown } from "@/components/TimingBreakdown";
 import { cn } from "@/lib/utils";
 import { useSystemPrinters } from "@/lib/hooks/useSystemPrinters";
@@ -40,13 +24,6 @@ import { DEFAULT_MOCK_DATA } from "@/lib/templates/defaultTemplate";
 import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
 import type { StarterTemplate } from "@/lib/templates/seedTemplates";
 import { compileTemplateCss } from "@/lib/templates/compileTemplateCss";
-import {
-  applyColumnMapping,
-  CSV_MAX_BYTES,
-  CsvTooLargeError,
-  parseCsv,
-  type ColumnMapping,
-} from "@/lib/csv";
 const MM_TO_PX = 3.7795;
 
 export function PrintPage() {
@@ -55,25 +32,6 @@ export function PrintPage() {
   const { printers, refresh: refreshSystemPrinters } = useSystemPrinters();
   const [templates, setTemplates] = useState<StarterTemplate[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showBatchDialog, setShowBatchDialog] = useState(false);
-  const [batchInput, setBatchInput] = useState("");
-  const [batchCsvFile, setBatchCsvFile] = useState<File | null>(null);
-  const [batchCsvPreview, setBatchCsvPreview] = useState<Array<
-    Record<string, string>
-  > | null>(null);
-  const [batchCsvHeaders, setBatchCsvHeaders] = useState<string[]>([]);
-  const [batchCsvRows, setBatchCsvRows] = useState<string[][]>([]);
-  const [columnMap, setColumnMap] = useState<ColumnMapping>({});
-  const [batches, setBatches] = useState<
-    Array<{
-      id: number;
-      total: number;
-      done: number;
-      failed: number;
-      mode: string;
-      status: string;
-    }>
-  >([]);
 
   const [previewHtml, setPreviewHtml] = useState<string>("");
   const [previewError, setPreviewError] = useState<string>("");
@@ -83,7 +41,6 @@ export function PrintPage() {
   // every render of the same template.
   const cssBackfilled = useRef<Set<number>>(new Set());
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [showBatches, setShowBatches] = useState(false);
 
   // Fetch printers + templates fresh every time (mount, sync pull,
   // window focus) so a height saved in Designer is visible here.
@@ -133,6 +90,8 @@ export function PrintPage() {
   const dataUrl = store.dataUrl;
   const useTestData = store.useTestData;
   const httpMethod = store.httpMethod;
+  const pageCount = Math.min(500, Math.max(1, Math.floor(store.records || 1)));
+  const PREVIEW_PAGE_CAP = 10;
   useEffect(() => {
     const template = selectedTemplate;
     if (!template) {
@@ -199,10 +158,27 @@ export function PrintPage() {
           }
         }
 
+        if (Array.isArray(data) && data.length === 0) {
+          if (!cancelled) {
+            setPreviewHtml("");
+            setPreviewError("The data is an empty array: nothing to print.");
+            setPreviewNotice(notice);
+          }
+          return;
+        }
+        // One object repeats `records` times; an array prints its own
+        // length. The preview shows at most a few pages so a big N stays
+        // light — the print itself renders them all.
+        const totalPages = Array.isArray(data) ? data.length : pageCount;
+        const shownData = Array.isArray(data)
+          ? data.slice(0, PREVIEW_PAGE_CAP)
+          : Array<unknown>(Math.min(pageCount, PREVIEW_PAGE_CAP)).fill(data);
+        if (totalPages > shownData.length) {
+          notice += `${notice ? " " : ""}Showing first ${shownData.length} of ${totalPages} pages — the print has them all.`;
+        }
+
         if (!cancelled) {
-          setPreviewHtml(
-            renderRecords(html, css, data as unknown, compiledCss),
-          );
+          setPreviewHtml(renderRecords(html, css, shownData, compiledCss));
           setPreviewError("");
           setPreviewNotice(notice);
         }
@@ -216,165 +192,7 @@ export function PrintPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedTemplate, dataUrl, useTestData, httpMethod]);
-
-  const refreshBatches = async () => {
-    try {
-      const list = await agent("list_batches", {});
-      setBatches(list ?? []);
-    } catch {}
-  };
-  // Poll while the dialog is open (live progress on submit) or while
-  // any batch is still active. Idle pages do not poll: the old effect
-  // re-created the interval on every dialog toggle and kept it
-  // running with the dialog closed.
-  const hasActiveBatch = batches.some(
-    (b) => b.status === "queued" || b.status === "printing",
-  );
-  useEffect(() => {
-    refreshBatches();
-    if (!showBatchDialog && !hasActiveBatch) return;
-    const id = setInterval(refreshBatches, 5000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showBatchDialog, hasActiveBatch]);
-
-  const rebuildBatchJson = (
-    headers: string[],
-    rows: string[][],
-    mapping: ColumnMapping,
-  ) => {
-    const jsonRows = applyColumnMapping(headers, rows, mapping);
-    setBatchCsvPreview(jsonRows.slice(0, 5));
-    setBatchInput(JSON.stringify(jsonRows, null, 2));
-    return jsonRows;
-  };
-
-  const handleCsvUpload = async (file: File) => {
-    setBatchCsvFile(file);
-    try {
-      if (file.size > CSV_MAX_BYTES) {
-        throw new CsvTooLargeError(
-          `CSV file is ${(file.size / 1024).toFixed(0)} KiB (max ${(CSV_MAX_BYTES / 1024).toFixed(0)} KiB)`,
-        );
-      }
-      const text = await file.text();
-      const { headers, rows } = parseCsv(text);
-      if (headers.length === 0) {
-        toast.error("CSV has no header row");
-        return;
-      }
-      setBatchCsvHeaders(headers);
-      setBatchCsvRows(rows);
-      const mapping: ColumnMapping = {};
-      setColumnMap(mapping);
-      const jsonRows = rebuildBatchJson(headers, rows, mapping);
-      toast.success(
-        `CSV loaded: ${jsonRows.length} row(s), ${headers.length} column(s)`,
-      );
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : `CSV parse failed: ${e}`);
-    }
-  };
-
-  const handleColumnRename = (header: string, key: string) => {
-    setColumnMap((prev) => {
-      const next = { ...prev, [header]: key };
-      rebuildBatchJson(batchCsvHeaders, batchCsvRows, next);
-      return next;
-    });
-  };
-
-  const handleBatchPrint = async () => {
-    if (!batchInput.trim()) {
-      toast.error("Please enter batch data or upload CSV");
-      return;
-    }
-    let data: unknown;
-    try {
-      data = JSON.parse(batchInput);
-    } catch {
-      toast.error("Invalid JSON");
-      return;
-    }
-    if (!Array.isArray(data)) {
-      toast.error(
-        "Batch data must be a JSON array (CSV is converted to array)",
-      );
-      return;
-    }
-    const templateId = Number(store.templateId);
-    if (!Number.isInteger(templateId) || templateId <= 0) {
-      toast.error("Select a template first");
-      return;
-    }
-    if (!store.printerId) {
-      toast.error("Select a printer first");
-      return;
-    }
-    const resolvePrinterId = async (): Promise<number | null> => {
-      const system = printers.find((p) => p.name === store.printerId);
-      const systemId =
-        system && Number.isInteger(Number(system.id)) && Number(system.id) > 0
-          ? Number(system.id)
-          : null;
-      // System-printer ids are strings ("printer-3"); only the device
-      // list carries numeric row ids, so fall through to it.
-      if (systemId !== null) return systemId;
-      try {
-        const all = await agent("list_printers", {});
-        const match = (all ?? []).find((p) => p.name === store.printerId);
-        return typeof match?.id === "number" && match.id > 0 ? match.id : null;
-      } catch {
-        return null;
-      }
-    };
-    const printerId = await resolvePrinterId();
-    if (printerId === null) {
-      toast.error("Could not resolve printer — re-select it");
-      return;
-    }
-    try {
-      await agent("create_batch", {
-        req: {
-          template_id: templateId,
-          printer_id: printerId,
-          data,
-          mode: "per_record",
-        },
-      });
-      toast.success(`Batch queued: ${(data as unknown[]).length} record(s)`);
-      setShowBatchDialog(false);
-      setBatchInput("");
-      setBatchCsvFile(null);
-      setBatchCsvPreview(null);
-      setBatchCsvHeaders([]);
-      setBatchCsvRows([]);
-      setColumnMap({});
-      refreshBatches();
-    } catch (e) {
-      toast.error(`Batch failed: ${e}`);
-    }
-  };
-
-  const handleCancelBatch = async (id: number) => {
-    try {
-      await agent("cancel_batch", { id });
-      toast.success(`Batch #${id} cancelled`);
-      refreshBatches();
-    } catch (e) {
-      toast.error(String(e));
-    }
-  };
-  const handleRetryBatch = async (id: number) => {
-    try {
-      await agent("retry_batch", { id });
-      toast.success(`Batch #${id} retry queued`);
-      refreshBatches();
-    } catch (e) {
-      toast.error(String(e));
-    }
-  };
+  }, [selectedTemplate, dataUrl, useTestData, httpMethod, pageCount]);
 
   const loadPrinters = async () => {
     try {
@@ -413,6 +231,7 @@ export function PrintPage() {
           page_height_mm: selectedTemplate?.page_h_mm ?? 297,
           orientation: store.orientation,
           copies: store.copies,
+          records: store.records,
           margin_top: store.marginTop,
           margin_right: store.marginRight,
           margin_bottom: store.marginBottom,
@@ -674,20 +493,37 @@ export function PrintPage() {
                 )}
               </div>
 
-              <div className={cn(field, "max-w-[8rem]")}>
-                <Label htmlFor="copies">{t("print.copies")}</Label>
-                <Input
-                  id="copies"
-                  type="number"
-                  min="1"
-                  value={store.copies}
-                  onChange={(e) =>
-                    store.setCopies(
-                      Math.max(1, Math.floor(Number(e.target.value) || 1)),
-                    )
-                  }
-                />
+              <div className="grid max-w-[16rem] grid-cols-2 gap-3">
+                <div className={field}>
+                  <Label htmlFor="copies">{t("print.copies")}</Label>
+                  <Input
+                    id="copies"
+                    type="number"
+                    min="1"
+                    value={store.copies}
+                    onChange={(e) =>
+                      store.setCopies(
+                        Math.max(1, Math.floor(Number(e.target.value) || 1)),
+                      )
+                    }
+                  />
+                </div>
+                <div className={field}>
+                  <Label htmlFor="pages">Pages</Label>
+                  <Input
+                    id="pages"
+                    type="number"
+                    min="1"
+                    max="500"
+                    value={store.records}
+                    onChange={(e) => store.setRecords(Number(e.target.value))}
+                  />
+                </div>
               </div>
+              <p className="-mt-2 text-xs text-muted-foreground">
+                Pages repeats one object per page (an array prints its own
+                length); Copies re-sends the whole job.
+              </p>
 
               <div className="space-y-2 pt-1">
                 <Button
@@ -885,7 +721,7 @@ export function PrintPage() {
           </Card>
         </div>
 
-        {/* Right: what will print, then batches */}
+        {/* Right: what will print */}
         <div className="space-y-4">
           <Card>
             <CardHeader className="flex-row items-center justify-between space-y-0">
@@ -935,223 +771,8 @@ export function PrintPage() {
               )}
             </CardContent>
           </Card>
-
-          <Card>
-            <CardHeader className="flex-row items-center justify-between space-y-0">
-              <CardTitle>Batch print</CardTitle>
-              <div className="flex gap-2">
-                <Button variant="ghost" size="sm" onClick={refreshBatches}>
-                  Refresh
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowBatchDialog(true)}
-                >
-                  <Play className="h-4 w-4" aria-hidden="true" />
-                  New batch
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {batches.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No batches yet. Start one with a CSV or JSON list.
-                </p>
-              ) : (
-                <ul className="space-y-2">
-                  {(showBatches ? batches : batches.slice(0, 3)).map((b) => {
-                    const pct =
-                      b.total > 0
-                        ? Math.min(
-                            100,
-                            Math.round(((b.done + b.failed) / b.total) * 100),
-                          )
-                        : 0;
-                    return (
-                      <li
-                        key={b.id}
-                        className="space-y-1.5 rounded-md border p-3 text-sm"
-                      >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium">Batch #{b.id}</span>
-                          <JobStatusBadge status={b.status} />
-                          <span className="text-xs text-muted-foreground">
-                            {b.mode === "per_record"
-                              ? "Per record"
-                              : "Single job"}
-                            , {b.done}/{b.total} done
-                            {b.failed > 0 ? `, ${b.failed} failed` : ""}
-                          </span>
-                          <span className="ml-auto flex gap-1">
-                            {(b.status === "queued" ||
-                              b.status === "printing") && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleCancelBatch(b.id)}
-                              >
-                                Cancel
-                              </Button>
-                            )}
-                            {(b.status === "failed" ||
-                              b.status === "cancelled") &&
-                              b.failed > 0 && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleRetryBatch(b.id)}
-                                >
-                                  Retry
-                                </Button>
-                              )}
-                          </span>
-                        </div>
-                        <div
-                          className="h-1.5 w-full overflow-hidden rounded-sm bg-muted"
-                          role="progressbar"
-                          aria-valuenow={pct}
-                          aria-valuemin={0}
-                          aria-valuemax={100}
-                          aria-label={`Batch ${b.id} progress`}
-                        >
-                          <div
-                            className="h-full bg-primary transition-all"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-              {batches.length > 3 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowBatches((v) => !v)}
-                >
-                  {showBatches ? "Show fewer" : `Show all ${batches.length}`}
-                </Button>
-              )}
-            </CardContent>
-          </Card>
         </div>
       </div>
-
-      <Dialog open={showBatchDialog} onOpenChange={setShowBatchDialog}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Batch Print</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <Label>CSV Upload (optional)</Label>
-              <Input
-                type="file"
-                accept=".csv,text/csv"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleCsvUpload(f);
-                }}
-              />
-              {batchCsvFile && (
-                <p className="text-xs text-muted-foreground">
-                  {batchCsvFile.name} · {batchCsvHeaders.length} columns
-                  {batchCsvPreview
-                    ? ` · preview ${batchCsvPreview.length} row(s)`
-                    : ""}
-                </p>
-              )}
-              {batchCsvHeaders.length > 0 && (
-                <div className="rounded border p-2 text-xs">
-                  <p className="font-medium mb-1">Columns → variables</p>
-                  <p className="text-muted-foreground mb-2">
-                    Rename a column to change its template key (e.g. {"{{"}
-                    name{"}}"}). Clear the name to drop the column; the JSON
-                    below rebuilds itself.
-                  </p>
-                  <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-                    {/* Duplicate header names share one mapping entry. */}
-                    {batchCsvHeaders.map((h, i) => (
-                      <label
-                        key={`${h}-${i}`}
-                        className="flex items-center gap-1.5"
-                      >
-                        <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground">
-                          {h === "" ? "(blank header)" : h}
-                        </span>
-                        <span aria-hidden="true">→</span>
-                        <Input
-                          aria-label={`Template key for column ${h === "" ? "(blank header)" : h}`}
-                          className="h-7 text-xs"
-                          value={columnMap[h] ?? h}
-                          placeholder="(drop)"
-                          onChange={(e) =>
-                            handleColumnRename(h, e.target.value)
-                          }
-                        />
-                      </label>
-                    ))}
-                  </div>
-                  {batchCsvPreview && (
-                    <div className="mt-2 overflow-auto max-h-32">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr>
-                            {Object.keys(batchCsvPreview[0] ?? {}).map((k) => (
-                              <th key={k} className="text-left border-b p-1">
-                                {k}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {batchCsvPreview.map((row, i) => (
-                            <tr key={i}>
-                              {Object.entries(row).map(([k, v]) => (
-                                <td
-                                  key={k}
-                                  className="p-1 border-b truncate max-w-[120px]"
-                                >
-                                  {v}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            <div className="space-y-1">
-              <Label>JSON Array</Label>
-              <Textarea
-                placeholder='[{"name":"Tea","qty":2},{"name":"Coffee","qty":1}]'
-                value={batchInput}
-                onChange={(e) => setBatchInput(e.target.value)}
-                rows={8}
-                className="font-mono text-xs"
-              />
-              <p className="text-xs text-muted-foreground">
-                CSV is auto-converted to this JSON. You can also paste JSON
-                directly.
-              </p>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowBatchDialog(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleBatchPrint}>
-              <Play className="h-4 w-4" />
-              Start Batch
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

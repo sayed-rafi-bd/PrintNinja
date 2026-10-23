@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use std::time::Instant;
 use tauri::{AppHandle, Manager, State};
 
+/// Upper bound for pages in one document: a single object repeated more
+/// than this many times is rejected instead of building a giant PDF.
+pub const MAX_RECORDS: u32 = 500;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct PrintRequest {
     pub printer_name: String,
@@ -17,6 +21,12 @@ pub struct PrintRequest {
     pub page_height_mm: Option<f64>,
     pub orientation: Option<String>,
     pub copies: Option<u32>,
+
+    /// Pages per print: a single data object is repeated this many times
+    /// (one page each). An array ignores it and prints its own length.
+    /// Clamped to 1..=MAX_RECORDS.
+    #[serde(default)]
+    pub records: Option<u32>,
 
     /// Layout options (mm). Defaults mirror the UI defaults.
     #[serde(default)]
@@ -419,8 +429,7 @@ pub async fn run_print_with(
 }
 
 /// Run a row the worker already claimed (`queued` → `printing`) — the P3
-/// path that reprint, retry, batch and `POST /v1/print/batch` all queue
-/// into.
+/// path that reprint and retry queue into.
 ///
 /// The request comes from the row, not from a caller: the printer it was
 /// queued for, the pinned template version, the copies and settings, and
@@ -662,34 +671,56 @@ async fn run_stages(
     // printing the raw template source instead of failing. A replayed job is
     // the exception: its HTML already went through the engine once.
     if render_template {
-        // One object prints one page; an array prints one page per
-        // record in a single document (page-break between records).
+        // One object prints `records` pages (the same page repeated);
+        // an array prints one page per element and ignores `records`.
+        // Either way the pages join into a single document with a
+        // page break between records.
         let context = fetched.unwrap_or_else(|| serde_json::json!({}));
+        // Resolve the page list first so every failure below shares one
+        // shape: `finish_job` + timings + an early `Ok` response.
+        let fail_template = |msg: String| -> AppResult<PrintResponse> {
+            finish_job(
+                db,
+                job_id,
+                "failed",
+                Some(msg.clone()),
+                "",
+                &req,
+                start.elapsed().as_millis() as i64,
+            )?;
+            Ok(PrintResponse {
+                success: false,
+                job_id: job_id.to_string(),
+                duration_ms: start.elapsed().as_millis(),
+                error: Some(msg),
+                timings: None,
+            })
+        };
+        if req.records.is_some_and(|n| n > MAX_RECORDS) {
+            let msg = format!(
+                "Too many pages requested: {} (max {MAX_RECORDS})",
+                req.records.unwrap_or(1)
+            );
+            timings.template_ms = ms(t_template);
+            timings.total_ms = ms(start);
+            let mut res = fail_template(msg)?;
+            res.timings = Some(timings);
+            save_timings(db, job_id, res.timings.as_ref().unwrap());
+            return Ok(res);
+        }
+        let wanted = req.records.unwrap_or(1).clamp(1, MAX_RECORDS) as usize;
         let records: Vec<serde_json::Value> = match context {
             serde_json::Value::Array(arr) if !arr.is_empty() => arr,
             serde_json::Value::Array(_) => {
-                let msg = "Data is an empty array: nothing to print".to_string();
-                finish_job(
-                    db,
-                    job_id,
-                    "failed",
-                    Some(msg.clone()),
-                    "",
-                    &req,
-                    start.elapsed().as_millis() as i64,
-                )?;
                 timings.template_ms = ms(t_template);
                 timings.total_ms = ms(start);
-                save_timings(db, job_id, &timings);
-                return Ok(PrintResponse {
-                    success: false,
-                    job_id: job_id.to_string(),
-                    duration_ms: start.elapsed().as_millis(),
-                    error: Some(msg),
-                    timings: Some(timings),
-                });
+                let mut res =
+                    fail_template("Data is an empty array: nothing to print".to_string())?;
+                res.timings = Some(timings);
+                save_timings(db, job_id, res.timings.as_ref().unwrap());
+                return Ok(res);
             }
-            single => vec![single],
+            single => vec![single; wanted],
         };
         let engine = TemplateEngine::new();
         let mut pages: Vec<String> = Vec::with_capacity(records.len());
@@ -1201,7 +1232,7 @@ fn close_job(
 /// Rebuild the print request a queued row describes (P3).
 ///
 /// The row is the job: the printer it was queued for, the pinned template
-/// version, the copies and settings, and the input payload batches store in
+/// version, the copies and settings, and the input payload stored in
 /// `data_json`. A row that also carries `rendered_html` replays that HTML
 /// as-is — the content it printed the first time — and needs neither
 /// template nor data; its `data_url` is dropped so a replay cannot fail on
@@ -1300,6 +1331,7 @@ fn load_job_request(db: &DbState, job_id: i64) -> AppResult<(PrintRequest, Optio
             .and_then(|v| v.as_str())
             .map(String::from),
         copies: Some(copies.max(1) as u32),
+        records: None,
         margin_top: margins.and_then(|m| m.get("top").and_then(|v| v.as_f64())),
         margin_right: margins.and_then(|m| m.get("right").and_then(|v| v.as_f64())),
         margin_bottom: margins.and_then(|m| m.get("bottom").and_then(|v| v.as_f64())),
@@ -1368,6 +1400,7 @@ pub async fn spike_test_print(
         margin_bottom: None,
         margin_left: None,
         fit_mode: None,
+        records: None,
         page_range: None,
         grayscale: None,
         template_id: None,
@@ -1394,6 +1427,7 @@ mod tests {
             page_height_mm: Some(200.0),
             orientation: Some("portrait".into()),
             copies: Some(1),
+            records: None,
             margin_top: Some(5.0),
             margin_right: Some(6.0),
             margin_bottom: Some(7.0),

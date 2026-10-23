@@ -196,13 +196,14 @@ pub fn run() {
             }
 
             // One shared print queue for the whole app, so the Tauri command
-            // handlers, the REST API routes, and batch jobs all serialise
-            // per printer instead of interleaving bytes on a thermal head.
+            // handlers, the REST API routes, and reprint/retry rows all
+            // serialise per printer instead of interleaving bytes on a
+            // thermal head.
             let queue = queue::PrintQueue::new();
             app.manage(queue.clone());
 
-            // One worker consumes the queued rows reprint, retry, batch and
-            // `POST /v1/print/batch` write (P3). It replaced a channel whose
+            // One worker consumes the queued rows reprint and retry write
+            // (P3). It replaced a channel whose
             // receiver only logged what it admitted (P8): the database is
             // the queue, the worker is the consumer, and `queue.kick()`
             // wakes it the moment rows appear.
@@ -317,11 +318,6 @@ pub fn run() {
             commands::font::cache_forget_font,
             commands::font::cache_read_font_file,
             commands::font::cache_download_pending_fonts,
-            commands::batch::create_batch,
-            commands::batch::list_batches,
-            commands::batch::get_batch,
-            commands::batch::cancel_batch,
-            commands::batch::retry_batch,
             commands::api::start_api_server,
             commands::api::stop_api_server,
             commands::api::get_api_status,

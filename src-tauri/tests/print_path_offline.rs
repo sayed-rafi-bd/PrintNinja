@@ -18,10 +18,6 @@ const PRINT_PATH: &[(&str, &str)] = &[
     ("api/routes.rs", include_str!("../src/api/routes.rs")),
     ("deeplink.rs", include_str!("../src/deeplink.rs")),
     (
-        "commands/batch.rs",
-        include_str!("../src/commands/batch.rs"),
-    ),
-    (
         "commands/history.rs",
         include_str!("../src/commands/history.rs"),
     ),

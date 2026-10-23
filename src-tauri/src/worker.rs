@@ -1,9 +1,8 @@
 //! The queued-print worker (Phase 0, item 0.4, P3).
 //!
-//! Reprint, retry, batch and `POST /v1/print/batch` all write rows with
-//! `status = 'queued'`; before this worker existed nothing consumed them,
-//! so "queued" meant "never prints" and batch counters never moved. This
-//! module is the one place that runs them: it claims a row atomically
+//! Reprint and retry write rows with `status = 'queued'`; before this
+//! worker existed nothing consumed them, so "queued" meant "never prints".
+//! This module is the one place that runs them: it claims a row atomically
 //! (`queued` → `printing`, which is also what makes a row cancelled in
 //! between simply be skipped), rebuilds the request the row describes and
 //! runs the same pipeline a direct print runs — the per-printer permit
@@ -35,7 +34,7 @@ const SWEEP: Duration = Duration::from_secs(5);
 
 /// At most this many queued jobs run at once. The per-printer permit
 /// serialises each printer's own jobs; this bounds how many renders sit in
-/// flight at all, so a 5,000-record batch cannot launch 5,000 renders.
+/// flight at all, so a burst of queued jobs cannot launch unbounded renders.
 const MAX_IN_FLIGHT: usize = 4;
 
 /// Consumes `queued` print jobs from the database.

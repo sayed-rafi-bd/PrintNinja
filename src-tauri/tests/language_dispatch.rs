@@ -97,6 +97,7 @@ fn print_request(printer: &str) -> PrintRequest {
         page_height_mm: Some(30.0),
         orientation: Some("portrait".to_string()),
         copies: Some(1),
+        records: None,
         margin_top: None,
         margin_right: None,
         margin_bottom: None,
