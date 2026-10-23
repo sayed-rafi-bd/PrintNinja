@@ -9,7 +9,8 @@ on:
     # where the basic checks run.
     # Release jobs are gated on `v*` tags, and
     # version-check rejects any tag that is not on main.
-    branches: [main, develop]
+    # TEMP-API-EXPLORER: also run on the feature branch (revert after).
+    branches: [main, develop, api-explorer]
     # `create` events do not support tag filters, so tag builds must use `push`.
     tags: ["v*"]
   pull_request:
@@ -136,8 +137,9 @@ jobs:
   # E1 and E8 over HTTP against the composed stack (built image, database
   # file in the named volume, real network port). Tag-only with the rest of the heavy
   # jobs: pushes and PRs run the basic checks.
+  # TEMP-API-EXPLORER: also run on the feature branch (revert after).
   server-e2e:
-    if: startsWith(github.ref, 'refs/tags/v') && github.head_ref != 'refactoring'
+    if: (startsWith(github.ref, 'refs/tags/v') && github.head_ref != 'refactoring') || github.ref == 'refs/heads/api-explorer'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -168,8 +170,9 @@ jobs:
 
   # The Playwright smoke spec: the app in Chromium against the harness
   # stack (own SQLite file per worker, built service, fake desktop agent).
+  # TEMP-API-EXPLORER: also run on the feature branch (revert after).
   app-e2e:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/api-explorer'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
