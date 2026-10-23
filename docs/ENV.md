@@ -16,9 +16,10 @@ no root `.env`: Vite needs no variables, and dev scripts default
 | Run | Env source |
 | --- | --- |
 | `docker compose up` (from `server/`) | `server/.env` (copy `server/env.example`) |
-| Local server (`node --env-file=.env`, from `server/`) | `server/.env` |
+| Local server (`pnpm dev`, from `server/`) | `server/.env`, loaded by the script via `--env-file-if-exists` |
 | CLI scripts (`db:apply`, `db:import`, `openapi:generate`) | `server/.env`, loaded automatically (explicit env wins) |
-| Bare `prisma` CLI (`generate`, `migrate`) | **not** auto-loaded — pass `--env-file .env` (see Migrations) |
+| `pnpm db:generate` / `db:migrate` / `db:validate` | `server/.env`, loaded by the script (see Migrations) |
+| Bare `npx prisma ...` | **not** auto-loaded — use the scripts above or set `DATABASE_URL` yourself |
 
 Never commit any `.env` file (`server/.env` is gitignored).
 
@@ -31,7 +32,7 @@ every environment:
 | Run | Database |
 | --- | --- |
 | `docker compose up` (from `server/`) | Bundled file (`file:/data/printninja.db` in the named volume), unless `DATABASE_URL` is set |
-| Local server (`node --env-file=.env`, from `server/`) | `DATABASE_URL=file:./dev.db` (no token) |
+| Local server (`pnpm dev`, from `server/`) | `DATABASE_URL=file:./dev.db` (no token) |
 | Production container | Turso Cloud (`DATABASE_URL=libsql://…` + `DATABASE_AUTH_TOKEN`) |
 
 ### `DATABASE_URL`
@@ -55,12 +56,29 @@ any secret.
 
 Author with `pnpm --filter server db:migrate` (Prisma Migrate against a
 local file), apply with `pnpm --filter server db:apply`. After a fresh
-clone, generate the client once with `npx prisma generate --env-file
-.env` (from `server/`). Bare `prisma` commands do **not** read
-`server/.env` on their own — without `--env-file` they fail with
-`Cannot resolve environment variable: DATABASE_URL`, even when `.env`
-is correct. (`db:apply` and the service need no flag: they load the
-file themselves.)
+clone, generate the client once with `pnpm db:generate` (from `server/`,
+or `pnpm --filter server db:generate`). The `db:migrate`, `db:generate`
+and `db:validate` scripts load `server/.env` through Node's
+`--env-file-if-exists`, so they work on any shell, and still work with no
+file when `DATABASE_URL` is already in the environment (CI and the
+Dockerfile rely on this). A bare `npx prisma ...` does **not** read
+`server/.env`, and Prisma's own `--env-file` flag does not feed
+`prisma.config.ts` either: both fail with
+`Cannot resolve environment variable: DATABASE_URL`, even when `.env` is
+correct. (`db:apply` and the service need no flag: they load the file
+themselves.)
+
+If a script still reports that error, `.env` holds no usable value:
+
+- `cp env.example .env` leaves `DATABASE_URL` **commented out**. Remove
+  the leading `# ` from one line, e.g. `DATABASE_URL=file:./dev.db`.
+- On Windows, create the file with `Copy-Item env.example .env` and edit
+  it as UTF-8. PowerShell redirection (`echo ... > .env`) writes UTF-16.
+- To skip the file, set the variable for the session (generation never
+  connects, so any valid value works; it lasts only for that terminal):
+  - PowerShell: `$env:DATABASE_URL = "file:./dev.db"; npx prisma generate`
+  - bash: `DATABASE_URL=file:./dev.db npx prisma generate`
+
 The container
 entrypoint applies pending migrations on boot (`RUN_MIGRATIONS=false`
 skips it — set that on all but one replica). `prisma migrate deploy`
