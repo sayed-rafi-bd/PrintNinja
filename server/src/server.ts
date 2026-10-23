@@ -1,6 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { buildApp } from "./app.js";
-import { loadConfig } from "./config.js";
+import { buildStack } from "./boot.js";
 import { purgeExpiredSessions } from "./domain/auth/index.js";
 import { purgeOldTombstones } from "./domain/sync/index.js";
 import type { AppDeps } from "./domain/ports.js";
@@ -60,7 +58,9 @@ app.addHook("onClose", async () => {
 // tombstones older than the retention window go (their absence is what
 // lets a stale cursor answer reset instead of silently missing deletes).
 // No job queue — a timer in the process entry is the whole mechanism.
-// buildApp stays schedule-free so tests never inherit timers.
+// buildApp stays schedule-free so tests never inherit timers. Serverless
+// deployments run this from a scheduled job against /v2/internal/cleanup
+// instead (see docs/RELEASE.md).
 const purgedSessionsAtStartup = await purgeExpiredSessions(deps);
 const purgedTombstonesAtStartup = await purgeOldTombstones(
   deps,
@@ -107,8 +107,7 @@ app.addHook("onClose", async () => {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     app.log.info({ signal }, "shutting down");
-    app
-      .close()
+    close()
       .then(() => process.exit(0))
       .catch((error: unknown) => {
         app.log.error({ err: error }, "error during shutdown");

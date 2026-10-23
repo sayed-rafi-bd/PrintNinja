@@ -53,6 +53,14 @@ exactly when `DATABASE_URL` starts with `libsql:` — the service refuses
 to start otherwise, naming the field. Never commit it; rotate it like
 any secret.
 
+### `CRON_SECRET`
+Shared secret for `GET /v2/internal/cleanup` (purges expired sessions
+and tombstones older than the retention window). The scheduled
+`server-cleanup` workflow calls it with a Bearer token; without the
+secret the endpoint answers 404 (disabled). Generate with
+`openssl rand -hex 32` and never commit it. Not needed for the Docker
+or local entries, which run the same purges from their own timers.
+
 ### Migrations
 
 Author with `pnpm --filter server db:migrate` (Prisma Migrate against a
@@ -115,9 +123,12 @@ Port the server listens on inside the container/process. Default: `3001`.
 Host port that compose publishes the API on. Default: `3001`.
 
 ### `TRUST_PROXY`
-Reverse-proxy hops trusted when finding the client IP (the login
-throttle keys on it). `0` means clients connect directly; any positive
-value means one proxy on this host. See `server/src/app.ts`.
+Reverse-proxy hops trusted for the client IP (the login throttle keys
+on it). `0` means clients connect directly; any positive value means
+one proxy on this host. **On Vercel set `1`**: every request arrives
+through Vercel's proxy, and with `0` the rate limiter would key on the
+proxy address (one shared bucket) instead of the real client. See
+`server/src/app.ts`.
 
 ## Sessions
 

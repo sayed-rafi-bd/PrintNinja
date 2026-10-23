@@ -18,6 +18,7 @@ import { communityRoutes } from "./http/routes/community.js";
 import { accountRoutes } from "./http/routes/account.js";
 import { libraryRoutes } from "./http/routes/library.js";
 import { healthRoutes } from "./http/routes/health.js";
+import { internalRoutes } from "./http/routes/internal.js";
 import { savedRoutes } from "./http/routes/saved.js";
 import { syncRoutes } from "./http/routes/sync.js";
 import { templateRoutes } from "./http/routes/templates.js";
@@ -139,6 +140,11 @@ export async function buildApp(args: {
   await app.register(savedRoutes, { deps });
   await app.register(versionRoutes, { deps });
   await app.register(syncRoutes, { deps, byteBudget: config.syncPageBytes });
+  await app.register(internalRoutes, {
+    deps,
+    cronSecret: config.cronSecret,
+    retentionDays: config.syncTombstoneDays,
+  });
 
   return app;
 }

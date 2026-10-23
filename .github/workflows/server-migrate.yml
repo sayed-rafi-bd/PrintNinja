@@ -1,0 +1,39 @@
+name: Server migrate
+
+# Applies the committed migrations to the live Turso database. There is
+# no boot-time migrate on serverless (see server/api/index.ts), so this
+# is the deploy step: run it (from the project page, the CLI or the
+# release checklist) after pushing a release that carries a migration.
+# Safe to re-run: applied migrations are skipped, and a changed file
+# for an applied migration fails loudly instead of diverging.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Apply pending migrations to Turso
+        env:
+          DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          DATABASE_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::TURSO_DATABASE_URL secret is not set."
+            exit 1
+          fi
+          pnpm --filter server db:apply
