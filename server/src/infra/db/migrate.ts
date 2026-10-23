@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@libsql/client";
 import { loadEnvFile } from "../../config.js";
+import { describeDatabaseUrl } from "./describe-url.js";
 
 // Applies pending migrations from prisma/migrations/ in filename order,
 // recording them in the `_prisma_migrations` table (same shape Prisma
@@ -113,6 +114,7 @@ if (invokedDirectly) {
     console.error("migrate: DATABASE_URL is required");
     process.exit(1);
   }
+  console.log(`migrate: DATABASE_URL=${describeDatabaseUrl(url)}`);
   try {
     const applied = await applyMigrations({
       url,

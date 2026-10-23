@@ -9,7 +9,7 @@
 use crate::db::DbState;
 use crate::error::{AppError, AppResult};
 use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::path::Path;
 use tauri::{AppHandle, Manager, State};
 
@@ -18,11 +18,31 @@ use crate::commands::font::{apply_font_delete, apply_font_upsert, FontDataIn};
 use crate::commands::profile::{apply_profile_delete, apply_profile_upsert, ProfileDataIn};
 use crate::commands::settings::{apply_setting_delete, apply_setting_upsert, SettingDataIn};
 
+/// `seq` is a BigInt on the server, so the wire carries it as a decimal
+/// string (e.g. "5") to stay exact past 2^53. Accept that form as well as
+/// a plain JSON number, which the shared fixtures and older callers use.
+fn de_seq<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Seq {
+        Int(i64),
+        Text(String),
+    }
+    match Seq::deserialize(deserializer)? {
+        Seq::Int(n) => Ok(n),
+        Seq::Text(t) => t.trim().parse::<i64>().map_err(serde::de::Error::custom),
+    }
+}
+
 /// One record from `GET /v2/sync/changes`, as the engine passes it in.
 /// `data` stays unparsed until the entity is known, so an unknown entity
 /// fails on its name rather than on its shape.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SyncChangeIn {
+    #[serde(deserialize_with = "de_seq")]
     pub seq: i64,
     pub entity: String,
     /// "upsert" | "delete". Anything else is rejected, never ignored.

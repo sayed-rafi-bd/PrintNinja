@@ -5,6 +5,7 @@ import { purgeExpiredSessions } from "./domain/auth/index.js";
 import { purgeOldTombstones } from "./domain/sync/index.js";
 import type { AppDeps } from "./domain/ports.js";
 import { createDbClient } from "./infra/db/client.js";
+import { describeDatabaseUrl } from "./infra/db/describe-url.js";
 import { createDatasetRepository } from "./infra/db/datasets.js";
 import { createSettingRepository } from "./infra/db/settings.js";
 import { createFontRepository } from "./infra/db/fonts.js";
@@ -47,6 +48,10 @@ const deps: AppDeps = {
 };
 
 const app = await buildApp({ config, deps });
+app.log.info(
+  { databaseUrl: describeDatabaseUrl(config.databaseUrl) },
+  "database",
+);
 app.addHook("onClose", async () => {
   await db.$disconnect();
 });

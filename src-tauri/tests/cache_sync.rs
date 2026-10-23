@@ -907,3 +907,30 @@ fn confirmed_rows_still_overwrite_normally() {
     assert_eq!(report.applied_upserts, 1);
     assert_eq!(sync_state_of(&conn, "srv-k"), "synced");
 }
+
+/// The server sends `seq` as a decimal string because it is a BigInt.
+/// The command must accept that wire form as well as a plain number;
+/// rejecting it surfaced as "invalid type: string \"5\", expected i64".
+#[test]
+fn sync_change_seq_accepts_string_and_number() {
+    let from_string: SyncChangeIn =
+        serde_json::from_str(r#"{"seq":"5","entity":"template","op":"delete","id":"x"}"#)
+            .expect("string seq");
+    assert_eq!(from_string.seq, 5);
+
+    let from_number: SyncChangeIn =
+        serde_json::from_str(r#"{"seq":7,"entity":"template","op":"delete","id":"x"}"#)
+            .expect("numeric seq");
+    assert_eq!(from_number.seq, 7);
+
+    let big: SyncChangeIn = serde_json::from_str(
+        r#"{"seq":"9007199254740993","entity":"template","op":"delete","id":"x"}"#,
+    )
+    .expect("seq beyond 2^53");
+    assert_eq!(big.seq, 9_007_199_254_740_993);
+
+    let bad = serde_json::from_str::<SyncChangeIn>(
+        r#"{"seq":"abc","entity":"template","op":"delete","id":"x"}"#,
+    );
+    assert!(bad.is_err(), "a non-numeric seq must still be rejected");
+}
