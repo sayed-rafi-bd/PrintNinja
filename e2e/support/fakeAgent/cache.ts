@@ -87,7 +87,6 @@ function assertNoRemoteRefs(html: string, css: string): void {
   }
 }
 
-
 export interface FakeSyncState {
   account_handle: string | null;
   server_url: string | null;
