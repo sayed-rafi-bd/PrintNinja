@@ -20,6 +20,13 @@ pub struct Template {
     pub origin: String,
     pub origin_owner: Option<String>,
     pub withdrawn: bool,
+    /// The server revision this copy was last synced at. Saves send it
+    /// as a guard; NULL means the server has never seen this row.
+    pub base_revision: Option<i64>,
+    /// `synced` | `dirty` | `deleted_pending` | `conflict`. A `dirty`
+    /// row under the server-authoritative model is a draft: edits not
+    /// yet saved to the server.
+    pub sync_state: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -36,7 +43,8 @@ pub fn list_templates(db: State<DbState>) -> AppResult<Vec<Template>> {
     let mut stmt = conn.prepare(
         "SELECT id, name, current_version_id, page_w_mm, page_h_mm,
                 orientation, readme, summary, remote_id, server_id, published_at,
-                origin, origin_owner, withdrawn, created_at, updated_at
+                origin, origin_owner, withdrawn, created_at, updated_at,
+                base_revision, sync_state
          FROM templates WHERE sync_state <> 'deleted_pending'
          ORDER BY name COLLATE NOCASE",
     )?;
@@ -60,6 +68,8 @@ pub fn list_templates(db: State<DbState>) -> AppResult<Vec<Template>> {
                 withdrawn: row.get::<_, i64>(13)? != 0,
                 created_at: row.get(14)?,
                 updated_at: row.get(15)?,
+                base_revision: row.get(16)?,
+                sync_state: row.get(17)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -232,7 +242,8 @@ fn tx_guard_to_template(conn: &rusqlite::Connection, id: i64) -> rusqlite::Resul
     conn.query_row(
         "SELECT id, name, current_version_id, page_w_mm, page_h_mm,
                 orientation, readme, summary, remote_id, server_id, published_at,
-                origin, origin_owner, withdrawn, created_at, updated_at
+                origin, origin_owner, withdrawn, created_at, updated_at,
+                base_revision, sync_state
          FROM templates WHERE id = ?1 AND sync_state <> 'deleted_pending'",
         [id],
         |row| {
@@ -253,6 +264,8 @@ fn tx_guard_to_template(conn: &rusqlite::Connection, id: i64) -> rusqlite::Resul
                 withdrawn: row.get::<_, i64>(13)? != 0,
                 created_at: row.get(14)?,
                 updated_at: row.get(15)?,
+                base_revision: row.get(16)?,
+                sync_state: row.get(17)?,
             })
         },
     )

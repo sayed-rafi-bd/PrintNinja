@@ -22,6 +22,12 @@ export interface TemplateRow {
   origin: string;
   origin_owner: string | null;
   withdrawn: boolean;
+  /** The server revision this copy was last synced at. Saves send it as
+   * a guard; null means the server has never seen this row. */
+  base_revision: number | null;
+  /** `synced` | `dirty` | `deleted_pending` | `conflict`. A `dirty`
+   * row is a draft: edits not yet saved to the server. */
+  sync_state: string;
   created_at: string;
   updated_at: string;
 }
