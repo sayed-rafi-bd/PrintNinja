@@ -106,7 +106,7 @@ impl ApiServerHandle {
 }
 
 #[tauri::command(rename_all = "snake_case")]
-pub fn start_api_server(
+pub async fn start_api_server(
     app: AppHandle,
     db: State<'_, DbState>,
     queue: State<'_, crate::queue::PrintQueue>,
