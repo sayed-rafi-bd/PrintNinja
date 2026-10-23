@@ -85,6 +85,8 @@ export const testids = {
   apiExplorerBody: "api-explorer-body",
   /** API Explorer: optional Idempotency-Key field. */
   apiExplorerIdempotency: "api-explorer-idempotency",
+  /** API Explorer: data_url field for URL-driven prints. */
+  apiExplorerDataUrl: "api-explorer-data-url",
   /** API Explorer: send the built request. */
   apiExplorerSend: "api-explorer-send",
   /** API Explorer: pretty-printed response. */
