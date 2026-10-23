@@ -169,9 +169,8 @@ jobs:
 
   # The Playwright smoke spec: the app in Chromium against the harness
   # stack (own SQLite file per worker, built service, fake desktop agent).
-  # TEMP-E2E-CHECK: also run on develop to validate the merge (revert after).
   app-e2e:
-    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/develop'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
