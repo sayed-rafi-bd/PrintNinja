@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ChevronRight, CircleHelp, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -13,7 +13,7 @@ import type { HistoryJob } from "@/lib/store/historyStore";
 import { NAV_GROUPS, NAV_ITEMS, isActivePath } from "@/lib/shell/nav";
 import { useGlobalShortcuts } from "@/lib/shell/useGlobalShortcuts";
 import { useShareStatus } from "@/lib/shell/useShareStatus";
-import { useSyncStatus } from "@/lib/sync/useSyncStatus";
+import { syncNow, useSyncStatus } from "@/lib/sync/useSyncStatus";
 import { useAdoption } from "@/lib/sync/useAdoption";
 import { usePrefs } from "@/lib/prefs/PrefsProvider";
 import { agent } from "@/lib/agent/commands";
@@ -23,50 +23,8 @@ function ShareIndicator() {
   const { t } = useTranslation();
   const status = useShareStatus();
   const sync = useSyncStatus();
+  const [busy, setBusy] = useState(false);
   if (status.state === "unconfigured") return null;
-  if (status.state === "online") {
-    // One wrapper carries the test id (registry: exactly once in src/);
-    // the badge inside reflects the sync state.
-    let title: string;
-    let badge: ReactNode;
-    let to: string | null = null;
-    if (sync.state === "conflict") {
-      title = t("shell.sync_conflict");
-      badge = <StatusBadge status="conflict" />;
-      to = "/templates";
-    } else if (sync.state === "syncing") {
-      title = t("shell.sync_syncing");
-      badge = <StatusBadge status="syncing" />;
-    } else if (sync.state === "pending" || sync.pending > 0) {
-      title = t("shell.sync_pending", { count: sync.pending });
-      badge = (
-        <StatusBadge
-          status="pending"
-          label={t("shell.sync_pending", { count: sync.pending })}
-        />
-      );
-    } else if (sync.state === "offline") {
-      title = t("shell.share_offline");
-      badge = <StatusBadge status="offline" />;
-      to = "/settings";
-    } else {
-      title = sync.lastPullAt
-        ? t("shell.sync_synced", { time: sync.lastPullAt })
-        : t("shell.share_online", { handle: status.handle });
-      badge = (
-        <StatusBadge
-          status="synced"
-          label={status.handle || t("status.online")}
-        />
-      );
-    }
-    const inner = <span title={title}>{badge}</span>;
-    return (
-      <span data-testid="sync-chip">
-        {to ? <Link to={to}>{inner}</Link> : inner}
-      </span>
-    );
-  }
   if (status.state === "offline") {
     return (
       <Link to="/settings" title={t("shell.share_offline")}>
@@ -74,13 +32,84 @@ function ShareIndicator() {
       </Link>
     );
   }
+  if (status.state !== "online") {
+    return (
+      <Link
+        to="/settings"
+        className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+      >
+        {t("shell.share_signed_out")}
+      </Link>
+    );
+  }
+  // Online: the connection badge always shows, and sync gets its own
+  // button so "waiting to send" can never masquerade as the share
+  // state. Clicking it runs a full sync now (pull + push).
+  const syncing = busy || sync.state === "syncing";
+  const detail =
+    sync.state === "conflict"
+      ? t("shell.sync_conflict")
+      : sync.lastError
+        ? t("shell.sync_failed", { error: sync.lastError })
+        : sync.pending > 0
+          ? t("shell.sync_pending", { count: sync.pending })
+          : sync.lastPullAt
+            ? t("shell.sync_synced", { time: sync.lastPullAt })
+            : t("shell.share_online", { handle: status.handle });
+  const syncBadge =
+    sync.state === "conflict" ? (
+      <StatusBadge status="conflict" />
+    ) : syncing ? (
+      <StatusBadge status="syncing" />
+    ) : sync.pending > 0 ? (
+      <StatusBadge
+        status="pending"
+        label={t("shell.sync_pending", { count: sync.pending })}
+      />
+    ) : (
+      <StatusBadge status="synced" />
+    );
+  const onSyncNow = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await syncNow();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const syncControl =
+    sync.state === "conflict" ? (
+      <Link
+        to="/templates"
+        data-testid="sync-chip"
+        title={`${t("shell.sync_now")} — ${detail}`}
+      >
+        {syncBadge}
+      </Link>
+    ) : (
+      <button
+        type="button"
+        data-testid="sync-chip"
+        title={`${t("shell.sync_now")} — ${detail}`}
+        aria-label={`${t("shell.sync_now")}: ${detail}`}
+        onClick={() => void onSyncNow()}
+        disabled={syncing}
+        className="rounded-md hover:opacity-80 disabled:cursor-wait disabled:hover:opacity-100"
+      >
+        {syncBadge}
+      </button>
+    );
   return (
-    <Link
-      to="/settings"
-      className="text-xs text-muted-foreground underline-offset-2 hover:underline"
-    >
-      {t("shell.share_signed_out")}
-    </Link>
+    <span className="inline-flex items-center gap-2">
+      <span title={t("shell.share_online", { handle: status.handle })}>
+        <StatusBadge
+          status="online"
+          label={status.handle || t("status.online")}
+        />
+      </span>
+      {syncControl}
+    </span>
   );
 }
 

@@ -116,6 +116,8 @@ const resources = {
         sync_pending: "{{count}} change(s) waiting to send",
         sync_synced: "Last synced {{time}}",
         sync_syncing: "Syncing…",
+        sync_now: "Sync now",
+        sync_failed: "Last sync failed: {{error}}",
       },
       designer: {
         title: "Designer",

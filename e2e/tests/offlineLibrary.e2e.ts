@@ -94,7 +94,10 @@ test("offline library edits queue dirty and replay on recovery", async ({
   expect(printerId).toBeGreaterThan(0);
 
   await run("save_dataset", {
-    req: { name: "Offline Orders", data_json: '{"rows":[]}' },
+    req: {
+      name: "Offline Orders",
+      data_json: '{"rows":[{"id":"offline-1","total":42}]}',
+    },
   });
   await run("save_profile", {
     req: {
@@ -143,5 +146,15 @@ test("offline library edits queue dirty and replay on recovery", async ({
     expect(names).toContain("font:upsert:body");
     expect(names).toContain("setting:upsert:brand_name");
     expect(names).toContain("profile:upsert:e2e offline printer");
+    // Sample data round-trips the payload, not just the row.
+    const dataset = sync.changes.find(
+      (c) =>
+        c.entity === "dataset" &&
+        c.op === "upsert" &&
+        (c.data as { name?: string } | undefined)?.name === "Offline Orders",
+    );
+    expect(
+      (dataset?.data as { data_json?: string } | undefined)?.data_json,
+    ).toContain("offline-1");
   }).toPass({ timeout: 60_000 });
 });

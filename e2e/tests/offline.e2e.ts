@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { apiMine, apiRegister } from "../support/api";
+import { apiMine, apiRegister, apiSyncChanges } from "../support/api";
 import { pc } from "../support/fixtures";
 import { readStackState } from "../support/stack-state";
 import { testids } from "../support/testids";
@@ -57,13 +57,15 @@ test("F12 offline start, pending edits, and recovery", async ({ browser }) => {
     timeout: 15_000,
   });
   await expect(page.getByText("Offline Invoice")).toBeVisible();
-  // The share is down, so the shell shows the offline badge (the sync
-  // chip renders once the share is back online).
+  // The share is down, so the shell shows the offline badge; the
+  // connection badge and the sync button render once the share is back.
   await expect(page.getByTitle("Share service unreachable")).toBeVisible();
 
   // A local edit marks the row dirty; the push cannot reach the server,
   // so the row waits in the cache (the pending the chip reports once
-  // the share is back).
+  // the share is back). The edit touches every synced field — html, css,
+  // readme and page size — so recovery proves the full content
+  // round-trips, not just the row's existence.
   await page.evaluate(() =>
     (
       window as unknown as {
@@ -75,8 +77,35 @@ test("F12 offline start, pending edits, and recovery", async ({ browser }) => {
       req: {
         template_id: 1,
         html: "<p>edited offline</p>",
-        css: "",
+        css: ".edited{color:red}",
         created_by: "manual",
+      },
+    }),
+  );
+  await page.evaluate(() =>
+    (
+      window as unknown as {
+        __TAURI_INTERNALS__: {
+          invoke: (cmd: string, args?: unknown) => Promise<unknown>;
+        };
+      }
+    ).__TAURI_INTERNALS__.invoke("update_readme", {
+      req: { id: 1, readme: "# Offline Invoice\nEdited offline readme" },
+    }),
+  );
+  await page.evaluate(() =>
+    (
+      window as unknown as {
+        __TAURI_INTERNALS__: {
+          invoke: (cmd: string, args?: unknown) => Promise<unknown>;
+        };
+      }
+    ).__TAURI_INTERNALS__.invoke("update_template_meta", {
+      req: {
+        id: 1,
+        name: "Offline Invoice",
+        page_w_mm: 100,
+        page_h_mm: 150,
       },
     }),
   );
@@ -100,6 +129,31 @@ test("F12 offline start, pending edits, and recovery", async ({ browser }) => {
     const mine = await apiMine(auth.token);
     expect(mine.items.map((t) => t.name)).toContain("Offline Invoice");
   }).toPass({ timeout: 30_000 });
+  // The pushed upsert carries the edited content, not just the row:
+  // html, css, readme and page size all land server-side.
+  await expect(async () => {
+    const sync = await apiSyncChanges(auth.token, "template");
+    const upsert = sync.changes.find(
+      (c) =>
+        c.entity === "template" &&
+        c.op === "upsert" &&
+        (c.data as { id?: string } | undefined)?.id === serverId,
+    );
+    const data = upsert?.data as
+      | {
+          body?: string;
+          css?: string;
+          readme?: string;
+          page_w_mm?: number;
+          page_h_mm?: number;
+        }
+      | undefined;
+    expect(data?.body).toContain("edited offline");
+    expect(data?.css).toContain(".edited");
+    expect(data?.readme).toContain("Edited offline readme");
+    expect(data?.page_w_mm).toBe(100);
+    expect(data?.page_h_mm).toBe(150);
+  }).toPass({ timeout: 60_000 });
   await expect(page.getByTestId(testids.offlineBanner)).toBeHidden();
   await expect(page.getByTestId(testids.syncChip)).toBeVisible();
 });
