@@ -18,6 +18,7 @@ no root `.env`: Vite needs no variables, and dev scripts default
 | `docker compose up` (from `server/`) | `server/.env` (copy `server/env.example`) |
 | Local server (`node --env-file=.env`, from `server/`) | `server/.env` |
 | CLI scripts (`db:apply`, `db:import`, `openapi:generate`) | `server/.env`, loaded automatically (explicit env wins) |
+| Bare `prisma` CLI (`generate`, `migrate`) | **not** auto-loaded — pass `--env-file .env` (see Migrations) |
 
 Never commit any `.env` file (`server/.env` is gitignored).
 
@@ -53,7 +54,14 @@ any secret.
 ### Migrations
 
 Author with `pnpm --filter server db:migrate` (Prisma Migrate against a
-local file), apply with `pnpm --filter server db:apply`. The container
+local file), apply with `pnpm --filter server db:apply`. After a fresh
+clone, generate the client once with `npx prisma generate --env-file
+.env` (from `server/`). Bare `prisma` commands do **not** read
+`server/.env` on their own — without `--env-file` they fail with
+`Cannot resolve environment variable: DATABASE_URL`, even when `.env`
+is correct. (`db:apply` and the service need no flag: they load the
+file themselves.)
+The container
 entrypoint applies pending migrations on boot (`RUN_MIGRATIONS=false`
 skips it — set that on all but one replica). `prisma migrate deploy`
 cannot reach a remote Turso database, so the boot runner
