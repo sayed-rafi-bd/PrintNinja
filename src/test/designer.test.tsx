@@ -110,7 +110,7 @@ describe("DesignerToolbar", () => {
         publishedAt={null}
       />,
     );
-    expect(screen.getByText("Draft")).toBeInTheDocument();
+    expect(screen.queryByText("Draft")).not.toBeInTheDocument();
     expect(screen.getByText("Only on this computer")).toBeInTheDocument();
   });
 
@@ -126,7 +126,7 @@ describe("DesignerToolbar", () => {
         publishedAt="2026-02-01T00:00:00Z"
       />,
     );
-    expect(screen.getByText("Published")).toBeInTheDocument();
+    expect(screen.queryByText("Published")).not.toBeInTheDocument();
     expect(screen.getByTestId("template-visibility")).toBeInTheDocument();
     expect(screen.getByText("Public")).toBeInTheDocument();
   });
@@ -142,7 +142,7 @@ describe("DesignerToolbar", () => {
         onVisibilityChange={vi.fn()}
       />,
     );
-    expect(screen.getByText("Draft")).toBeInTheDocument();
+    expect(screen.queryByText("Draft")).not.toBeInTheDocument();
     expect(screen.getByText("Private")).toBeInTheDocument();
   });
 
@@ -174,7 +174,7 @@ describe("DesignerToolbar", () => {
         onVisibilityChange={vi.fn()}
       />,
     );
-    expect(screen.getByText("Read-only copy")).toBeInTheDocument();
+    expect(screen.getByText("Read-only")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(screen.queryByTestId("template-visibility")).toBeNull();
   });

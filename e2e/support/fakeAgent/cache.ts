@@ -39,6 +39,55 @@ export interface FakeTemplateRow {
   versions: FakeVersion[];
 }
 
+// Mirrors find_remote_refs in src-tauri/src/render/handlebars.rs:
+// the same needles, lowercased, and the same error shape, so the
+// Designer shows the backend's rejection.
+function assertNoRemoteRefs(html: string, css: string): void {
+  const lowerHtml = html.toLowerCase();
+  const lowerCss = css.toLowerCase();
+  const issues: string[] = [];
+  for (const needle of [
+    'src="http',
+    "src='http",
+    'href="http',
+    "href='http",
+    'src="//',
+    'href="//',
+  ]) {
+    if (lowerHtml.includes(needle)) {
+      issues.push(
+        `Remote reference in HTML: ${needle.slice(0, 20)} — use data: URIs`,
+      );
+    }
+  }
+  for (const needle of [
+    'url("http',
+    "url('http",
+    "url(http",
+    'url("//',
+    "url('//",
+    "url(//",
+  ]) {
+    if (lowerHtml.includes(needle) || lowerCss.includes(needle)) {
+      issues.push(`Remote url() in CSS/HTML: ${needle} — use data: URIs`);
+    }
+  }
+  if (
+    lowerHtml.includes("@import") &&
+    (lowerHtml.includes("http://") ||
+      lowerHtml.includes("https://") ||
+      lowerHtml.includes("//"))
+  ) {
+    issues.push("@import with remote URL — use data: URIs");
+  }
+  if (issues.length > 0) {
+    throw new Error(
+      `Template contains remote references (${issues.join("; ")}). Use data: URIs instead.`,
+    );
+  }
+}
+
+
 export interface FakeSyncState {
   account_handle: string | null;
   server_url: string | null;
@@ -518,7 +567,9 @@ export function createFakeCache() {
         .map((t) => ({ id: t.id, server_id: t.server_id, name: t.name }));
     },
 
-    /** Templates for list_templates: tombstones hidden, like Rust. */
+    /** Templates for list_templates: tombstones hidden, like Rust.
+     * Content lives on the row itself (no versions): html/css ride along
+     * with the metadata so Print previews without a second call. */
     listTemplates(): Record<string, unknown>[] {
       return [...templates.values()]
         .filter((t) => t.sync_state !== "deleted_pending")
@@ -526,12 +577,13 @@ export function createFakeCache() {
         .map((t) => ({
           id: t.id,
           name: t.name,
-          current_version_id: t.versions[t.versions.length - 1]
-            ? t.id * 1000 + (t.versions[t.versions.length - 1]?.version_no ?? 0)
-            : null,
           page_w_mm: t.page_w,
           page_h_mm: t.page_h,
           orientation: t.orientation,
+          html: t.versions[t.versions.length - 1]?.html ?? "",
+          css: t.versions[t.versions.length - 1]?.css ?? "",
+          compiled_css: "",
+          compiled_key: "",
           readme: t.readme,
           summary: t.summary,
           remote_id: t.server_id,
@@ -553,11 +605,13 @@ export function createFakeCache() {
       return {
         id: row.id,
         name: row.name,
-        current_version_id:
-          row.versions[row.versions.length - 1]?.version_no ?? null,
         page_w_mm: row.page_w,
         page_h_mm: row.page_h,
         orientation: row.orientation,
+        html: row.versions[row.versions.length - 1]?.html ?? "",
+        css: row.versions[row.versions.length - 1]?.css ?? "",
+        compiled_css: "",
+        compiled_key: "",
         readme: row.readme,
         summary: row.summary,
         remote_id: row.server_id,
@@ -625,12 +679,37 @@ export function createFakeCache() {
       if (!name) {
         throw new Error("Template name required");
       }
+      // Content writes carry the same remote-ref bar as creates: the
+      // Rust backend validates in write_template_meta, and the Designer
+      // surfaces the rejection without pushing.
+      const html =
+        typeof req["html"] === "string"
+          ? req["html"]
+          : (row.versions[row.versions.length - 1]?.html ?? "");
+      const css =
+        typeof req["css"] === "string"
+          ? req["css"]
+          : (row.versions[row.versions.length - 1]?.css ?? "");
+      assertNoRemoteRefs(html, css);
       row.name = name;
       row.page_w = Number(req["page_w_mm"] ?? row.page_w);
       row.page_h = Number(req["page_h_mm"] ?? row.page_h);
       row.orientation = row.page_w > row.page_h ? "landscape" : "portrait";
       if (typeof req["summary"] === "string") {
         row.summary = req["summary"];
+      }
+      // Content lives on the row: write it onto the latest version in
+      // place (no new version — versions are gone server-side too).
+      const latest = row.versions[row.versions.length - 1];
+      if (latest) {
+        latest.html = html;
+        latest.css = css;
+        if (typeof req["compiled_css"] === "string") {
+          latest.compiled_css = req["compiled_css"];
+        }
+        if (typeof req["compiled_key"] === "string") {
+          latest.compiled_key = req["compiled_key"];
+        }
       }
       row.updated_at = nowIso();
       row.sync_state = "dirty";
@@ -689,51 +768,7 @@ export function createFakeCache() {
       }
       const html = String(req["html"] ?? "");
       const css = String(req["css"] ?? "");
-      // Mirrors find_remote_refs in src-tauri/src/render/handlebars.rs:
-      // the same needles, lowercased, and the same error shape, so the
-      // Designer shows the backend's rejection.
-      const lowerHtml = html.toLowerCase();
-      const lowerCss = css.toLowerCase();
-      const issues: string[] = [];
-      for (const needle of [
-        'src="http',
-        "src='http",
-        'href="http',
-        "href='http",
-        'src="//',
-        'href="//',
-      ]) {
-        if (lowerHtml.includes(needle)) {
-          issues.push(
-            `Remote reference in HTML: ${needle.slice(0, 20)} — use data: URIs`,
-          );
-        }
-      }
-      for (const needle of [
-        'url("http',
-        "url('http",
-        "url(http",
-        'url("//',
-        "url('//",
-        "url(//",
-      ]) {
-        if (lowerHtml.includes(needle) || lowerCss.includes(needle)) {
-          issues.push(`Remote url() in CSS/HTML: ${needle} — use data: URIs`);
-        }
-      }
-      if (
-        lowerHtml.includes("@import") &&
-        (lowerHtml.includes("http://") ||
-          lowerHtml.includes("https://") ||
-          lowerHtml.includes("//"))
-      ) {
-        issues.push("@import with remote URL — use data: URIs");
-      }
-      if (issues.length > 0) {
-        throw new Error(
-          `Template contains remote references (${issues.join("; ")}). Use data: URIs instead.`,
-        );
-      }
+      assertNoRemoteRefs(html, css);
       const maxNo = row.versions.reduce((m, v) => Math.max(m, v.version_no), 0);
       const version = {
         version_no: maxNo + 1,

@@ -185,7 +185,7 @@ describe("Designer page layout on a phone", () => {
       name: "Designer views",
     });
     const save = screen.getByTestId("designer-save");
-    expect(screen.getByText("Draft")).toBeInTheDocument();
+    expect(screen.getByText("Only on this computer")).toBeInTheDocument();
     // TabsList carries data-orientation too, so start from its parent to reach the Tabs root.
     const tabsRoot = tablist.parentElement?.closest("[data-orientation]");
     expect(tabsRoot).not.toBeNull();
@@ -437,7 +437,7 @@ describe("Designer page layout on desktop", () => {
     renderDesigner();
     await screen.findByTitle("Canvas preview");
     expect(screen.getByTestId("designer-save")).toBeInTheDocument();
-    expect(screen.getByTestId("template-state")).toBeInTheDocument();
+    expect(screen.getByText("Only on this computer")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /New/ })).toBeInTheDocument();
   });
 });

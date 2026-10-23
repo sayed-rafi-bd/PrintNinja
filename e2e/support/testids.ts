@@ -46,8 +46,6 @@ export const testids = {
   classWarnings: "class-warnings",
   /** Designer toolbar: save the editor to the server. */
   designerSave: "designer-save",
-  /** Designer sync bar: state badge wrapper (data-state). */
-  templateState: "template-state",
   /** Designer sync bar: visibility switch (Public/Private). */
   templateVisibility: "template-visibility",
   /** Settings appearance: app name field. */

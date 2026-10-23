@@ -841,7 +841,6 @@ export function DesignerPage() {
           saveTitle={
             offline ? "Offline — connect to save to the server" : undefined
           }
-          templateName={templateName}
           remoteId={remoteId}
           publishedAt={publishedAt}
           readOnly={isReadOnly({ origin })}
