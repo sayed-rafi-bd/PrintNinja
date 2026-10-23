@@ -8,21 +8,19 @@ export interface StarterTemplate {
   page_w_mm: number;
   page_h_mm: number;
   orientation: string;
+  html: string;
+  css: string;
+  compiled_css: string;
+  compiled_key: string;
 }
 
 /**
  * Return the templates, seeding the bundled starter on first run.
  *
- * The starter template used to live only in the Designer's in-memory
- * fallback, so on a fresh install `list_templates` came back empty and the
- * Print tab showed "No templates — create one in Designer" even though the app
- * ships a ready-to-print layout. It is persisted here instead, so it has a
- * real row and a real version 1 to render.
- *
- * A module-level promise dedupes concurrent callers (Designer and Print both
- * call this on mount), so the starters are only created once.
+ * Always reads fresh from `list_templates` — no module memo, so a height
+ * saved in Designer is visible in Print without a reload. Seed failures
+ * fall back to whatever was created.
  */
-let pending: Promise<StarterTemplate[]> | null = null;
 
 const toStarter = (row: {
   id: number;
@@ -30,12 +28,20 @@ const toStarter = (row: {
   page_w_mm: number;
   page_h_mm: number;
   orientation: string;
+  html?: string;
+  css?: string;
+  compiled_css?: string;
+  compiled_key?: string;
 }): StarterTemplate => ({
   id: row.id,
   name: row.name,
   page_w_mm: row.page_w_mm,
   page_h_mm: row.page_h_mm,
   orientation: row.orientation,
+  html: row.html ?? "",
+  css: row.css ?? "",
+  compiled_css: row.compiled_css ?? "",
+  compiled_key: row.compiled_key ?? "",
 });
 
 async function loadOrSeed(): Promise<StarterTemplate[]> {
@@ -67,13 +73,11 @@ async function loadOrSeed(): Promise<StarterTemplate[]> {
 }
 
 export function ensureStarterTemplates(): Promise<StarterTemplate[]> {
-  if (!pending) {
-    pending = loadOrSeed().catch((e) => {
-      // Web mode: no Tauri backend. Reset so a later mount can retry.
-      pending = null;
-      console.warn("Starter template seeding unavailable:", e);
-      return [] as StarterTemplate[];
-    });
-  }
-  return pending;
+  return loadOrSeed().catch((e) => {
+    console.warn("Starter template seeding unavailable:", e);
+    return [] as StarterTemplate[];
+  });
 }
+
+/** Alias for callers that want an explicit refresh after Save/sync. */
+export const refreshTemplates = ensureStarterTemplates;

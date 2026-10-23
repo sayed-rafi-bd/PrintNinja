@@ -7,8 +7,9 @@ this file explains what each one does.
 ## Which file goes where
 
 There is exactly one live env file: **`server/.env`** (next to
-`server/docker-compose.yml`). Compose reads it on its own; local server
-runs use `node --env-file=.env` from `server/`. There is intentionally
+`server/docker-compose.yml`), created from the one template,
+`server/env.example`. Compose reads it on its own; local server runs
+use `pnpm dev` from `server/`, which loads it. There is intentionally
 no root `.env`: Vite needs no variables, and dev scripts default
 `BASE_URL` to `http://localhost:1420` when unset (set it in a root
 `.env` you create yourself only to override that).
@@ -16,8 +17,10 @@ no root `.env`: Vite needs no variables, and dev scripts default
 | Run | Env source |
 | --- | --- |
 | `docker compose up` (from `server/`) | `server/.env` (copy `server/env.example`) |
-| Local server (`node --env-file=.env`, from `server/`) | `server/.env` |
+| Local server (`pnpm dev`, from `server/`) | `server/.env`, loaded by the script via `--env-file-if-exists` |
 | CLI scripts (`db:apply`, `db:import`, `openapi:generate`) | `server/.env`, loaded automatically (explicit env wins) |
+| `pnpm db:generate` / `db:migrate` / `db:validate` | `server/.env`, loaded by the script (see Migrations) |
+| Bare `npx prisma ...` | **not** auto-loaded — use the scripts above or set `DATABASE_URL` yourself |
 
 Never commit any `.env` file (`server/.env` is gitignored).
 
@@ -30,7 +33,7 @@ every environment:
 | Run | Database |
 | --- | --- |
 | `docker compose up` (from `server/`) | Bundled file (`file:/data/printninja.db` in the named volume), unless `DATABASE_URL` is set |
-| Local server (`node --env-file=.env`, from `server/`) | `DATABASE_URL=file:./dev.db` (no token) |
+| Local server (`pnpm dev`, from `server/`) | `DATABASE_URL=file:./dev.db` (no token) |
 | Production container | Turso Cloud (`DATABASE_URL=libsql://…` + `DATABASE_AUTH_TOKEN`) |
 
 ### `DATABASE_URL`
@@ -50,10 +53,42 @@ exactly when `DATABASE_URL` starts with `libsql:` — the service refuses
 to start otherwise, naming the field. Never commit it; rotate it like
 any secret.
 
+### `CRON_SECRET`
+Shared secret for `GET /v2/internal/cleanup` (purges expired sessions
+and tombstones older than the retention window). The scheduled
+`server-cleanup` workflow calls it with a Bearer token; without the
+secret the endpoint answers 404 (disabled). Generate with
+`openssl rand -hex 32` and never commit it. Not needed for the Docker
+or local entries, which run the same purges from their own timers.
+
 ### Migrations
 
 Author with `pnpm --filter server db:migrate` (Prisma Migrate against a
-local file), apply with `pnpm --filter server db:apply`. The container
+local file), apply with `pnpm --filter server db:apply`. After a fresh
+clone, generate the client once with `pnpm db:generate` (from `server/`,
+or `pnpm --filter server db:generate`). The `db:migrate`, `db:generate`
+and `db:validate` scripts load `server/.env` through Node's
+`--env-file-if-exists`, so they work on any shell, and still work with no
+file when `DATABASE_URL` is already in the environment (CI and the
+Dockerfile rely on this). A bare `npx prisma ...` does **not** read
+`server/.env`, and Prisma's own `--env-file` flag does not feed
+`prisma.config.ts` either: both fail with
+`Cannot resolve environment variable: DATABASE_URL`, even when `.env` is
+correct. (`db:apply` and the service need no flag: they load the file
+themselves.)
+
+If a script still reports that error, `.env` holds no usable value:
+
+- `cp env.example .env` leaves `DATABASE_URL` **commented out**. Remove
+  the leading `# ` from one line, e.g. `DATABASE_URL=file:./dev.db`.
+- On Windows, create the file with `Copy-Item env.example .env` and edit
+  it as UTF-8. PowerShell redirection (`echo ... > .env`) writes UTF-16.
+- To skip the file, set the variable for the session (generation never
+  connects, so any valid value works; it lasts only for that terminal):
+  - PowerShell: `$env:DATABASE_URL = "file:./dev.db"; npx prisma generate`
+  - bash: `DATABASE_URL=file:./dev.db npx prisma generate`
+
+The container
 entrypoint applies pending migrations on boot (`RUN_MIGRATIONS=false`
 skips it — set that on all but one replica). `prisma migrate deploy`
 cannot reach a remote Turso database, so the boot runner
@@ -88,9 +123,12 @@ Port the server listens on inside the container/process. Default: `3001`.
 Host port that compose publishes the API on. Default: `3001`.
 
 ### `TRUST_PROXY`
-Reverse-proxy hops trusted when finding the client IP (the login
-throttle keys on it). `0` means clients connect directly; any positive
-value means one proxy on this host. See `server/src/app.ts`.
+Reverse-proxy hops trusted for the client IP (the login throttle keys
+on it). `0` means clients connect directly; any positive value means
+one proxy on this host. **On Vercel set `1`**: every request arrives
+through Vercel's proxy, and with `0` the rate limiter would key on the
+proxy address (one shared bucket) instead of the real client. See
+`server/src/app.ts`.
 
 ## Sessions
 

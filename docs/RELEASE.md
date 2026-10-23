@@ -231,6 +231,37 @@ libSQL client), and `RUN_MIGRATIONS=false` skips that step on all but one
 replica. Backups are Turso's snapshots plus a periodic `.dump` you keep
 yourself — see `Back up` below.
 
+### Deploy to Vercel (serverless)
+Deploy `server/` as its own Vercel project (Root Directory = `server`).
+The function entry is `server/api/index.ts`: it builds the same stack
+as `src/server.ts` per cold start and forwards requests into Fastify —
+no code changes to routes, domain or repositories.
+
+1. Create the project pointing at this repo, Root Directory `server`.
+2. Set the environment variables (no `.env` file on Vercel):
+   `DATABASE_URL=libsql://…`, `DATABASE_AUTH_TOKEN=…`,
+   `CORS_ORIGINS` (production origins only, e.g. `tauri://localhost`),
+   `TRUST_PROXY=1` (every request arrives through Vercel's proxy;
+   without it the login throttle keys on the proxy address),
+   `DOCS_ENABLED=false`, and `CRON_SECRET` (generate with
+   `openssl rand -hex 32`).
+3. Deploy. `vercel.json` already pins the build (`prisma generate`
+   first — the generated client is gitignored) and `maxDuration: 30`.
+4. Run `server-migrate` (Actions → Server migrate → Run workflow) once
+   to apply migrations to Turso — there is no boot-time migrate on
+   serverless. Re-run it whenever a release carries a migration.
+5. Add the `SERVICE_URL` and `CRON_SECRET` repository secrets so the
+   daily `server-cleanup` workflow can call
+   `GET /v2/internal/cleanup` (expired sessions, old tombstones —
+   the in-process timer from `src/server.ts` does not exist here).
+
+What Vercel changes, in one place: no `listen()` socket, no timers,
+no shutdown hooks (all stay in `src/server.ts` for Docker/local); the
+database goes through the fetch-only web client (`libsql:`/`https:`
+URLs — never `file:`, the filesystem is ephemeral); rate limiting is
+per-instance in memory. Verify with the `Verify` section below, then
+the e2e suite against the deployment URL if you want the full pin.
+
 ### Back up
 The database holds all accounts and everything they own.
 
@@ -270,7 +301,7 @@ DATABASE_URL=libsql://YOUR-DB.turso.io DATABASE_AUTH_TOKEN=TOKEN \
   HOST=127.0.0.1 PORT=3001 node server/dist/server.js
 ```
 Run it under a service manager so it restarts on failure. The service reads
-environment variables only (see `env.example`); it loads no `.env` file by
+environment variables only (see `server/env.example`); it loads no `.env` file by
 itself. Put persistent storage under the database (on an ephemeral disk, use
 Turso Cloud — every account is lost with the disk), and put a TLS reverse
 proxy in front that sets `X-Forwarded-For`.

@@ -1,13 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import "@/lib/i18n";
-import { notifyLocalEdit, useSyncStatus } from "@/lib/sync/useSyncStatus";
-import type {
-  EngineApi,
-  EngineCache,
-  LibraryApi,
-  LibraryCache,
-} from "@/lib/sync/engine";
+import { cacheNow, useSyncStatus } from "@/lib/sync/useSyncStatus";
+import type { EngineApi, EngineCache, LibraryCache } from "@/lib/sync/engine";
 
 function fakes(
   over: { cache?: Partial<EngineCache>; api?: Partial<EngineApi> } = {},
@@ -21,9 +16,8 @@ function fakes(
       applied_upserts: 0,
       applied_deletes: 0,
       skipped_dirty: 0,
+      conflicts: 0,
     }),
-    markPushed: async () => {},
-    markConflicted: async () => {},
     forgetTemplate: async () => true,
     listQueuedUses: async () => [],
     drainUse: async () => {},
@@ -36,60 +30,36 @@ function fakes(
       has_more: false,
       reset: false,
     }),
-    fetchTemplate: async () => ({ revision: 1 }),
-    putTemplate: async () => ({ revision: 1 }),
     deleteTemplate: async () => {},
     postUse: async () => {},
     ...over.api,
   };
-  const libraryCache: LibraryCache = {
-    listDirtyDatasets: async () => [],
-    listDirtyProfiles: async () => [],
-    listDirtySettings: async () => [],
-    listDirtyFonts: async () => [],
-    listTombstonedDatasets: async () => [],
-    listTombstonedProfiles: async () => [],
-    listTombstonedSettings: async () => [],
-    listTombstonedFonts: async () => [],
+  const library: LibraryCache = {
     listSyncedDatasets: async () => [],
     listSyncedProfiles: async () => [],
     listSyncedSettings: async () => [],
     listSyncedFonts: async () => [],
-    markDatasetPushed: async () => {},
-    markProfilePushed: async () => {},
-    markSettingPushed: async () => {},
-    markFontPushed: async () => {},
     forgetDataset: async () => true,
     forgetProfile: async () => true,
     forgetSetting: async () => true,
     forgetFont: async () => true,
-    readFontFile: async () => [],
     downloadPendingFonts: async () => ({ downloaded: 0, failed: 0 }),
   };
-  const libraryApi: LibraryApi = {
-    putDataset: async () => ({ revision: 1 }),
-    deleteDataset: async () => {},
-    putProfile: async () => ({ revision: 1 }),
-    deleteProfile: async () => {},
-    putSetting: async () => ({}),
-    deleteSetting: async () => {},
-    putFont: async () => ({ revision: 1 }),
-    putFontFile: async () => ({ revision: 2 }),
-    deleteFont: async () => {},
-  };
-  return { cache, api, library: { cache: libraryCache, api: libraryApi } };
+  return { cache, api, library: { cache: library } };
 }
 
-function Probe(props: { cache?: EngineCache; api?: EngineApi }) {
+function Probe(props: {
+  cache?: EngineCache;
+  api?: EngineApi;
+  library?: { cache: LibraryCache };
+}) {
   const faked = fakes();
   const status = useSyncStatus({
     cache: props.cache ?? faked.cache,
     api: props.api ?? faked.api,
-    library: faked.library,
+    library: props.library ?? faked.library,
   });
-  return (
-    <p data-testid="sync">{`${status.state}:${status.pending}:${status.conflicts}`}</p>
-  );
+  return <p data-testid="sync">{`${status.state}:${status.drafts}`}</p>;
 }
 
 describe("useSyncStatus", () => {
@@ -98,7 +68,7 @@ describe("useSyncStatus", () => {
     render(<Probe cache={cache} api={api} />);
     expect(screen.getByTestId("sync")).toHaveTextContent("syncing");
     await waitFor(() =>
-      expect(screen.getByTestId("sync")).toHaveTextContent(/^synced:0:0$/),
+      expect(screen.getByTestId("sync")).toHaveTextContent(/^synced:0$/),
     );
   });
 
@@ -108,9 +78,6 @@ describe("useSyncStatus", () => {
         fetchChanges: async () => {
           throw new Error("down");
         },
-        putTemplate: async () => ({ revision: 1 }),
-        deleteTemplate: async () => {},
-        postUse: async () => {},
       },
     });
     render(<Probe cache={cache} api={api} />);
@@ -119,7 +86,32 @@ describe("useSyncStatus", () => {
     );
   });
 
-  it("notifyLocalEdit without a mounted scheduler is a safe no-op", async () => {
-    expect(() => notifyLocalEdit()).not.toThrow();
+  it("counts local drafts without sending them", async () => {
+    const { cache, api } = fakes({
+      cache: {
+        listDirty: async () => [
+          {
+            id: 1,
+            server_id: "s1",
+            name: "Draft",
+            summary: "",
+            page_w_mm: 80,
+            page_h_mm: 200,
+            readme: "",
+            html: "<p>x</p>",
+            css: "",
+            base_revision: null,
+          },
+        ],
+      },
+    });
+    render(<Probe cache={cache} api={api} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("sync")).toHaveTextContent(/^synced:1$/),
+    );
+  });
+
+  it("cacheNow without a mounted scheduler is a safe no-op", async () => {
+    await expect(cacheNow()).resolves.toBeUndefined();
   });
 });

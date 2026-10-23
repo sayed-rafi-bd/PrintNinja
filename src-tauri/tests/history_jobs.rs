@@ -28,21 +28,17 @@ fn test_db() -> Arc<Mutex<Database>> {
     )
     .unwrap();
     let printer_id = conn.last_insert_rowid();
-    conn.execute("INSERT INTO templates (name) VALUES ('Label')", [])
-        .unwrap();
-    let template_id = conn.last_insert_rowid();
     conn.execute(
-        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-         VALUES (?1, 1, '<p>v1</p>', '', 'manual')",
-        [template_id],
+        "INSERT INTO templates (name, html) VALUES ('Label', '<p>v1</p>')",
+        [],
     )
     .unwrap();
-    let version_id = conn.last_insert_rowid();
+    let template_id = conn.last_insert_rowid();
     conn.execute(
         "INSERT INTO print_jobs
-           (template_id, template_version_id, printer_id, source, status, copies, is_test)
-         VALUES (?1, ?2, ?3, 'ui', 'success', 2, 0)",
-        rusqlite::params![template_id, version_id, printer_id],
+           (template_id, printer_id, source, status, copies, is_test)
+         VALUES (?1, ?2, 'ui', 'success', 2, 0)",
+        rusqlite::params![template_id, printer_id],
     )
     .unwrap();
 

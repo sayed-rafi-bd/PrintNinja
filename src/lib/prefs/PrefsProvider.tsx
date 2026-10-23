@@ -7,7 +7,6 @@ import {
   useState,
 } from "react";
 import { readCachedSetting, readSetting, writeSetting } from "@/lib/settings";
-import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
 import {
   DEFAULT_APP_NAME,
   SETTING_KEYS,
@@ -107,8 +106,7 @@ export function PrefsProvider({ children }: { children: React.ReactNode }) {
   const setDensity = useCallback(async (d: Density) => {
     setDensityState(d);
     await writeSetting(SETTING_KEYS.density, d);
-    // An account preference: push it soon so the other PC pulls it.
-    notifyLocalEdit();
+    // Saved locally; an explicit Save in Settings sends it to the server.
   }, []);
   const setAppName = useCallback(async (name: string) => {
     const clean = sanitizeAppName(name);
@@ -118,13 +116,13 @@ export function PrefsProvider({ children }: { children: React.ReactNode }) {
       SETTING_KEYS.appName,
       clean === DEFAULT_APP_NAME ? "" : clean,
     );
-    notifyLocalEdit();
+    // Saved locally; an explicit Save in Settings sends it to the server.
   }, []);
   const setLogo = useCallback(async (dataUrl: string | null) => {
     const next = isValidLogoDataUrl(dataUrl) ? dataUrl : null;
     setLogoState(next);
     await writeSetting(SETTING_KEYS.logo, next ?? "");
-    notifyLocalEdit();
+    // Saved locally; an explicit Save in Settings sends it to the server.
   }, []);
 
   const value = useMemo(

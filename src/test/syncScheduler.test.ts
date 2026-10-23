@@ -1,15 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createSyncScheduler, type SyncStatus } from "@/lib/sync/scheduler";
-import type { EngineApi, EngineCache } from "@/lib/sync/engine";
+import { createSyncScheduler, type SyncState } from "@/lib/sync/scheduler";
+import type { EngineApi, EngineCache, LibraryCache } from "@/lib/sync/engine";
 
 function setup(
   over: {
     cache?: Partial<EngineCache>;
     api?: Partial<EngineApi>;
+    library?: { cache: LibraryCache };
     now?: () => number;
   } = {},
 ) {
-  const statuses: SyncStatus[] = [];
+  const statuses: SyncState[] = [];
   const cache: EngineCache = {
     getCursor: async () => "",
     listDirty: async () => [],
@@ -19,9 +20,8 @@ function setup(
       applied_upserts: 0,
       applied_deletes: 0,
       skipped_dirty: 0,
+      conflicts: 0,
     }),
-    markPushed: async () => {},
-    markConflicted: async () => {},
     forgetTemplate: async () => true,
     listQueuedUses: async () => [],
     drainUse: async () => {},
@@ -34,8 +34,6 @@ function setup(
       has_more: false,
       reset: false,
     }),
-    fetchTemplate: async () => ({ revision: 1 }),
-    putTemplate: async () => ({ revision: 1 }),
     deleteTemplate: async () => {},
     postUse: async () => {},
     ...over.api,
@@ -43,6 +41,7 @@ function setup(
   const scheduler = createSyncScheduler({
     cache,
     api,
+    library: over.library,
     now: over.now,
     onStatus: (s) => statuses.push(s),
   });
@@ -58,7 +57,7 @@ afterEach(() => {
 });
 
 describe("sync scheduler", () => {
-  it("runs a full sync at startup and reports synced", async () => {
+  it("runs a cache refresh at startup and reports synced", async () => {
     const { scheduler, statuses } = setup();
     scheduler.start();
     await vi.advanceTimersByTimeAsync(0);
@@ -68,9 +67,8 @@ describe("sync scheduler", () => {
     scheduler.stop();
   });
 
-  it("debounces local edits into one push-only run after 3 s", async () => {
-    let puts = 0;
-    const { scheduler } = setup({
+  it("counts drafts in the status without sending them", async () => {
+    const { scheduler, statuses } = setup({
       cache: {
         listDirty: async () => [
           {
@@ -87,21 +85,12 @@ describe("sync scheduler", () => {
           },
         ],
       },
-      api: {
-        putTemplate: async () => {
-          puts += 1;
-          return { revision: 2 };
-        },
-      },
     });
     scheduler.start();
     await vi.advanceTimersByTimeAsync(0);
-    puts = 0;
-    scheduler.schedulePushSoon();
-    scheduler.schedulePushSoon();
-    scheduler.schedulePushSoon();
-    await vi.advanceTimersByTimeAsync(3_000);
-    await vi.waitFor(() => expect(puts).toBe(1));
+    await vi.waitFor(() =>
+      expect(statuses.some((s) => s.drafts === 1)).toBe(true),
+    );
     scheduler.stop();
   });
 
@@ -134,15 +123,15 @@ describe("sync scheduler", () => {
     );
     expect(scheduler._debug().failures).toBe(1);
 
-    // Inside the backoff window a manual sync is skipped.
+    // Inside the backoff window a manual refresh is skipped.
     calls = 0;
-    await scheduler.syncNow();
+    await scheduler.refreshNow();
     expect(calls).toBe(0);
 
     // After the window (5 s * 2^1 = 10 s) it retries and reports synced.
     t += 11_000;
     await vi.advanceTimersByTimeAsync(11_000);
-    await scheduler.syncNow();
+    await scheduler.refreshNow();
     await vi.waitFor(() =>
       expect(statuses.some((s) => s.state === "synced")).toBe(true),
     );
@@ -150,8 +139,8 @@ describe("sync scheduler", () => {
     scheduler.stop();
   });
 
-  it("broadcasts sync:pulled after a successful sync", async () => {
-    const seen: Array<{ pulled: number; pushed: number }> = [];
+  it("broadcasts sync:pulled after a successful refresh", async () => {
+    const seen: Array<{ pulled: number; usesSent: number }> = [];
     const onPulled = (e: Event) => seen.push((e as CustomEvent).detail);
     window.addEventListener("sync:pulled", onPulled);
     try {
@@ -159,14 +148,14 @@ describe("sync scheduler", () => {
       scheduler.start();
       await vi.advanceTimersByTimeAsync(0);
       await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0));
-      expect(seen[0]).toEqual({ pulled: 0, pushed: 0 });
+      expect(seen[0]).toMatchObject({ pulled: 0, usesSent: 0 });
       scheduler.stop();
     } finally {
       window.removeEventListener("sync:pulled", onPulled);
     }
   });
 
-  it("never runs two syncs at once", async () => {
+  it("never runs two refreshes at once", async () => {
     let concurrent = 0;
     let maxConcurrent = 0;
     const { scheduler } = setup({
@@ -187,8 +176,8 @@ describe("sync scheduler", () => {
     });
     scheduler.start();
     await vi.advanceTimersByTimeAsync(0);
-    const first = scheduler.syncNow();
-    const second = scheduler.syncNow();
+    const first = scheduler.refreshNow();
+    const second = scheduler.refreshNow();
     await vi.advanceTimersByTimeAsync(100);
     await Promise.all([first, second]);
     expect(maxConcurrent).toBe(1);

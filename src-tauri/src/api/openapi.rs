@@ -141,7 +141,7 @@ impl Default for OpenApiSpec {
                 "/v1/print/batch": {
                     "post": {
                         "summary": "Queue a batch print",
-                        "description": "Queues one row per record (`per_record`, the default) or one row for the whole array (`single_job`), stores each row's payload so retry/reprint can run it again, and wakes the worker that prints it. `202` reports the batch the worker will take — the print itself happens in the background.",
+                        "description": "Queues one row per record (`per_record`), stores each row's payload so retry/reprint can run it again, and wakes the worker that prints it. `202` reports the batch the worker will take — the print itself happens in the background.",
                         "requestBody": {
                             "required": true,
                             "content": {
@@ -153,7 +153,7 @@ impl Default for OpenApiSpec {
                                             "template": { "type": "string", "description": "Template name (case-insensitive)" },
                                             "printer": { "type": "string", "description": "Printer name (case-insensitive)" },
                                             "data": { "type": "array", "description": "1 to 5,000 records", "minItems": 1, "maxItems": 5000 },
-                                            "mode": { "type": "string", "enum": ["per_record", "single_job"], "default": "per_record" }
+                                            "mode": { "type": "string", "enum": ["per_record"], "default": "per_record" }
                                         }
                                     }
                                 }

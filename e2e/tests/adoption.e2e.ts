@@ -1,45 +1,29 @@
 import { expect, test } from "@playwright/test";
-import { apiMine, apiPutTemplate, apiRegister } from "../support/api";
+import { apiMine, apiRegister } from "../support/api";
 import { pc } from "../support/fixtures";
 import { testids } from "../support/testids";
 
-// F14 (REFACTORING.md section 11): first sync of a migrated install.
-// The agent starts with local-only templates and one template whose
-// server copy changed. The "back up N templates" dialog appears (ask
-// once, allow decline). After confirming, the local-only ones are
-// pushed private, and the changed one shows conflict instead of being
-// overwritten.
+// F14: a migrated install holds local-only templates. The server owns
+// the copies, so nothing uploads on its own: no backup dialog appears,
+// the rows list as drafts ("Not on the server"), and the account stays
+// empty until the user explicitly saves one.
 
 const PASSWORD = "password123";
 
-test("F14 first sync of a migrated install", async ({ browser }) => {
+test("F14 migrated local templates stay local drafts until explicitly saved", async ({
+  browser,
+}) => {
   test.setTimeout(240_000);
   const auth = await apiRegister(
     `f14-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
     PASSWORD,
   );
 
-  // The server copy of a template this install tracked before the
-  // cache existed; the local row carries a conflicting edit.
-  const serverId = crypto.randomUUID();
-  await apiPutTemplate(auth.token, serverId, {
-    name: "Changed",
-    body: "<p>server copy</p>",
-  });
-
   const seeded = await pc(browser, {
     settings: { share_session_token: auth.token, install_migrated: "1" },
     templates: [
       { name: "Local one", html: "<p>mine 1</p>" },
       { name: "Local two", html: "<p>mine 2</p>" },
-      {
-        name: "Changed",
-        server_id: serverId,
-        html: "<p>local edit</p>",
-        sync_state: "synced",
-        server_revision: 1,
-        base_revision: null,
-      },
     ],
   });
   const page = await seeded.context.newPage();
@@ -48,85 +32,46 @@ test("F14 first sync of a migrated install", async ({ browser }) => {
     timeout: 15_000,
   });
 
-  // The backup dialog asks once with the local-only count.
-  await expect(
-    page.getByText("Back up 2 templates to the server?"),
-  ).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("button", { name: "Back up", exact: true }).click();
-  await expect(page.getByText("Back up 2 templates to the server?")).toBeHidden(
-    { timeout: 30_000 },
-  );
+  // No backup dialog: there is nothing to confirm, because nothing
+  // uploads without an explicit Save.
+  await expect(page.getByText(/Back up \d+ template/)).toBeHidden({
+    timeout: 15_000,
+  });
 
-  // The local-only templates are pushed private.
+  // Both rows list as drafts that live only on this computer.
+  await expect(page.getByText("Local one")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Local two")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Not on the server").first()).toBeVisible({
+    timeout: 15_000,
+  });
+
+  // The server holds nothing from this install.
   await expect(async () => {
     const mine = await apiMine(auth.token);
-    expect(mine.items.map((t) => t.name)).toEqual(
-      expect.arrayContaining(["Local one", "Local two"]),
-    );
-    const privates = mine.items.filter(
-      (t) => t.name === "Local one" || t.name === "Local two",
-    );
-    expect(privates.every((t) => t.published_at == null)).toBe(true);
-  }).toPass({ timeout: 60_000 });
-
-  // The changed row was not overwritten: it shows conflict, and the
-  // server copy is untouched.
-  await expect(page.getByTestId(testids.conflictBanner)).toBeVisible({
-    timeout: 30_000,
-  });
-  const kept = await page.evaluate(
-    () =>
-      JSON.parse(
-        localStorage.getItem("fake-agent:templates") ?? "[]",
-      ) as Array<{
-        name: string;
-        sync_state: string;
-        versions: Array<{ html: string }>;
-      }>,
-  );
-  expect(kept.find((t) => t.name === "Changed")).toMatchObject({
-    sync_state: "conflict",
-  });
-  expect(kept.find((t) => t.name === "Changed")?.versions.at(-1)?.html).toBe(
-    "<p>local edit</p>",
-  );
-});
-
-test("F14 declining the backup leaves local templates alone", async ({
-  browser,
-}) => {
-  test.setTimeout(240_000);
-  const auth = await apiRegister(
-    `f14d-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
-    PASSWORD,
-  );
-
-  const seeded = await pc(browser, {
-    settings: { share_session_token: auth.token, install_migrated: "1" },
-    templates: [{ name: "Local only", html: "<p>mine</p>" }],
-  });
-  const page = await seeded.context.newPage();
-  await page.goto("/");
-  await expect(page.getByText("Back up 1 template to the server?")).toBeVisible(
-    { timeout: 30_000 },
-  );
-
-  // Declining dismisses the dialog and pushes nothing; the row stays
-  // local-only and the prompt does not return on reload.
-  await page.getByRole("button", { name: "Not now" }).click();
-  await expect(page.getByText("Back up 1 template to the server?")).toBeHidden({
-    timeout: 30_000,
-  });
-  await expect(async () => {
-    const mine = await apiMine(auth.token);
-    expect(mine.items.map((t) => t.name)).not.toContain("Local only");
+    expect(mine.items).toHaveLength(0);
   }).toPass({ timeout: 30_000 });
 
+  // A reload changes nothing: still listed, still local, still silent.
   await page.reload();
   await expect(page.getByTestId(testids.shellApp)).toBeVisible({
     timeout: 15_000,
   });
-  await expect(page.getByText("Back up 1 template to the server?")).toBeHidden({
+  await expect(page.getByText("Local one")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/Back up \d+ template/)).toBeHidden({
     timeout: 15_000,
   });
+  await expect(async () => {
+    const mine = await apiMine(auth.token);
+    expect(mine.items).toHaveLength(0);
+  }).toPass({ timeout: 30_000 });
+
+  // The manual path still works: saving one row from the list uploads it.
+  await page
+    .getByRole("button", { name: "Save Local one to the server" })
+    .click();
+  await expect(async () => {
+    const mine = await apiMine(auth.token);
+    expect(mine.items.map((t) => t.name)).toContain("Local one");
+    expect(mine.items.map((t) => t.name)).not.toContain("Local two");
+  }).toPass({ timeout: 30_000 });
 });

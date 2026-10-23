@@ -36,7 +36,6 @@ import { cn } from "@/lib/utils";
 import { useSystemPrinters } from "@/lib/hooks/useSystemPrinters";
 import { toast } from "sonner";
 import { usePrintStore } from "@/lib/store/printStore";
-import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
 import { DEFAULT_MOCK_DATA } from "@/lib/templates/defaultTemplate";
 import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
 import type { StarterTemplate } from "@/lib/templates/seedTemplates";
@@ -86,10 +85,11 @@ export function PrintPage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showBatches, setShowBatches] = useState(false);
 
-  // Fetch printers + templates once on mount.
+  // Fetch printers + templates fresh every time (mount, sync pull,
+  // window focus) so a height saved in Designer is visible here.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const load = async (first: boolean) => {
       try {
         const [p, tpl] = await Promise.all([
           agent("enumerate_system_printers", {}).catch(() => []),
@@ -105,11 +105,18 @@ export function PrintPage() {
       } catch (e) {
         console.error("Failed to load printers/templates:", e);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (first && !cancelled) setLoading(false);
       }
-    })();
+    };
+    void load(true);
+    const onPulled = () => void load(false);
+    const onFocus = () => void load(false);
+    window.addEventListener("sync:pulled", onPulled);
+    window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
+      window.removeEventListener("sync:pulled", onPulled);
+      window.removeEventListener("focus", onFocus);
     };
   }, []);
 
@@ -136,40 +143,37 @@ export function PrintPage() {
     let cancelled = false;
     (async () => {
       try {
-        const versions = await agent("list_versions", {
-          template_id: template.id,
-        });
-        const latest = versions?.[0];
-        if (!latest) {
+        const html = template.html ?? "";
+        const css = template.css ?? "";
+        if (!html.trim()) {
           if (!cancelled) {
             setPreviewHtml("");
             setPreviewError(
-              "This template has no versions yet. Open it in Designer and save it.",
+              "This template is empty. Open it in Designer and save it.",
             );
           }
           return;
         }
-        const { renderTemplate } = await import("@/lib/render/renderTemplate");
+        const { renderRecords } = await import("@/lib/render/renderTemplate");
 
-        // A version saved before per-template compilation existed (or whose
-        // compile failed) has no stored Tailwind CSS. Compile it now so the
-        // preview matches the Designer, and store the result on the same
-        // row so the actual print job (which reads the stored stylesheet)
-        // is styled too. This updates the version in place: previews must
-        // not mint new versions just for being looked at.
-        let compiledCss = latest.compiled_css ?? "";
-        if (!compiledCss.trim() && !cssBackfilled.current.has(latest.id)) {
-          cssBackfilled.current.add(latest.id);
-          const built = await compileTemplateCss(latest.html);
+        // Templates saved before per-template compilation have no stored
+        // Tailwind CSS. Compile on the fly so the preview matches.
+        let compiledCss = template.compiled_css ?? "";
+        if (!compiledCss.trim() && !cssBackfilled.current.has(template.id)) {
+          cssBackfilled.current.add(template.id);
+          const built = await compileTemplateCss(html);
           compiledCss = built.css;
           if (built.css.trim() && !cancelled) {
-            agent("set_version_compiled", {
-              id: latest.id,
-              compiled_css: built.css,
-              compiled_key: built.key,
-            })
-              .then(() => notifyLocalEdit())
-              .catch((e) => console.warn("Could not store compiled CSS:", e));
+            agent("update_template_meta", {
+              req: {
+                id: template.id,
+                name: template.name,
+                page_w_mm: template.page_w_mm,
+                page_h_mm: template.page_h_mm,
+                compiled_css: built.css,
+                compiled_key: built.key,
+              },
+            }).catch((e) => console.warn("Could not store compiled CSS:", e));
           }
         }
 
@@ -197,7 +201,7 @@ export function PrintPage() {
 
         if (!cancelled) {
           setPreviewHtml(
-            renderTemplate(latest.html, latest.css, data as any, compiledCss),
+            renderRecords(html, css, data as unknown, compiledCss),
           );
           setPreviewError("");
           setPreviewNotice(notice);
@@ -336,7 +340,7 @@ export function PrintPage() {
           template_id: templateId,
           printer_id: printerId,
           data,
-          mode: store.batchMode2,
+          mode: "per_record",
         },
       });
       toast.success(`Batch queued: ${(data as unknown[]).length} record(s)`);
@@ -950,23 +954,6 @@ export function PrintPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="max-w-xs space-y-1.5">
-                <Label htmlFor="batch-mode">Mode</Label>
-                <Select
-                  value={store.batchMode2}
-                  onValueChange={(v) =>
-                    store.setBatchMode2(v as "single_job" | "per_record")
-                  }
-                >
-                  <SelectTrigger id="batch-mode" aria-label="Batch mode">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="single_job">Single job</SelectItem>
-                    <SelectItem value="per_record">Per record</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
               {batches.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   No batches yet. Start one with a CSV or JSON list.

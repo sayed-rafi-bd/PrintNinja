@@ -4,6 +4,9 @@ All notable changes to PrintNinja are documented here. The format is based on Ke
 
 ## [Unreleased] — Online-only server migration
 
+### Added
+- **Vercel deployment for the share service (`server/` on `main-vercel`).** `server/api/index.ts` builds the same Fastify stack per cold start and forwards requests into it — no `listen()`, timers or shutdown hooks (all stay in `src/server.ts` for Docker/local). Remote Turso URLs go through the fetch-only web client and driver adapter, so serverless runtimes never touch the native SQLite binding. New `GET /v2/internal/cleanup` (Bearer `CRON_SECRET`, 404 when unset) replaces the in-process purge timer; the daily `server-cleanup` workflow calls it, and `server-migrate` applies migrations on demand since there is no boot-time migrate. Pinned in `server/vercel.json` (Root Directory = `server`), documented in `docs/RELEASE.md`.
+
 ### Changed
 - **Share service database: Turso Cloud in production, local SQLite files everywhere else.** `server/` no longer runs PostgreSQL: Prisma 7 now uses the SQLite provider through `@prisma/adapter-libsql`, one code path for `file:` URLs (development, integration tests, Playwright e2e, the bundled compose volume) and `libsql://` + `DATABASE_AUTH_TOKEN` (production on Turso Cloud). The repository layer, the `/v2` API and the OpenAPI contract are unchanged; Community search stays case-insensitive via `COLLATE NOCASE` columns (Prisma's `mode: "insensitive"` is PostgreSQL-only). Migrations are authored with `prisma migrate dev` and applied by a small boot runner (`pnpm --filter server db:apply`, also the container entrypoint) because `prisma migrate deploy` cannot reach a remote Turso database. `docker compose up` is now a single service; the old `POSTGRES_PASSWORD`/`db` container is gone, and the committed PostgreSQL migrations are archived under `server/prisma/migrations-postgres-archive/`. No data is carried over (fresh start, per the migration decision).
 

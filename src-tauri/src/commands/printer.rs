@@ -319,7 +319,6 @@ pub async fn test_printer(
         page_range: None,
         grayscale: None,
         template_id: None,
-        template_version_id: None,
         data: None,
         data_url: None,
         http_method: None,

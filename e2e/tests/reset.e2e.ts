@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { apiMine, apiRegister, apiSyncChanges } from "../support/api";
+import {
+  apiMine,
+  apiPutDataset,
+  apiPutTemplate,
+  apiRegister,
+  apiSyncChanges,
+} from "../support/api";
 import { pc } from "../support/fixtures";
 import { readStackState } from "../support/stack-state";
 import { testids } from "../support/testids";
@@ -40,19 +46,15 @@ test("reset wipes the PC, keeps the server copy, and re-pulls on sign-in", async
       [cmd, args] as const,
     ) as Promise<unknown>;
 
-  // Seed one of everything the wipe claims to clear, then push it all
-  // so the server holds a copy before the wipe.
-  await invoke("create_template", {
-    req: {
-      name: "Keep Me",
-      page_w_mm: 210,
-      page_h_mm: 297,
-      html: "<p>x</p>",
-      css: "",
-    },
+  // Seed one of everything the wipe claims to clear, straight on the
+  // server; the PC pulls it all down before the wipe.
+  await apiPutTemplate(auth.token, crypto.randomUUID(), {
+    name: "Keep Me",
+    body: "<p>x</p>",
   });
-  await invoke("save_dataset", {
-    req: { name: "Keep Data", data_json: '{"rows":[]}' },
+  await apiPutDataset(auth.token, crypto.randomUUID(), {
+    name: "Keep Data",
+    dataJson: '{"rows":[]}',
   });
   await page.reload();
   await expect(async () => {

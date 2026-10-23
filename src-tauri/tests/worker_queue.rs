@@ -47,25 +47,12 @@ fn seed_template(db: &Db) -> i64 {
     let guard = db.lock().unwrap();
     let conn = guard.connection();
     conn.execute(
-        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation)
-         VALUES ('Shelf', 100, 150, 'portrait')",
+        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, html, css)
+         VALUES ('Shelf', 100, 150, 'portrait', '<p>{{n}}</p>', '')",
         [],
     )
     .expect("seed template");
-    let tid = conn.last_insert_rowid();
-    conn.execute(
-        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-         VALUES (?1, 1, '<p>{{n}}</p>', '', 'manual')",
-        [tid],
-    )
-    .expect("seed version");
-    let vid = conn.last_insert_rowid();
-    conn.execute(
-        "UPDATE templates SET current_version_id = ?1 WHERE id = ?2",
-        rusqlite::params![vid, tid],
-    )
-    .expect("pin current version");
-    tid
+    conn.last_insert_rowid()
 }
 
 /// A queued row the way reprint/batch write one: the content already rendered,
