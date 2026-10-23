@@ -30,7 +30,7 @@ export const testids = {
   fontRow: (id: number | string) => `font-row-${id}`,
   /** Prefix for "any font row" locators. */
   fontRowPrefix: "font-row-",
-  /** The three-way conflict dialog. */
+  /** The three-way conflict dialog (legacy conflicted rows on Templates). */
   conflictDialog: "conflict-dialog",
   /** Conflict dialog: keep pushing the local edits. */
   conflictKeepMine: "conflict-keep-mine",
@@ -38,11 +38,17 @@ export const testids = {
   conflictTakeServer: "conflict-take-server",
   /** Conflict dialog: duplicate locally, then take the server copy. */
   conflictKeepBoth: "conflict-keep-both",
+  /** Designer save-conflict dialog: the server copy moved since last save. */
+  saveConflictDialog: "save-conflict-dialog",
+  /** Save-conflict dialog: overwrite the server with the editor's copy. */
+  saveConflictOverwrite: "save-conflict-overwrite",
+  /** Save-conflict dialog: load the server copy into the editor. */
+  saveConflictTakeServer: "save-conflict-take-server",
   /** File import control in the designer toolbar. */
   templateImport: "template-import",
   /** Tailwind warnings panel in the designer. */
   classWarnings: "class-warnings",
-  /** Designer toolbar: save the working copy locally. */
+  /** Designer toolbar: save the editor to the server. */
   designerSave: "designer-save",
   /** Designer sync bar: state badge wrapper (data-state). */
   templateState: "template-state",
@@ -62,7 +68,7 @@ export const testids = {
   versionLabel: "version-label",
   /** Designer actions: open the save-version dialog. */
   designerSaveVersion: "designer-save-version",
-  /** Designer sync bar: manual sync button. */
+  /** Designer sync bar: cache refresh button. */
   templateSyncNow: "template-sync-now",
   /** Settings appearance: app name field. */
   settingsBrandName: "settings-brand-name",

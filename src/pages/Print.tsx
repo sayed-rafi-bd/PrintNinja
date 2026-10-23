@@ -36,7 +36,6 @@ import { cn } from "@/lib/utils";
 import { useSystemPrinters } from "@/lib/hooks/useSystemPrinters";
 import { toast } from "sonner";
 import { usePrintStore } from "@/lib/store/printStore";
-import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
 import { DEFAULT_MOCK_DATA } from "@/lib/templates/defaultTemplate";
 import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
 import type { StarterTemplate } from "@/lib/templates/seedTemplates";
@@ -163,13 +162,12 @@ export function PrintPage() {
           const built = await compileTemplateCss(latest.html);
           compiledCss = built.css;
           if (built.css.trim() && !cancelled) {
+            // A cache backfill, not a user edit: nothing to send.
             agent("set_version_compiled", {
               id: latest.id,
               compiled_css: built.css,
               compiled_key: built.key,
-            })
-              .then(() => notifyLocalEdit())
-              .catch((e) => console.warn("Could not store compiled CSS:", e));
+            }).catch((e) => console.warn("Could not store compiled CSS:", e));
           }
         }
 
