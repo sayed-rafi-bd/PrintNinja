@@ -749,127 +749,155 @@ fn sync_schema_marks_migrated_installs() {
 // ───────────────────────────────────────────────────────────────
 
 #[test]
-fn reset_database_wipes_everything_but_the_schema() {
-    use printninja_lib::commands::reset::wipe_database;
+fn reset_database_recreates_the_file_fresh() {
+    use printninja_lib::commands::reset::recreate_database;
 
-    let (_state, conn) = test_db();
+    let (state, _conn) = test_db();
     let fonts_dir = std::env::temp_dir().join(format!("pn-reset-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&fonts_dir).unwrap();
 
     // Seed one row per user-data table (plus a legacy dead table and a
-    // font file on disk) so the wipe has something to prove.
-    conn.execute(
-        "INSERT INTO printers (name, type, address, language) VALUES ('P', 'ipp', 'x', 'pdf')",
-        [],
-    )
-    .unwrap();
-    let printer: i64 = conn.last_insert_rowid();
-    conn.execute(
-        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation) VALUES ('T', 210, 297, 'portrait')",
-        [],
-    )
-    .unwrap();
-    let template: i64 = conn.last_insert_rowid();
-    conn.execute(
-        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-         VALUES (?1, 1, '<p></p>', '', 'manual')",
-        [template],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO batches (template_id, printer_id) VALUES (?1, ?2)",
-        rusqlite::params![template, printer],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO print_jobs (template_id, printer_id, source, status) VALUES (?1, ?2, 'ui', 'success')",
-        rusqlite::params![template, printer],
-    )
-    .unwrap();
+    // font file on disk) so the recreate has something to prove. Two
+    // printers bump the AUTOINCREMENT counter, proving it restarts.
     let font_path = fonts_dir.join("orphan.ttf");
     std::fs::write(&font_path, [0x00, 0x01, 0x00, 0x00]).unwrap();
-    conn.execute(
-        "INSERT INTO fonts (family, style, weight, file_path, format) VALUES ('Body', 'normal', '400', ?1, 'ttf')",
-        [font_path.to_string_lossy().to_string()],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO synced_datasets (server_id, name) VALUES ('ds-1', 'D')",
-        [],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO synced_profiles (server_id, template_server_id, printer_name) VALUES ('p-1', 't-1', 'e2e')",
-        [],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO api_clients (name, key_hash) VALUES ('c', 'h')",
-        [],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO queued_uses (server_template_id, count) VALUES ('t-1', 2)",
-        [],
-    )
-    .unwrap();
-    conn.execute("INSERT INTO sync_state (id, cursor) VALUES (1, 'abc')", [])
+    {
+        let guard = state.lock().unwrap();
+        let conn = guard.connection();
+        conn.execute(
+            "INSERT INTO printers (name, type, address, language) VALUES ('P', 'ipp', 'x', 'pdf')",
+            [],
+        )
         .unwrap();
-    conn.execute(
-        "INSERT INTO settings (key, value) VALUES ('share_session_token', 'tok')",
-        [],
-    )
-    .unwrap();
-    conn.execute("CREATE TABLE printer_profiles (id INTEGER PRIMARY KEY)", [])
+        let printer: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO printers (name, type, address, language) VALUES ('P2', 'ipp', 'y', 'pdf')",
+            [],
+        )
         .unwrap();
+        conn.execute(
+            "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation) VALUES ('T', 210, 297, 'portrait')",
+            [],
+        )
+        .unwrap();
+        let template: i64 = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
+             VALUES (?1, 1, '<p></p>', '', 'manual')",
+            [template],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO batches (template_id, printer_id) VALUES (?1, ?2)",
+            rusqlite::params![template, printer],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO print_jobs (template_id, printer_id, source, status) VALUES (?1, ?2, 'ui', 'success')",
+            rusqlite::params![template, printer],
+        )
+        .unwrap();
+        let font_db_path = font_path.to_string_lossy().to_string();
+        conn.execute(
+            "INSERT INTO fonts (family, style, weight, file_path, format) VALUES ('Body', 'normal', '400', ?1, 'ttf')",
+            [font_db_path],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO synced_datasets (server_id, name) VALUES ('ds-1', 'D')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO synced_profiles (server_id, template_server_id, printer_name) VALUES ('p-1', 't-1', 'e2e')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO api_clients (name, key_hash) VALUES ('c', 'h')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO queued_uses (server_template_id, count) VALUES ('t-1', 2)",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO sync_state (id, cursor) VALUES (1, 'abc')", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('share_session_token', 'tok')",
+            [],
+        )
+        .unwrap();
+        conn.execute("CREATE TABLE printer_profiles (id INTEGER PRIMARY KEY)", [])
+            .unwrap();
+    }
 
-    let report = wipe_database(&conn, &fonts_dir).unwrap();
+    let report = recreate_database(&mut state.lock().unwrap(), &fonts_dir).unwrap();
     assert_eq!(report.templates, 1);
     assert_eq!(report.template_versions, 1);
     assert_eq!(report.print_jobs, 1);
     assert_eq!(report.fonts, 1);
     assert_eq!(report.datasets, 1);
     assert_eq!(report.profiles, 1);
-    assert_eq!(report.printers, 1);
+    assert_eq!(report.printers, 2);
     assert_eq!(report.batches, 1);
 
-    // Every user table is empty; settings lost the session token too.
-    for table in [
-        "print_jobs",
-        "template_versions",
-        "templates",
-        "fonts",
-        "synced_datasets",
-        "synced_profiles",
-        "batches",
-        "printers",
-        "api_clients",
-        "queued_uses",
-        "sync_state",
-        "settings",
-    ] {
-        let n: i64 = conn
-            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+    {
+        let guard = state.lock().unwrap();
+        let conn = guard.connection();
+        // Every user table is empty; settings lost the session token too.
+        for table in [
+            "print_jobs",
+            "template_versions",
+            "templates",
+            "fonts",
+            "synced_datasets",
+            "synced_profiles",
+            "batches",
+            "printers",
+            "api_clients",
+            "queued_uses",
+            "sync_state",
+            "settings",
+        ] {
+            let n: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(n, 0, "{table} was not wiped");
+        }
+        // The dead legacy table is gone; the schema tables survive.
+        let old: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'printer_profiles'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
-        assert_eq!(n, 0, "{table} was not wiped");
+        assert_eq!(old, 0);
+        let kept: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'templates'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(kept, 1, "schema itself must survive the wipe");
+
+        // Fresh status: no AUTOINCREMENT counters carried over, so the
+        // next row restarts at 1 like a first install.
+        let seq: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sqlite_sequence", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(seq, 0, "autoincrement counters survived the recreate");
+        conn.execute(
+            "INSERT INTO printers (name, type, address, language) VALUES ('N', 'ipp', 'z', 'pdf')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(conn.last_insert_rowid(), 1);
     }
-    // The dead legacy table is gone; the schema tables survive.
-    let old: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'printer_profiles'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(old, 0);
-    let kept: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'templates'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(kept, 1, "schema itself must survive the wipe");
 
     // Font bytes went with their rows.
     assert!(!font_path.exists());

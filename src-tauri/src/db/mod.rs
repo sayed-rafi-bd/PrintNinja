@@ -49,6 +49,34 @@ impl Database {
         strip_sqlite_prefix(&self.url)
     }
 
+    /// Delete the database file (plus WAL/journal sidecars) and reopen it
+    /// fresh through the one schema path. The old connection is closed
+    /// first, so the delete works on Windows file locking too.
+    ///
+    /// Afterwards the file holds the current schema and nothing else:
+    /// no rows, no `sqlite_sequence` counters, no freelist pages, no
+    /// drift from long-ago migrations. On reopen failure `self` is left
+    /// with a temporary in-memory database and the error tells the caller
+    /// to restart the app (whose startup open recreates the file).
+    pub fn recreate(&mut self) -> rusqlite::Result<()> {
+        let old = std::mem::replace(&mut self.conn, Connection::open_in_memory()?);
+        if let Err((conn, err)) = old.close() {
+            self.conn = conn;
+            return Err(err);
+        }
+        let path = self.path().to_string();
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let _ = std::fs::remove_file(format!("{path}{suffix}"));
+        }
+        match Database::open(&self.url) {
+            Ok(fresh) => {
+                self.conn = fresh.conn;
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// The shared connection. Immutable borrow: rusqlite reads and writes
     /// take `&self`; transactions use `unchecked_transaction`, which is safe
     /// here because the `DbState` mutex serialises all access to it.

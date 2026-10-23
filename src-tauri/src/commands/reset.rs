@@ -8,13 +8,16 @@
 //! returns to the welcome screen. The server is untouched: it still holds
 //! the account, and signing back in pulls it down again.
 //!
-//! Everything cleared here is user data, never schema: tables, indexes
-//! and migrations stay, so the app keeps working with an empty database.
+//! The wipe is a file delete, not row deletes: the SQLite file (plus WAL
+//! and journal sidecars) is removed and recreated through the one schema
+//! path, so the result is byte-identical to a fresh install — no rows, no
+//! `sqlite_sequence` counters, no freelist pages, no drift from old
+//! migrations. The in-memory print queue holds no row references (permits
+//! and wake-ups only), so the worker just sees empty tables afterwards.
 //! Dead tables from old installs (`printer_profiles`, `sample_datasets`,
-//! `presets`) are dropped if they somehow still exist. Child rows go
-//! first so the wipe never depends on foreign-key enforcement.
+//! `presets`) vanish with the file instead of needing individual drops.
 
-use crate::db::DbState;
+use crate::db::{Database, DbState};
 use crate::error::{AppError, AppResult};
 use rusqlite::Connection;
 use serde::Serialize;
@@ -38,40 +41,32 @@ fn count(conn: &Connection, table: &str) -> AppResult<usize> {
     Ok(n as usize)
 }
 
-pub fn wipe_database(conn: &Connection, fonts_dir: &Path) -> AppResult<ResetReport> {
+/// The work behind [`reset_database`]: report what was there, delete the
+/// file and reopen fresh, drop font bytes with their rows. Split out so
+/// tests run it against a real file database without a Tauri app around.
+pub fn recreate_database(db: &mut Database, fonts_dir: &Path) -> AppResult<ResetReport> {
     let report = ResetReport {
-        templates: count(conn, "templates")?,
-        template_versions: count(conn, "template_versions")?,
-        print_jobs: count(conn, "print_jobs")?,
-        fonts: count(conn, "fonts")?,
-        datasets: count(conn, "synced_datasets")?,
-        profiles: count(conn, "synced_profiles")?,
-        printers: count(conn, "printers")?,
-        batches: count(conn, "batches")?,
+        templates: count(db.connection(), "templates")?,
+        template_versions: count(db.connection(), "template_versions")?,
+        print_jobs: count(db.connection(), "print_jobs")?,
+        fonts: count(db.connection(), "fonts")?,
+        datasets: count(db.connection(), "synced_datasets")?,
+        profiles: count(db.connection(), "synced_profiles")?,
+        printers: count(db.connection(), "printers")?,
+        batches: count(db.connection(), "batches")?,
     };
     // Font bytes live outside the database; drop them with their rows.
-    let font_paths: Vec<String> = conn
+    let font_paths: Vec<String> = db
+        .connection()
         .prepare("SELECT file_path FROM fonts WHERE file_path <> ''")?
         .query_map([], |r| r.get(0))?
         .collect::<Result<Vec<_>, _>>()?;
 
-    conn.execute_batch(
-        "DELETE FROM print_jobs;
-         DELETE FROM template_versions;
-         DELETE FROM templates;
-         DELETE FROM fonts;
-         DELETE FROM synced_datasets;
-         DELETE FROM synced_profiles;
-         DELETE FROM batches;
-         DELETE FROM printers;
-         DELETE FROM api_clients;
-         DELETE FROM queued_uses;
-         DELETE FROM sync_state;
-         DELETE FROM settings;
-         DROP TABLE IF EXISTS printer_profiles;
-         DROP TABLE IF EXISTS sample_datasets;
-         DROP TABLE IF EXISTS presets;",
-    )?;
+    db.recreate().map_err(|e| {
+        AppError::Internal(format!(
+            "database file deleted but reopen failed ({e}); restart the app to recreate it"
+        ))
+    })?;
     for stored in font_paths {
         let _ = std::fs::remove_file(crate::commands::font::resolve_font_path(fonts_dir, &stored));
     }
@@ -84,8 +79,8 @@ pub fn wipe_database(conn: &Connection, fonts_dir: &Path) -> AppResult<ResetRepo
 #[tauri::command]
 pub fn reset_database(app: AppHandle, db: State<DbState>) -> AppResult<ResetReport> {
     let fonts_dir = app.path().app_data_dir()?.join("fonts");
-    let guard = db
+    let mut guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    wipe_database(guard.connection(), &fonts_dir)
+    recreate_database(&mut guard, &fonts_dir)
 }
