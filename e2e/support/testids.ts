@@ -42,8 +42,6 @@ export const testids = {
   saveConflictOverwrite: "save-conflict-overwrite",
   /** Save-conflict dialog: load the server copy into the editor. */
   saveConflictTakeServer: "save-conflict-take-server",
-  /** File import control in the designer toolbar. */
-  templateImport: "template-import",
   /** Tailwind warnings panel in the designer. */
   classWarnings: "class-warnings",
   /** Designer toolbar: save the editor to the server. */

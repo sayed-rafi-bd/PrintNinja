@@ -24,7 +24,6 @@ import {
   SampleDataPanel,
   type Dataset,
 } from "@/components/designer/SampleDataPanel";
-import { TemplateSyncBar } from "@/components/designer/TemplateSyncBar";
 import { ClassWarnings } from "@/components/designer/ClassWarnings";
 import {
   ResizableHandle,
@@ -467,43 +466,6 @@ export function DesignerPage() {
     }
   };
 
-  const handleImportFile = async (file: File) => {
-    try {
-      const text = await file.text();
-      const isHtml =
-        file.name.toLowerCase().endsWith(".html") ||
-        text.trim().toLowerCase().startsWith("<!doctype") ||
-        text.trim().toLowerCase().startsWith("<html");
-      if (isHtml) {
-        setTemplateName(file.name.replace(/\.html$/i, ""));
-        setHtmlCode(formatHtml(text));
-        toast.success("HTML template imported");
-      } else {
-        const data = JSON.parse(text);
-        setTemplateName(data.name || file.name.replace(/\.(json|html)$/, ""));
-        if (data.html) setHtmlCode(formatHtml(data.html));
-        if (data.css) setCssCode(formatCss(data.css));
-        toast.success("Template imported");
-      }
-    } catch {
-      toast.error("Invalid template file");
-    }
-  };
-
-  const handleExport = () => {
-    const data = { name: templateName, html: htmlCode, css: cssCode };
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${templateName.replace(/\s+/g, "-")}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Template exported");
-  };
-
   const createNewTemplate = async () => {
     const name = newTemplateName.trim();
     if (!name) {
@@ -822,6 +784,7 @@ export function DesignerPage() {
     presets: PAGE_PRESETS,
     orientation,
     setOrientation,
+    onBarcode: () => setShowBarcodeDialog(true),
   };
 
   const insertHelper = (text: string, back = 0) => {
@@ -851,7 +814,6 @@ export function DesignerPage() {
         notices={<ClassWarnings html={debouncedHtml} />}
         samplePanel={sampleDataPanel}
       />
-      <DesignerActions onBarcode={() => setShowBarcodeDialog(true)} />
     </div>
   );
 
@@ -875,23 +837,18 @@ export function DesignerPage() {
         <DesignerToolbar
           onNew={() => setShowNewTemplateDialog(true)}
           onSave={() => void handleSave()}
-          onImportFile={handleImportFile}
-          onExport={handleExport}
           saveDisabled={offline || isReadOnly({ origin })}
           saveTitle={
             offline ? "Offline — connect to save to the server" : undefined
           }
+          templateName={templateName}
+          remoteId={remoteId}
+          publishedAt={publishedAt}
+          readOnly={isReadOnly({ origin })}
+          pending={pending}
+          onVisibilityChange={(v) => void handleVisibilityChange(v)}
         />
       </PageHeader>
-
-      <TemplateSyncBar
-        templateName={templateName}
-        remoteId={remoteId}
-        publishedAt={publishedAt}
-        readOnly={isReadOnly({ origin })}
-        pending={pending}
-        onVisibilityChange={(v) => void handleVisibilityChange(v)}
-      />
 
       {isDesktop ? (
         <div className="flex min-h-0 flex-1 gap-4">
@@ -1032,10 +989,7 @@ export function DesignerPage() {
               )}
             </TabsContent>
 
-            <DesignerActions
-              onBarcode={() => setShowBarcodeDialog(true)}
-              onShowCanvas={handleShowCanvas}
-            />
+            <DesignerActions onShowCanvas={handleShowCanvas} />
           </Tabs>
         </div>
       )}

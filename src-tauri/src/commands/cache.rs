@@ -221,11 +221,9 @@ fn adopt_or_conflict(
     report: &mut ApplyReport,
 ) -> AppResult<()> {
     let local: Option<(String, String)> = tx
-        .query_row(
-            "SELECT html, css FROM templates WHERE id = ?1",
-            [id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
+        .query_row("SELECT html, css FROM templates WHERE id = ?1", [id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
         .ok();
     let (html, css) = local.unwrap_or_default();
     if html == data.body && css == data.css {

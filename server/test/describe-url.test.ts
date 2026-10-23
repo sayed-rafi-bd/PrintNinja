@@ -18,13 +18,15 @@ describe("describeDatabaseUrl", () => {
 
   it("shows a libsql URL without query string or credentials", () => {
     expect(
-      describeDatabaseUrl("libsql://user:pw@my-db.turso.io/main?authToken=SECRET"),
+      describeDatabaseUrl(
+        "libsql://user:pw@my-db.turso.io/main?authToken=SECRET",
+      ),
     ).toBe("libsql://my-db.turso.io/main");
   });
 
   it("never echoes a token that rides in the query of a file URL", () => {
-    expect(describeDatabaseUrl("file:./a.db?authToken=SECRET", "/w")).not.toContain(
-      "SECRET",
-    );
+    expect(
+      describeDatabaseUrl("file:./a.db?authToken=SECRET", "/w"),
+    ).not.toContain("SECRET");
   });
 });

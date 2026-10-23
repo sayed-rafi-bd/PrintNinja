@@ -154,7 +154,7 @@ export function PrintPage() {
           }
           return;
         }
-        const { renderTemplate } = await import("@/lib/render/renderTemplate");
+        const { renderRecords } = await import("@/lib/render/renderTemplate");
 
         // Templates saved before per-template compilation have no stored
         // Tailwind CSS. Compile on the fly so the preview matches.
@@ -201,7 +201,7 @@ export function PrintPage() {
 
         if (!cancelled) {
           setPreviewHtml(
-            renderTemplate(html, css, data as any, compiledCss),
+            renderRecords(html, css, data as unknown, compiledCss),
           );
           setPreviewError("");
           setPreviewNotice(notice);
@@ -340,7 +340,7 @@ export function PrintPage() {
           template_id: templateId,
           printer_id: printerId,
           data,
-          mode: store.batchMode2,
+          mode: "per_record",
         },
       });
       toast.success(`Batch queued: ${(data as unknown[]).length} record(s)`);
@@ -954,23 +954,6 @@ export function PrintPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="max-w-xs space-y-1.5">
-                <Label htmlFor="batch-mode">Mode</Label>
-                <Select
-                  value={store.batchMode2}
-                  onValueChange={(v) =>
-                    store.setBatchMode2(v as "single_job" | "per_record")
-                  }
-                >
-                  <SelectTrigger id="batch-mode" aria-label="Batch mode">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="single_job">Single job</SelectItem>
-                    <SelectItem value="per_record">Per record</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
               {batches.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   No batches yet. Start one with a CSV or JSON list.

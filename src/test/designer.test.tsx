@@ -25,7 +25,6 @@ import {
   stepZoom,
 } from "@/components/designer/CanvasWorkspace";
 import { SampleDataPanel } from "@/components/designer/SampleDataPanel";
-import { TemplateSyncBar } from "@/components/designer/TemplateSyncBar";
 import { ControlsRail } from "@/components/designer/ControlsRail";
 import {
   HelpersPanel,
@@ -61,109 +60,114 @@ beforeAll(() => {
 beforeEach(() => window.localStorage.clear());
 
 describe("DesignerToolbar", () => {
-  it("fires New, Save and Export, and passes a chosen file to Import", async () => {
-    const onNew = vi.fn();
-    const onSave = vi.fn();
-    const onExport = vi.fn();
-    const onImportFile = vi.fn();
-    render(
-      <DesignerToolbar
-        onNew={onNew}
-        onSave={onSave}
-        onImportFile={onImportFile}
-        onExport={onExport}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: /New/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    fireEvent.click(screen.getByRole("button", { name: "Export" }));
-    expect(onNew).toHaveBeenCalled();
-    expect(onSave).toHaveBeenCalled();
-    expect(onExport).toHaveBeenCalled();
-    const file = new File(["{}"], "t.json", { type: "application/json" });
-    fireEvent.change(screen.getByTestId("template-import"), {
-      target: { files: [file] },
-    });
-    await waitFor(() => expect(onImportFile).toHaveBeenCalledWith(file));
-  });
-});
-
-describe("TemplateSyncBar", () => {
   const base = {
     templateName: "Label",
+    remoteId: null as string | null,
+    publishedAt: null as string | null,
+    readOnly: false as boolean,
     pending: null as "save" | "visibility" | null,
     onVisibilityChange: (() => {}) as any,
   };
 
+  it("fires New and Save", () => {
+    const onNew = vi.fn();
+    const onSave = vi.fn();
+    render(
+      <DesignerToolbar
+        {...base}
+        onNew={onNew}
+        onSave={onSave}
+        onVisibilityChange={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /New/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onNew).toHaveBeenCalled();
+    expect(onSave).toHaveBeenCalled();
+  });
+
+  it("has no Import or Export actions", () => {
+    render(
+      <DesignerToolbar
+        {...base}
+        onNew={vi.fn()}
+        onSave={vi.fn()}
+        onVisibilityChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Import" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Export" })).toBeNull();
+    expect(screen.queryByTestId("template-import")).toBeNull();
+  });
+
   it("marks a template that is only on this computer", () => {
-    const { unmount } = render(
-      <TemplateSyncBar {...base} remoteId={null} publishedAt={null} />,
+    render(
+      <DesignerToolbar
+        {...base}
+        onNew={vi.fn()}
+        onSave={vi.fn()}
+        remoteId={null}
+        publishedAt={null}
+      />,
     );
     expect(screen.getByText("Draft")).toBeInTheDocument();
     expect(screen.getByText("Only on this computer")).toBeInTheDocument();
-    unmount();
   });
 
   it("shows a Public switch once a template is published", () => {
     const onVisibilityChange = vi.fn();
     render(
-      <TemplateSyncBar
+      <DesignerToolbar
         {...base}
+        onNew={vi.fn()}
+        onSave={vi.fn()}
         onVisibilityChange={onVisibilityChange}
         remoteId="r1"
         publishedAt="2026-02-01T00:00:00Z"
       />,
     );
     expect(screen.getByText("Published")).toBeInTheDocument();
-    const sw = screen.getByTestId("template-visibility");
-    expect(sw).toBeInTheDocument();
+    expect(screen.getByTestId("template-visibility")).toBeInTheDocument();
     expect(screen.getByText("Public")).toBeInTheDocument();
   });
 
   it("shows a Private switch for an unpublished server copy", () => {
     render(
-      <TemplateSyncBar
+      <DesignerToolbar
         {...base}
+        onNew={vi.fn()}
+        onSave={vi.fn()}
         remoteId="r1"
         publishedAt={null}
         onVisibilityChange={vi.fn()}
       />,
     );
-    expect(screen.getByText(/Private copy/i)).toBeInTheDocument();
+    expect(screen.getByText("Draft")).toBeInTheDocument();
     expect(screen.getByText("Private")).toBeInTheDocument();
-  });
-
-  it("says Save updates the live copy once published", () => {
-    render(
-      <TemplateSyncBar
-        {...base}
-        remoteId="r1"
-        publishedAt="2026-01-01T00:00:00Z"
-        onVisibilityChange={vi.fn()}
-      />,
-    );
-    expect(screen.getByText(/Save updates the live copy/)).toBeInTheDocument();
   });
 
   it("calls onVisibilityChange when the switch flips", () => {
     const onVisibilityChange = vi.fn();
     render(
-      <TemplateSyncBar
+      <DesignerToolbar
         {...base}
+        onNew={vi.fn()}
+        onSave={vi.fn()}
         onVisibilityChange={onVisibilityChange}
         remoteId="r1"
         publishedAt={null}
       />,
     );
-    const sw = screen.getByTestId("template-visibility");
-    fireEvent.click(sw);
+    fireEvent.click(screen.getByTestId("template-visibility"));
     expect(onVisibilityChange).toHaveBeenCalled();
   });
 
-  it("hides the switch on a saved copy from Community", () => {
+  it("hides Save and the switch on a saved copy from Community", () => {
     render(
-      <TemplateSyncBar
+      <DesignerToolbar
         {...base}
+        onNew={vi.fn()}
+        onSave={vi.fn()}
         readOnly
         remoteId="x1"
         publishedAt="2026-02-01T00:00:00Z"
@@ -171,9 +175,8 @@ describe("TemplateSyncBar", () => {
       />,
     );
     expect(screen.getByText("Read-only copy")).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("template-visibility"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.queryByTestId("template-visibility")).toBeNull();
   });
 });
 
@@ -301,6 +304,32 @@ describe("ControlsAccordion", () => {
   it("keeps a closed section's contents out of the page", () => {
     render(<ControlsAccordion {...props()} defaultOpen={[]} />);
     expect(screen.queryByLabelText("Width (mm)")).not.toBeInTheDocument();
+  });
+
+  it("shows Barcode and Font in a Custom input section when onBarcode is given", () => {
+    render(
+      <ControlsAccordion {...props()} defaultOpen={[]} onBarcode={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Custom input" }));
+    expect(screen.getByRole("button", { name: "Barcode" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Font" })).toBeInTheDocument();
+  });
+
+  it("hides the Custom input section without onBarcode", () => {
+    render(<ControlsAccordion {...props()} defaultOpen={[]} />);
+    expect(
+      screen.queryByRole("button", { name: "Custom input" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("calls onBarcode from the Custom input section", () => {
+    const onBarcode = vi.fn();
+    render(
+      <ControlsAccordion {...props()} defaultOpen={[]} onBarcode={onBarcode} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Custom input" }));
+    fireEvent.click(screen.getByRole("button", { name: "Barcode" }));
+    expect(onBarcode).toHaveBeenCalled();
   });
 });
 
@@ -838,9 +867,11 @@ describe("ControlsRail", () => {
     expect(onOpenSection).toHaveBeenCalledWith("helpers");
     fireEvent.click(screen.getByRole("button", { name: "Open Helpers" }));
     expect(onOpenSection).toHaveBeenCalledWith("helpers");
+    fireEvent.click(screen.getByRole("button", { name: "Open Custom input" }));
+    expect(onOpenSection).toHaveBeenCalledWith("custom");
     fireEvent.click(screen.getByRole("button", { name: "Expand controls" }));
     expect(onExpand).toHaveBeenCalled();
-    expect(screen.getAllByRole("button")).toHaveLength(4);
+    expect(screen.getAllByRole("button")).toHaveLength(5);
   });
 });
 

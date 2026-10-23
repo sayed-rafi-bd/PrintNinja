@@ -19,6 +19,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import { HelpersPanel } from "./HelpersPanel";
+import { CustomInputPanel } from "./CustomInputPanel";
 
 export interface PagePreset {
   label: string;
@@ -41,7 +42,9 @@ interface Props<T extends { id: number; name: string }> {
   setOrientation: (v: "portrait" | "landscape") => void;
   /** Show the Helpers section. A phone shows the helpers inside the Sample data tab instead. */
   showHelpers?: boolean;
-  /** Section ids open at first: "templates", "page", "helpers". Desktop opens only "page"; a phone opens none. */
+  /** Open the barcode dialog. Renders the "Custom input" section (barcode + font). */
+  onBarcode?: () => void;
+  /** Section ids open at first: "templates", "page", "helpers", "custom". Desktop opens only "page"; a phone opens none. */
   defaultOpen?: string[];
   /** Controlled open sections. When given, the parent owns (and can remember) which are open. */
   openSections?: string[];
@@ -51,8 +54,8 @@ interface Props<T extends { id: number; name: string }> {
 }
 
 /**
- * The controls column: template list, page setup
- * and helpers, as accordion sections. Several can be open at once.
+ * The controls column: template list, page setup, helpers
+ * and custom input, as accordion sections. Several can be open at once.
  * (Sample data lives in the editor pane, after the HTML / CSS / README tabs.)
  */
 export function ControlsAccordion<T extends { id: number; name: string }>({
@@ -73,6 +76,7 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
   openSections,
   onOpenSectionsChange,
   onInsertHelper,
+  onBarcode,
 }: Props<T>) {
   const { t } = useTranslation();
   const open = openSections
@@ -197,6 +201,15 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
           <AccordionTrigger>Helpers</AccordionTrigger>
           <AccordionContent>
             <HelpersPanel onInsert={onInsertHelper} />
+          </AccordionContent>
+        </AccordionItem>
+      )}
+
+      {onBarcode && (
+        <AccordionItem value="custom">
+          <AccordionTrigger>Custom input</AccordionTrigger>
+          <AccordionContent>
+            <CustomInputPanel onBarcode={onBarcode} />
           </AccordionContent>
         </AccordionItem>
       )}

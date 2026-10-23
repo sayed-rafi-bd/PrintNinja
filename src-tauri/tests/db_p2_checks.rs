@@ -158,7 +158,9 @@ fn p2_checks_sanitize_then_rebuild() {
         .unwrap();
     assert_eq!(versions_table, 0, "versions table is removed");
     let html: String = conn
-        .query_row("SELECT html FROM templates WHERE id = ?1", [tid], |r| r.get(0))
+        .query_row("SELECT html FROM templates WHERE id = ?1", [tid], |r| {
+            r.get(0)
+        })
         .unwrap();
     assert_eq!(html, "");
     let (family, format, size): (String, String, i64) = conn

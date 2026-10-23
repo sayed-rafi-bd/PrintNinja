@@ -529,8 +529,11 @@ async fn batch_print(
         )));
     }
     let mode = req.mode.unwrap_or_else(|| "per_record".into());
-    if !["single_job", "per_record"].contains(&mode.as_str()) {
-        return Err(ApiRejection::BadRequest(format!("invalid mode '{}'", mode)));
+    if mode != "per_record" {
+        return Err(ApiRejection::BadRequest(format!(
+            "invalid mode '{}': only 'per_record' is supported",
+            mode
+        )));
     }
 
     let guard = db.lock().map_err(ApiRejection::from)?;
@@ -564,38 +567,21 @@ async fn batch_print(
     .map_err(ApiRejection::from)?;
     let batch_id = tx.last_insert_rowid();
 
-    if mode == "per_record" {
-        // Each record's own payload rides on its row in `data_json` —
-        // without it the worker would have nothing to render (P3).
-        for (i, record) in records.iter().enumerate() {
-            tx.execute(
-                "INSERT INTO print_jobs
+    // per_record only: one queued job per record, each carrying its
+    // own payload in `data_json` — without it the worker would have
+    // nothing to render (P3).
+    for (i, record) in records.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO print_jobs
                    (batch_id, record_index, template_id,
                     printer_id, source, status, copies, is_test, data_json)
                  VALUES (?1, ?2, ?3, ?4, 'api', 'queued', 1, 0, ?5)",
-                rusqlite::params![
-                    batch_id,
-                    i as i64,
-                    template_id,
-                    printer_id,
-                    record.to_string()
-                ],
-            )
-            .map_err(ApiRejection::from)?;
-        }
-    } else {
-        // Single job: the whole array is one row's payload, rendered once
-        // by the template as an array context.
-        tx.execute(
-            "INSERT INTO print_jobs
-               (batch_id, record_index, template_id,
-                printer_id, source, status, copies, is_test, data_json)
-             VALUES (?1, 0, ?2, ?3, 'api', 'queued', 1, 0, ?4)",
             rusqlite::params![
                 batch_id,
+                i as i64,
                 template_id,
                 printer_id,
-                serde_json::to_string(records).unwrap_or_default()
+                record.to_string()
             ],
         )
         .map_err(ApiRejection::from)?;

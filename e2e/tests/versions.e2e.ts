@@ -1,8 +1,5 @@
 import { expect, test } from "@playwright/test";
-import {
-  apiPutTemplate,
-  apiRegister,
-} from "../support/api";
+import { apiPutTemplate, apiRegister } from "../support/api";
 import { pc } from "../support/fixtures";
 import { testids } from "../support/testids";
 
@@ -87,9 +84,9 @@ test("F8 version history on the server", async ({ browser }) => {
       .getByRole("button", { name: "Save", exact: true })
       .click();
     // A labelled save is one push: the server records the version.
-    await expect(
-      pageA.getByText("Version saved to the server"),
-    ).toBeVisible({ timeout: 30_000 });
+    await expect(pageA.getByText("Version saved to the server")).toBeVisible({
+      timeout: 30_000,
+    });
     await openVersions(pageA);
     await expect(pageA.getByText(label)).toBeVisible({ timeout: 15_000 });
   }

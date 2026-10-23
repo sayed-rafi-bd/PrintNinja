@@ -682,3 +682,75 @@ async fn a_running_job_shows_as_printing_and_then_finishes() {
     assert!(duration.is_some(), "real duration recorded");
     assert!(error.is_none());
 }
+
+/// An array payload prints one page per record in a single document:
+/// one object → one page, N objects → N pages joined with a page break.
+#[tokio::test]
+async fn an_array_payload_prints_one_page_per_record() {
+    let _finishes = lock_finishes().await;
+    let db = test_db();
+    let good = mock_ipp_server(0x0000);
+    seed_printer(&db, "Good", &good);
+    let queue = PrintQueue::new();
+
+    struct CapturingRenderer {
+        html: Mutex<Option<String>>,
+    }
+    #[async_trait::async_trait]
+    impl JobRenderer for CapturingRenderer {
+        async fn render(
+            &self,
+            final_html: &str,
+            _w_mm: f64,
+            _h_mm: f64,
+            _orientation: &str,
+        ) -> anyhow::Result<Vec<u8>> {
+            *self.html.lock().unwrap() = Some(final_html.to_string());
+            Ok(b"%PDF-1.4 fake-render".to_vec())
+        }
+    }
+
+    let renderer = CapturingRenderer {
+        html: Mutex::new(None),
+    };
+    let mut req = print_request("Good");
+    req.html = "<p>Hello {{name}}!</p>".to_string();
+    req.data = Some(serde_json::json!([{ "name": "Ana" }, { "name": "Bo" }]));
+
+    let res = run_print_with(&cache_dir(), &db, &queue, req, &renderer)
+        .await
+        .expect("array print succeeds");
+    assert!(res.success, "{:?}", res.error);
+
+    let html = renderer.html.lock().unwrap().clone().expect("rendered");
+    assert!(html.contains("Hello Ana!"), "first record page");
+    assert!(html.contains("Hello Bo!"), "second record page");
+    assert!(
+        html.contains(r#"<div style="break-before:page"></div>"#),
+        "records are page-separated"
+    );
+}
+
+/// An empty array is a validation failure, not an empty print.
+#[tokio::test]
+async fn an_empty_array_payload_fails_the_job() {
+    let _finishes = lock_finishes().await;
+    let db = test_db();
+    seed_printer(&db, "Mock", "127.0.0.1:1");
+    let queue = PrintQueue::new();
+
+    let mut req = print_request("Mock");
+    req.data = Some(serde_json::json!([]));
+
+    let res = run_print_with(&cache_dir(), &db, &queue, req, &FakeRenderer)
+        .await
+        .expect("empty array is an outcome, not a pipeline error");
+    assert!(!res.success);
+    assert!(
+        res.error
+            .as_deref()
+            .is_some_and(|e| e.contains("empty array")),
+        "clear error, got {:?}",
+        res.error
+    );
+}

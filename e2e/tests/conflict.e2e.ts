@@ -179,22 +179,18 @@ test("F6 conflict: take server copy", async ({ browser }) => {
   // The editor now holds A's copy (re-indented on load); the dialog
   // is gone and B's edit with it. CodeMirror applies the new document
   // a beat after the dialog closes, so both reads poll.
-  await expect(
-    pageB.getByTestId(testids.saveConflictDialog),
-  ).toBeHidden({ timeout: 15_000 });
+  await expect(pageB.getByTestId(testids.saveConflictDialog)).toBeHidden({
+    timeout: 15_000,
+  });
   const editor = pageB.getByLabel("HTML editor").locator(".cm-content");
   await expect(async () => {
     const editorText = (await editor.textContent()) ?? "";
-    expect(editorText.replace(/\s+/g, "")).toContain(
-      aHtml.replace(/\s+/g, ""),
-    );
+    expect(editorText.replace(/\s+/g, "")).toContain(aHtml.replace(/\s+/g, ""));
     expect(editorText).not.toContain("b-edit");
   }).toPass({ timeout: 15_000 });
 });
 
-test("F6 a fresh save after the pull needs no dialog", async ({
-  browser,
-}) => {
+test("F6 a fresh save after the pull needs no dialog", async ({ browser }) => {
   const { auth, pageB, serverId, bHtml } = await setupConflict(
     browser,
     "f6clean",
@@ -205,9 +201,9 @@ test("F6 a fresh save after the pull needs no dialog", async ({
   await expect(pageB.getByText("Saved to the server")).toBeVisible({
     timeout: 30_000,
   });
-  await expect(
-    pageB.getByTestId(testids.saveConflictDialog),
-  ).toBeHidden({ timeout: 15_000 });
+  await expect(pageB.getByTestId(testids.saveConflictDialog)).toBeHidden({
+    timeout: 15_000,
+  });
   await expect(async () => {
     const mine = await apiMine(auth.token);
     expect(mine.items.map((t) => t.name)).toContain("Contended");

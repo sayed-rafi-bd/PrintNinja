@@ -338,9 +338,7 @@ describe("Templates page", () => {
     renderPage();
     await screen.findByText("Shipping label");
     const row = screen.getByText("Shipping label").closest("tr")!;
-    fireEvent.click(
-      within(row).getByRole("button", { name: /Delete/ }),
-    );
+    fireEvent.click(within(row).getByRole("button", { name: /Delete/ }));
     const dialog = await screen.findByRole("dialog");
     expect(
       within(dialog).getByText("Delete “Shipping label” everywhere?"),

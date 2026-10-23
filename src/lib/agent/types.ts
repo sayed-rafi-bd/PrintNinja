@@ -316,4 +316,3 @@ export interface DeeplinkResult {
   action: string;
   [key: string]: unknown;
 }
-

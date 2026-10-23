@@ -28,8 +28,11 @@ fn test_db() -> Arc<Mutex<Database>> {
     )
     .unwrap();
     let printer_id = conn.last_insert_rowid();
-    conn.execute("INSERT INTO templates (name, html) VALUES ('Label', '<p>v1</p>')", [])
-        .unwrap();
+    conn.execute(
+        "INSERT INTO templates (name, html) VALUES ('Label', '<p>v1</p>')",
+        [],
+    )
+    .unwrap();
     let template_id = conn.last_insert_rowid();
     conn.execute(
         "INSERT INTO print_jobs

@@ -155,7 +155,7 @@ fn template_meta_update_writes_content() {
         },
     )
     .unwrap();
-    let (html, css, compiled): (String, String, String) = conn
+    let (html, _css, compiled): (String, String, String) = conn
         .query_row(
             "SELECT html, css, compiled_css FROM templates WHERE id = ?1",
             [tpl.id],

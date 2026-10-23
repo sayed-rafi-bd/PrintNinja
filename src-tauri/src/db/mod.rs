@@ -526,8 +526,14 @@ pub fn ensure_library_schema(conn: &Connection) -> rusqlite::Result<()> {
 /// Idempotent; fresh databases already match and do nothing.
 pub fn ensure_template_content_schema(conn: &Connection) -> rusqlite::Result<()> {
     for (col, ddl) in [
-        ("html", "ALTER TABLE templates ADD COLUMN html TEXT NOT NULL DEFAULT ''"),
-        ("css", "ALTER TABLE templates ADD COLUMN css TEXT NOT NULL DEFAULT ''"),
+        (
+            "html",
+            "ALTER TABLE templates ADD COLUMN html TEXT NOT NULL DEFAULT ''",
+        ),
+        (
+            "css",
+            "ALTER TABLE templates ADD COLUMN css TEXT NOT NULL DEFAULT ''",
+        ),
         (
             "compiled_css",
             "ALTER TABLE templates ADD COLUMN compiled_css TEXT NOT NULL DEFAULT ''",

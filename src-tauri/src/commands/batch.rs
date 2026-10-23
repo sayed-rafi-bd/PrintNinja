@@ -18,7 +18,7 @@ pub struct Batch {
     pub created_at: String,
 }
 
-const VALID_MODES: &[&str] = &["single_job", "per_record"];
+const VALID_MODES: &[&str] = &["per_record"];
 /// Same cap the REST `POST /v1/print/batch` applies to `data` (P3).
 pub const DEFAULT_MAX_RECORDS: usize = 5000;
 
@@ -132,21 +132,9 @@ pub fn create_batch_conn(conn: &Connection, req: CreateBatchRequest) -> AppResul
             }
         }
         _ => {
-            // Single job: the whole array is one row's payload, rendered
-            // once by the template as an array context.
-            tx.execute(
-                "INSERT INTO print_jobs
-                   (batch_id, record_index, template_id,
-                    printer_id, source, status, copies, settings_json, is_test, data_json)
-                 VALUES (?1, 0, ?2, ?3, 'batch', 'queued', 1, ?4, 0, ?5)",
-                rusqlite::params![
-                    batch_id,
-                    req.template_id,
-                    req.printer_id,
-                    settings,
-                    serde_json::to_string(records).unwrap_or_else(|_| "[]".into()),
-                ],
-            )?;
+            return Err(AppError::Validation(
+                "unsupported batch mode: only 'per_record' is supported".into(),
+            ));
         }
     }
 

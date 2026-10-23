@@ -9,7 +9,17 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 vi.mock("@/lib/templates/seedTemplates", () => ({
   ensureStarterTemplates: async () => [
-    { id: 7, name: "Shipping label", page_w_mm: 100, page_h_mm: 150, orientation: "portrait", html: "<p>Hi {{store.name}}</p>", css: "", compiled_css: "", compiled_key: "" },
+    {
+      id: 7,
+      name: "Shipping label",
+      page_w_mm: 100,
+      page_h_mm: 150,
+      orientation: "portrait",
+      html: "<p>Hi {{store.name}}</p>",
+      css: "",
+      compiled_css: "",
+      compiled_key: "",
+    },
   ],
 }));
 vi.mock("@/lib/hooks/useSystemPrinters", () => ({

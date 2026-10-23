@@ -158,9 +158,6 @@ describe("saveTemplateToServer", () => {
     expect(result.remoteId).toBe(REMOTE.id);
   });
 
-
-
-
   it("retries a raced create as an update instead of failing", async () => {
     client.fetchRemoteTemplate.mockResolvedValue({ ...REMOTE, revision: 1 });
     client.putRemoteTemplate

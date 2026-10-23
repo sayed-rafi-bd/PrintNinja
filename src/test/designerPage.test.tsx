@@ -274,10 +274,13 @@ describe("Designer page layout on a phone", () => {
         invoke.mock.calls.filter((c) => c[0] === "list_templates").length,
       ).toBeGreaterThan(0),
     );
-    expect(invoke.mock.calls.filter((c) => c[0] === "list_versions")).toHaveLength(0);
-    expect(invoke.mock.calls.filter((c) => c[0] === "list_latest_versions")).toHaveLength(0);
+    expect(
+      invoke.mock.calls.filter((c) => c[0] === "list_versions"),
+    ).toHaveLength(0);
+    expect(
+      invoke.mock.calls.filter((c) => c[0] === "list_latest_versions"),
+    ).toHaveLength(0);
   });
-
 });
 
 describe("Designer page layout on desktop", () => {
@@ -319,12 +322,10 @@ describe("Designer page layout on desktop", () => {
     const controls = within(
       screen.getByRole("complementary", { name: "Designer controls" }),
     );
-    const states = ["Templates", "Page Setup", "Helpers"].map(
-      (name) => [
-        name,
-        controls.getByRole("button", { name }).getAttribute("aria-expanded"),
-      ],
-    );
+    const states = ["Templates", "Page Setup", "Helpers"].map((name) => [
+      name,
+      controls.getByRole("button", { name }).getAttribute("aria-expanded"),
+    ]);
     expect(states).toEqual([
       ["Templates", "false"],
       ["Page Setup", "true"],
@@ -415,11 +416,17 @@ describe("Designer page layout on desktop", () => {
     expect(screen.getByTitle("Canvas preview")).toBeInTheDocument();
   });
 
-  it("keeps the Barcode and Font actions, without a Save & Preview button", async () => {
+  it("keeps Barcode and Font in the Custom input section, without a Save & Preview button", async () => {
     renderDesigner();
     await screen.findByTitle("Canvas preview");
+    const aside = await screen.findByRole("complementary", {
+      name: "Designer controls",
+    });
+    fireEvent.click(
+      within(aside).getByRole("button", { name: "Custom input" }),
+    );
     for (const name of ["Barcode", "Font"]) {
-      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+      expect(within(aside).getByRole("button", { name })).toBeInTheDocument();
     }
     expect(
       screen.queryByRole("button", { name: /Save & Preview/ }),

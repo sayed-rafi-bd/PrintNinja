@@ -162,7 +162,10 @@ impl JobRenderer for PdfRenderer {
 
 /// Load template HTML/CSS for a job directly from the template row.
 /// The tuple is `(html, css, compiled_css, width_mm, height_mm)`.
-fn resolve_template(conn: &rusqlite::Connection, template_id: i64) -> AppResult<(String, String, String, f64, f64)> {
+fn resolve_template(
+    conn: &rusqlite::Connection,
+    template_id: i64,
+) -> AppResult<(String, String, String, f64, f64)> {
     conn.query_row(
         "SELECT html, css, compiled_css, page_w_mm, page_h_mm FROM templates WHERE id = ?1",
         [template_id],
@@ -398,12 +401,7 @@ pub async fn run_print_with(
     // state with the real start time. Later stages only update it, so a
     // running job is visible in History and every failure path — fetch,
     // render, send — leaves a row that already carries its own id.
-    let job_id = begin_job(
-        db,
-        &req,
-        copies as i64,
-        (content.w_mm, content.h_mm),
-    )?;
+    let job_id = begin_job(db, &req, copies as i64, (content.w_mm, content.h_mm))?;
 
     run_stages(
         cache_dir,
@@ -664,13 +662,13 @@ async fn run_stages(
     // printing the raw template source instead of failing. A replayed job is
     // the exception: its HTML already went through the engine once.
     if render_template {
+        // One object prints one page; an array prints one page per
+        // record in a single document (page-break between records).
         let context = fetched.unwrap_or_else(|| serde_json::json!({}));
-        let engine = TemplateEngine::new();
-        html = match engine.render(&html, &context) {
-            Ok(rendered) => rendered,
-            Err(e) => {
-                let msg = format!("Template render failed: {e}");
-                // No rendered content to replay (P3): store none.
+        let records: Vec<serde_json::Value> = match context {
+            serde_json::Value::Array(arr) if !arr.is_empty() => arr,
+            serde_json::Value::Array(_) => {
+                let msg = "Data is an empty array: nothing to print".to_string();
                 finish_job(
                     db,
                     job_id,
@@ -691,7 +689,43 @@ async fn run_stages(
                     timings: Some(timings),
                 });
             }
+            single => vec![single],
         };
+        let engine = TemplateEngine::new();
+        let mut pages: Vec<String> = Vec::with_capacity(records.len());
+        for (idx, record) in records.iter().enumerate() {
+            match engine.render(&html, record) {
+                Ok(rendered) => pages.push(rendered),
+                Err(e) => {
+                    let msg = if records.len() > 1 {
+                        format!("Template render failed on record {}: {e}", idx + 1)
+                    } else {
+                        format!("Template render failed: {e}")
+                    };
+                    // No rendered content to replay (P3): store none.
+                    finish_job(
+                        db,
+                        job_id,
+                        "failed",
+                        Some(msg.clone()),
+                        "",
+                        &req,
+                        start.elapsed().as_millis() as i64,
+                    )?;
+                    timings.template_ms = ms(t_template);
+                    timings.total_ms = ms(start);
+                    save_timings(db, job_id, &timings);
+                    return Ok(PrintResponse {
+                        success: false,
+                        job_id: job_id.to_string(),
+                        duration_ms: start.elapsed().as_millis(),
+                        error: Some(msg),
+                        timings: Some(timings),
+                    });
+                }
+            }
+        }
+        html = pages.join("\n<div style=\"break-before:page\"></div>\n");
     }
 
     let template_ms = ms(t_template);
