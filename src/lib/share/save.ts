@@ -77,6 +77,27 @@ export async function saveTemplateToServer(
 
   const compiled = await compiledFields(content.html);
 
+  // The editor snapshot lands locally first: update_template_meta
+  // validates remote refs with the canonical message, so a bad template
+  // is refused before anything reaches the server. It also marks the
+  // row dirty, so a failed save stays visible as a draft to retry.
+  await agent("update_template_meta", {
+    req: {
+      id: template.id,
+      name: content.name,
+      page_w_mm: content.page_w_mm,
+      page_h_mm: content.page_h_mm,
+      summary: content.summary,
+      html: content.html,
+      css: content.css,
+      compiled_css: compiled.compiled_css ?? "",
+      compiled_key: compiled.compiled_key ?? "",
+    },
+  });
+  await agent("update_readme", {
+    req: { id: template.id, readme: content.readme },
+  });
+
   const body = {
     name: content.name,
     summary: content.summary,
@@ -120,7 +141,7 @@ export async function saveTemplateToServer(
     }
   }
 
-  await recordServerCopy(template, content, remote, compiled);
+  await recordServerCopy(template, remote);
   return {
     remoteId: remote.id,
     revision: remote.revision,
@@ -138,34 +159,15 @@ function asConflict(serverId: string, err: unknown): unknown {
 
 /**
  * Write the copy the server just accepted into the local cache: the
- * metadata, the README, and the sync bookkeeping that marks the row
- * synced at that revision. (The version snapshot itself was written
- * before the PUT, so a failed save still leaves the attempt in history
- * as a visible draft.) This is what makes the cache mirror the server
- * instead of leading it.
+ * sync bookkeeping that marks the row synced at that revision, plus the
+ * server link. (The content itself was already written before the PUT,
+ * so a failed save still leaves the attempt as a visible draft.) This is
+ * what makes the cache mirror the server instead of leading it.
  */
 async function recordServerCopy(
   template: TemplateRow,
-  content: TemplateContent,
   remote: RemoteTemplate,
-  compiled?: { compiled_css?: string; compiled_key?: string },
 ): Promise<void> {
-  await agent("update_template_meta", {
-    req: {
-      id: template.id,
-      name: content.name,
-      page_w_mm: content.page_w_mm,
-      page_h_mm: content.page_h_mm,
-      summary: content.summary,
-      html: content.html,
-      css: content.css,
-      compiled_css: compiled?.compiled_css ?? "",
-      compiled_key: compiled?.compiled_key ?? "",
-    },
-  });
-  await agent("update_readme", {
-    req: { id: template.id, readme: content.readme },
-  });
   await agent("cache_mark_pushed", {
     server_id: remote.id,
     revision: remote.revision,
