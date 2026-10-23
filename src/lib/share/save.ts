@@ -18,10 +18,8 @@ import { ApiError, storedRevision } from "@/lib/api/errors";
 import { compiledFields } from "@/lib/templates/compileTemplateCss";
 import {
   fetchRemoteTemplate,
-  publishRemoteTemplate,
   putRemoteTemplate,
   RemoteTemplateNotFoundError,
-  unpublishRemoteTemplate,
   unpublishTemplate,
   type RemoteTemplate,
 } from "./client";
@@ -35,10 +33,6 @@ export interface TemplateContent {
   html: string;
   css: string;
   readme: string;
-  /** `true` publishes, `false` keeps private, omitted leaves as-is. */
-  publish?: boolean;
-  /** A labelled save records a server version alongside the content. */
-  version?: { label?: string | null; note?: string | null };
 }
 
 /**
@@ -81,17 +75,7 @@ export async function saveTemplateToServer(
   const serverId =
     template.server_id ?? template.remote_id ?? crypto.randomUUID();
 
-  await agent("create_version", {
-    req: {
-      template_id: template.id,
-      html: content.html,
-      css: content.css,
-      ...(await compiledFields(content.html)),
-      label: content.version?.label ?? null,
-      note: content.version?.note ?? null,
-      created_by: "manual",
-    },
-  });
+  const compiled = await compiledFields(content.html);
 
   const body = {
     name: content.name,
@@ -102,7 +86,6 @@ export async function saveTemplateToServer(
     body: content.html,
     css: content.css,
     readme: content.readme,
-    ...(content.version ? { version: content.version } : {}),
   };
 
   const put = (ifRevision: number | undefined) =>
@@ -137,14 +120,7 @@ export async function saveTemplateToServer(
     }
   }
 
-  if (content.publish === true && !remote.published_at) {
-    remote = await publishRemoteTemplate(remote.id);
-  } else if (content.publish === false && remote.published_at) {
-    await unpublishRemoteTemplate(remote.id);
-    remote = { ...remote, published_at: null };
-  }
-
-  await recordServerCopy(template, content, remote);
+  await recordServerCopy(template, content, remote, compiled);
   return {
     remoteId: remote.id,
     revision: remote.revision,
@@ -172,6 +148,7 @@ async function recordServerCopy(
   template: TemplateRow,
   content: TemplateContent,
   remote: RemoteTemplate,
+  compiled?: { compiled_css?: string; compiled_key?: string },
 ): Promise<void> {
   await agent("update_template_meta", {
     req: {
@@ -180,6 +157,10 @@ async function recordServerCopy(
       page_w_mm: content.page_w_mm,
       page_h_mm: content.page_h_mm,
       summary: content.summary,
+      html: content.html,
+      css: content.css,
+      compiled_css: compiled?.compiled_css ?? "",
+      compiled_key: compiled?.compiled_key ?? "",
     },
   });
   await agent("update_readme", {
@@ -258,17 +239,13 @@ export async function createTemplateOnServer(input: {
 export async function saveRowToServer(
   template: TemplateRow,
 ): Promise<SaveOutcome> {
-  const versions = await agent("list_versions", {
-    template_id: template.id,
-  });
-  const current = versions?.[0];
   return saveTemplateToServer(template, {
     name: template.name,
     summary: template.summary ?? "",
     page_w_mm: template.page_w_mm,
     page_h_mm: template.page_h_mm,
-    html: current?.html ?? "",
-    css: current?.css ?? "",
+    html: template.html ?? "",
+    css: template.css ?? "",
     readme: template.readme ?? "",
   });
 }
@@ -310,17 +287,7 @@ export async function takeServerCopy(template: TemplateRow): Promise<{
   if (!serverId) throw new Error("This template is not on the server yet");
   const remote = await fetchRemoteTemplate(serverId);
   const html = remote.body ?? "";
-  await agent("create_version", {
-    req: {
-      template_id: template.id,
-      html,
-      css: remote.css ?? "",
-      ...(await compiledFields(html)),
-      label: "Taken from server",
-      note: null,
-      created_by: "sync",
-    },
-  });
+  const compiled = await compiledFields(html);
   await agent("update_template_meta", {
     req: {
       id: template.id,
@@ -328,6 +295,10 @@ export async function takeServerCopy(template: TemplateRow): Promise<{
       page_w_mm: Math.round(remote.page_w_mm),
       page_h_mm: Math.round(remote.page_h_mm),
       summary: remote.summary ?? "",
+      html,
+      css: remote.css ?? "",
+      compiled_css: compiled.compiled_css ?? "",
+      compiled_key: compiled.compiled_key ?? "",
     },
   });
   await agent("update_readme", {

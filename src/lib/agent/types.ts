@@ -9,10 +9,13 @@
 export interface TemplateRow {
   id: number;
   name: string;
-  current_version_id: number | null;
   page_w_mm: number;
   page_h_mm: number;
   orientation: string;
+  html: string;
+  css: string;
+  compiled_css: string;
+  compiled_key: string;
   readme: string;
   summary: string;
   remote_id: string | null;
@@ -30,20 +33,6 @@ export interface TemplateRow {
   sync_state: string;
   created_at: string;
   updated_at: string;
-}
-
-export interface TemplateVersionRow {
-  id: number;
-  template_id: number;
-  version_no: number;
-  html: string;
-  css: string;
-  label: string | null;
-  note: string | null;
-  created_at: string;
-  created_by: string;
-  compiled_css?: string;
-  compiled_key?: string;
 }
 
 export interface DirtyRow {
@@ -92,7 +81,6 @@ export interface HistoryJob {
   batch_id: number | null;
   record_index: number | null;
   template_id: number | null;
-  template_version_id: number | null;
   printer_id: number | null;
   source: "ui" | "api" | "deeplink" | "batch" | "test";
   source_url: string | null;
@@ -161,7 +149,6 @@ export interface PrintHtmlReq {
   page_range?: string | null;
   grayscale?: boolean | null;
   template_id?: number | null;
-  template_version_id?: number | null;
   data?: unknown;
   data_url?: string | null;
   http_method?: string | null;
@@ -330,13 +317,3 @@ export interface DeeplinkResult {
   [key: string]: unknown;
 }
 
-export interface VersionDiff {
-  from_version_no: number;
-  to_version_no: number;
-  html_from: string;
-  html_to: string;
-  css_from: string;
-  css_to: string;
-  html_changed: boolean;
-  css_changed: boolean;
-}

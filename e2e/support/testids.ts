@@ -24,8 +24,6 @@ export const testids = {
   offlineBanner: "offline-banner",
   /** Banner on Templates when rows are conflicted. */
   conflictBanner: "conflict-banner",
-  /** Designer version row N (parameterized in the app). */
-  versionRow: (versionNo: number) => `version-row-${versionNo}`,
   /** Settings font row id (parameterized in the app). */
   fontRow: (id: number | string) => `font-row-${id}`,
   /** Prefix for "any font row" locators. */
@@ -52,24 +50,8 @@ export const testids = {
   designerSave: "designer-save",
   /** Designer sync bar: state badge wrapper (data-state). */
   templateState: "template-state",
-  /** Designer sync bar: publish button. */
-  templatePublish: "template-publish",
-  /** Designer sync bar: unpublish button. */
-  templateUnpublish: "template-unpublish",
-  /** Designer version panel: list container. */
-  versionList: "version-list",
-  /** Designer version row N diff viewer opener. */
-  versionDiff: (versionNo: number) => `version-diff-${versionNo}`,
-  /** Designer version row N restore button. */
-  versionRestore: (versionNo: number) => `version-restore-${versionNo}`,
-  /** Designer version row N delete button. */
-  versionDelete: (versionNo: number) => `version-delete-${versionNo}`,
-  /** Save-version dialog: label input. */
-  versionLabel: "version-label",
-  /** Designer actions: open the save-version dialog. */
-  designerSaveVersion: "designer-save-version",
-  /** Designer sync bar: cache refresh button. */
-  templateSyncNow: "template-sync-now",
+  /** Designer sync bar: visibility switch (Public/Private). */
+  templateVisibility: "template-visibility",
   /** Settings appearance: app name field. */
   settingsBrandName: "settings-brand-name",
   /** Settings appearance: density radio group. */

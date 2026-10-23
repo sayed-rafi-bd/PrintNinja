@@ -222,7 +222,7 @@ fn adopt_or_conflict(
 ) -> AppResult<()> {
     let local: Option<(String, String)> = tx
         .query_row(
-            "SELECT html, css FROM template_versions WHERE id = (SELECT current_version_id FROM templates WHERE id = ?1)",
+            "SELECT html, css FROM templates WHERE id = ?1",
             [id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
@@ -281,9 +281,10 @@ fn apply_upsert_synced(
     tx.execute(
         "UPDATE templates SET name = ?1, summary = ?2, page_w_mm = ?3, page_h_mm = ?4,
                         orientation = ?5, readme = ?6, published_at = ?7,
-                        server_revision = ?8, base_revision = ?8, synced_at = datetime('now'),
-                        sync_state = 'synced', updated_at = ?9
-                 WHERE id = ?10",
+                        html = ?8, css = ?9,
+                        server_revision = ?10, base_revision = ?10, synced_at = datetime('now'),
+                        sync_state = 'synced', updated_at = ?11
+                 WHERE id = ?12",
         rusqlite::params![
             data.name,
             data.summary,
@@ -292,27 +293,13 @@ fn apply_upsert_synced(
             orientation,
             data.readme,
             data.published_at,
+            data.body,
+            data.css,
             data.revision,
             data.updated_at,
             id
         ],
     )?;
-    let version_no: i64 = tx.query_row(
-        "SELECT COALESCE(MAX(version_no), 0) + 1 FROM template_versions WHERE template_id = ?1",
-        [id],
-        |r| r.get(0),
-    )?;
-    let version_id: i64 = tx.query_row(
-        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-                 VALUES (?1, ?2, ?3, ?4, 'sync') RETURNING id",
-        rusqlite::params![id, version_no, data.body, data.css],
-        |r| r.get(0),
-    )?;
-    tx.execute(
-        "UPDATE templates SET current_version_id = ?1 WHERE id = ?2",
-        rusqlite::params![version_id, id],
-    )?;
-    prune_versions(tx, id)?;
     report.applied_upserts += 1;
     Ok(())
 }
@@ -332,9 +319,9 @@ fn apply_upsert_new(
     };
     tx.execute(
                 "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, readme, summary,
-                        published_at, updated_at, server_id, server_revision, base_revision,
+                        html, css, published_at, updated_at, server_id, server_revision, base_revision,
                         sync_state, kind, owner_handle, synced_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, 'synced', 'own', NULL, datetime('now'))",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, 'synced', 'own', NULL, datetime('now'))",
                 rusqlite::params![
                     data.name,
                     page_w,
@@ -342,23 +329,14 @@ fn apply_upsert_new(
                     orientation,
                     data.readme,
                     data.summary,
+                    data.body,
+                    data.css,
                     data.published_at,
                     data.updated_at,
                     data.id,
                     data.revision,
                 ],
             )?;
-    let template_id = tx.last_insert_rowid();
-    let version_id: i64 = tx.query_row(
-        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-                 VALUES (?1, 1, ?2, ?3, 'sync') RETURNING id",
-        rusqlite::params![template_id, data.body, data.css],
-        |r| r.get(0),
-    )?;
-    tx.execute(
-        "UPDATE templates SET current_version_id = ?1 WHERE id = ?2",
-        rusqlite::params![version_id, template_id],
-    )?;
     report.applied_upserts += 1;
     Ok(())
 }
@@ -396,19 +374,6 @@ fn local_is_synced(tx: &rusqlite::Transaction, server_id: &str) -> rusqlite::Res
         |r| r.get(0),
     )?;
     Ok(state == "synced")
-}
-
-/// The local versions table is a read cache: keep the newest 20 per
-/// template so offline diffs keep working without unbounded growth.
-fn prune_versions(tx: &rusqlite::Transaction, template_id: i64) -> rusqlite::Result<()> {
-    tx.execute(
-        "DELETE FROM template_versions
-         WHERE template_id = ?1 AND id NOT IN (
-             SELECT id FROM template_versions WHERE template_id = ?1 ORDER BY version_no DESC LIMIT 20
-         )",
-        [template_id],
-    )?;
-    Ok(())
 }
 
 /// The one sync-state row, or blanks when no pull has happened yet.
@@ -474,11 +439,11 @@ pub struct DirtyTemplate {
 
 pub fn list_dirty(conn: &Connection) -> AppResult<Vec<DirtyTemplate>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.server_id, t.name, t.summary, t.page_w_mm, t.page_h_mm, t.readme,
-                v.html, v.css, t.base_revision
-         FROM templates t LEFT JOIN template_versions v ON v.id = t.current_version_id
-         WHERE t.sync_state = 'dirty'
-         ORDER BY t.id",
+        "SELECT id, server_id, name, summary, page_w_mm, page_h_mm, readme,
+                html, css, base_revision
+         FROM templates
+         WHERE sync_state = 'dirty'
+         ORDER BY id",
     )?;
     let rows = stmt.query_map([], |r| {
         Ok(DirtyTemplate {
@@ -551,7 +516,7 @@ pub fn list_conflicted(conn: &Connection) -> AppResult<Vec<ConflictedTemplate>> 
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
-/// Forgets a local copy outright: hard-deletes the row (versions cascade).
+/// Forgets a local copy outright: hard-deletes the row.
 /// Used after the server confirms a delete and when a reset pass proves
 /// a synced row is gone. Idempotent.
 pub fn forget_template(conn: &Connection, server_id: &str) -> AppResult<bool> {
@@ -710,7 +675,7 @@ pub fn clear_account(conn: &Connection, fonts_dir: &Path) -> AppResult<usize> {
         .query_map([], |r| r.get(0))?
         .collect::<Result<Vec<_>, _>>()?;
     conn.execute_batch(
-        "DELETE FROM template_versions; DELETE FROM templates;
+        "DELETE FROM templates;
          DELETE FROM synced_datasets; DELETE FROM synced_profiles; DELETE FROM fonts;
          DELETE FROM sync_state; DELETE FROM queued_uses;
          UPDATE settings SET sync_state = 'synced', synced_at = NULL;",

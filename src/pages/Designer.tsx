@@ -1,9 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/PageHeader";
-import {
-  ControlsAccordion,
-  type VersionRow,
-} from "@/components/designer/ControlsAccordion";
+import { ControlsAccordion } from "@/components/designer/ControlsAccordion";
 import { CanvasWorkspace } from "@/components/designer/CanvasWorkspace";
 import {
   CodeEditors,
@@ -47,7 +44,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -67,7 +63,6 @@ import { PanelLeftClose, QrCode } from "lucide-react";
 import { toast } from "sonner";
 import CodeMirror from "@uiw/react-codemirror";
 import { json } from "@codemirror/lang-json";
-import ReactDiffViewer, { DiffMethod } from "react-diff-viewer-continued";
 import {
   BARCODE_TYPES,
   buildBarcodeSnippet,
@@ -83,7 +78,6 @@ import { useCompiledCss } from "@/lib/templates/useCompiledCss";
 import { formatCss, formatHtml } from "@/lib/utils/format";
 import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
 import * as share from "@/lib/share/client";
-import { cacheNow } from "@/lib/sync/useSyncStatus";
 import { useShareStatus } from "@/lib/shell/useShareStatus";
 import { getLocalTemplate, isReadOnly } from "@/lib/share/sync";
 import {
@@ -104,15 +98,11 @@ const PAGE_PRESETS = [
   { label: "4x6 Label", width: 102, height: 152 },
 ];
 
-/** Which sync action is running, so only its button says so. */
-type SyncAction = "save" | "publish" | "unpublish" | "sync";
+/** Which sync action is running. */
+type SyncAction = "save" | "visibility";
 
 export function DesignerPage() {
   const { t } = useTranslation();
-  const [versions, setVersions] = useState<VersionRow[]>([]);
-  const [showVersionDialog, setShowVersionDialog] = useState(false);
-  const [versionLabel, setVersionLabel] = useState("");
-  const [versionNote, setVersionNote] = useState("");
   const [showBarcodeDialog, setShowBarcodeDialog] = useState(false);
   const [barcodeType, setBarcodeType] = useState("code128");
   const [barcodeValue, setBarcodeValue] = useState("");
@@ -225,12 +215,9 @@ export function DesignerPage() {
   const [_templatesLoading, setTemplatesLoading] = useState(true);
   void _templatesLoading;
 
-  // Template ids whose html/css in `templates` is real content, not the
-  // placeholder defaults. Hydration fetches only the opened row; other
-  // rows load on selection through the versions effect. loadTemplate
-  // leaves the editors alone for unloaded rows so they never flash
-  // defaults, and create/import paths mark their ids up front because
-  // their content is already known.
+  // Template ids whose html/css in `templates` is already loaded into
+  // the editor. `loadTemplate` writes content directly since rows carry
+  // their own html/css.
   const contentLoaded = useRef<Set<number>>(new Set());
 
   // Sample datasets (variables). Persisted through the agent and
@@ -297,20 +284,14 @@ export function DesignerPage() {
   }) => {
     setCurrentTemplateId(tpl.id);
     setTemplateName(tpl.name);
-    // Rows beyond the opened one carry placeholder content until their
-    // versions load (see contentLoaded): leave the editors alone and let
-    // the versions effect fill them, instead of flashing defaults.
-    if (contentLoaded.current.has(tpl.id)) {
-      setHtmlCode(formatHtml(tpl.html));
-      setCssCode(formatCss(tpl.css));
-    }
+    setHtmlCode(formatHtml(tpl.html));
+    setCssCode(formatCss(tpl.css));
+    contentLoaded.current.add(tpl.id);
     if (tpl.page_w_mm) setPageWidth(tpl.page_w_mm);
     if (tpl.page_h_mm) setPageHeight(tpl.page_h_mm);
     if (tpl.orientation)
       setOrientation(tpl.orientation as "portrait" | "landscape");
     setCurrentTemplateDbId(tpl.id);
-    setDiff(null);
-    setShowDiff(false);
     // Load readme and publish info if provided, otherwise fetch from DB
     if (tpl.readme !== undefined) {
       setReadme(tpl.readme);
@@ -333,29 +314,7 @@ export function DesignerPage() {
         }
       })();
     }
-    // Load the persisted versions for the newly selected template.
-    (async () => {
-      try {
-        const list = await agent("list_versions", {
-          template_id: tpl.id,
-        });
-        setVersions(
-          (list ?? []).map((v) => ({
-            key: `local-${v.id}`,
-            versionNo: v.version_no,
-            label: v.label,
-            note: v.note,
-            createdAt: v.created_at,
-            createdBy: v.created_by,
-            html: v.html,
-            css: v.css,
-            localId: v.id,
-          })),
-        );
-      } catch {
-        setVersions([]);
-      }
-    })();
+    // Content now lives on the template row itself; nothing more to load.
     toast.success(`Loaded "${tpl.name}"`);
   };
 
@@ -366,7 +325,7 @@ export function DesignerPage() {
    * failed save leaves nothing behind to rot (the edit stays in the
    * editor, and the row keeps its old synced content).
    */
-  const buildContent = async (publish?: boolean): Promise<TemplateContent> => {
+  const buildContent = async (): Promise<TemplateContent> => {
     const row = await getLocalTemplate(currentTemplateDbId!);
     return {
       name: templateName,
@@ -376,7 +335,6 @@ export function DesignerPage() {
       html: htmlCode,
       css: cssCode,
       readme,
-      ...(publish === undefined ? {} : { publish }),
     };
   };
 
@@ -400,6 +358,26 @@ export function DesignerPage() {
       const result = await saveTemplateToServer(row, content);
       setRemoteId(result.remoteId);
       setPublishedAt(result.published ? result.updatedAt : null);
+      setTemplates((prev) =>
+        prev.map((t) =>
+          t.id === currentTemplateDbId
+            ? {
+                ...t,
+                name: content.name,
+                html: content.html,
+                css: content.css,
+                page_w_mm: content.page_w_mm,
+                page_h_mm: content.page_h_mm,
+                orientation:
+                  content.page_w_mm > content.page_h_mm
+                    ? "landscape"
+                    : "portrait",
+              }
+            : t,
+        ),
+      );
+      setTemplateName(content.name);
+      window.dispatchEvent(new Event("sync:pulled"));
       toast.success(
         result.published
           ? "Saved — the published copy is updated"
@@ -417,60 +395,24 @@ export function DesignerPage() {
   };
 
   /**
-   * Publish is a one-time switch to public: it saves and makes the copy
-   * visible. After that, Save alone keeps the published copy current —
-   * the server never clears published_at on an update.
+   * Publish is visibility-only: the switch calls publish/unpublish
+   * immediately and updates the badge. Content still goes through Save.
    */
-  const handlePublish = async () => {
-    if (!currentTemplateDbId) {
-      toast.error("No template selected");
-      return;
-    }
-    if (offline) {
-      toast.error("Offline — connect to publish to the server");
-      return;
-    }
-    setPending("publish");
+  const handleVisibilityChange = async (makePublic: boolean) => {
+    if (!currentTemplateDbId || !remoteId || offline) return;
+    setPending("visibility");
     try {
-      const row = await getLocalTemplate(currentTemplateDbId);
-      const content = await buildContent(true);
-      const result = await saveTemplateToServer(row, content);
-      setRemoteId(result.remoteId);
-      setPublishedAt(result.published ? result.updatedAt : null);
-      toast.success("Published to Community");
-    } catch (e) {
-      if (e instanceof TemplateConflictError) {
-        setConflict({ rowId: currentTemplateDbId, serverId: e.serverId });
-        return;
+      if (makePublic) {
+        const remote = await share.publishRemoteTemplate(remoteId);
+        setPublishedAt(remote.published_at ?? remote.updated_at ?? null);
+        toast.success("Template is now public");
+      } else {
+        const remote = await share.unpublishRemoteTemplate(remoteId);
+        setPublishedAt(null);
+        void remote;
+        toast.success("Template is now private");
       }
-      toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setPending(null);
-    }
-  };
-
-  const handleCacheNow = async () => {
-    setPending("sync");
-    try {
-      await cacheNow();
-    } finally {
-      setPending(null);
-    }
-  };
-
-  const handleUnpublish = async () => {
-    if (!currentTemplateDbId || !remoteId) return;
-    if (offline) {
-      toast.error("Offline — connect to unpublish on the server");
-      return;
-    }
-    setPending("unpublish");
-    try {
-      // Unpublish makes the copy private; it stays on the server and on
-      // this PC, so Save keeps working and can publish it again later.
-      const remote = await share.unpublishRemoteTemplate(remoteId);
-      setPublishedAt(remote.published_at ?? null);
-      toast.success("Unpublished — the copy stays on the server");
+      window.dispatchEvent(new Event("sync:pulled"));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -599,7 +541,6 @@ export function DesignerPage() {
       contentLoaded.current.add(tpl.id);
       setTemplates((prev) => [...prev, tpl]);
       loadTemplate(tpl);
-      setVersions([]);
       setCurrentTemplateDbId(tpl.id);
       toast.success(`Template "${name}" created on the server`);
     } catch {
@@ -619,7 +560,6 @@ export function DesignerPage() {
       contentLoaded.current.add(tpl.id);
       setTemplates((prev) => [...prev, tpl]);
       loadTemplate(tpl);
-      setVersions([]);
       setCurrentTemplateDbId(tpl.id);
       toast.success(`Template "${name}" created locally`);
     } finally {
@@ -638,17 +578,6 @@ export function DesignerPage() {
 
   // The active template's DB row id (created on first save / on load).
   const [currentTemplateDbId, setCurrentTemplateDbId] = useState(1);
-  const [diff, setDiff] = useState<{
-    from_version_no: number;
-    to_version_no: number;
-    html_from: string;
-    html_to: string;
-    css_from: string;
-    css_to: string;
-    html_changed: boolean;
-    css_changed: boolean;
-  } | null>(null);
-  const [showDiff, setShowDiff] = useState(false);
 
   // Load template list from SQLite on mount; fall back to starters in web
   // mode or on first launch when the table is empty.
@@ -661,35 +590,15 @@ export function DesignerPage() {
         const rows = await ensureStarterTemplates();
         if (cancelled) return;
         if (rows && rows.length > 0) {
-          // One batched query carries every row's current content — not
-          // one list_versions per template (N+1).
           const hydrated = rows.map((r) => ({
             id: r.id,
             name: r.name,
-            html: DEFAULT_TEMPLATE_HTML,
-            css: DEFAULT_TEMPLATE_CSS,
+            html: r.html || DEFAULT_TEMPLATE_HTML,
+            css: r.css || DEFAULT_TEMPLATE_CSS,
             page_w_mm: r.page_w_mm,
             page_h_mm: r.page_h_mm,
             orientation: r.orientation,
           }));
-          try {
-            const latest = await agent("list_latest_versions", {
-              template_ids: rows.map((r) => r.id),
-            });
-            const byTemplate = new Map(
-              (latest ?? []).map((v) => [v.template_id, v]),
-            );
-            for (const h of hydrated) {
-              const v = byTemplate.get(h.id);
-              if (v) {
-                h.html = v.html;
-                h.css = v.css;
-              }
-              contentLoaded.current.add(h.id);
-            }
-          } catch {
-            /* placeholders stand; selection retries through the versions effect */
-          }
           setTemplates(hydrated);
           setCurrentTemplateId(hydrated[0].id);
           setTemplateName(hydrated[0].name);
@@ -750,65 +659,61 @@ export function DesignerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Templates reload on sync pulls so a save on another PC (or the
+  // topbar sync button) refreshes this list without a remount.
+  const currentTemplateDbIdRef = useRef(currentTemplateDbId);
+  currentTemplateDbIdRef.current = currentTemplateDbId;
   useEffect(() => {
-    // Load persisted versions for the active template. Keyed on the
-    // remote id too: it arrives after the row loads, and flips the
-    // panel from local rows to the server list.
-    if (currentTemplateDbId != null) refreshVersions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTemplateDbId, remoteId]);
-
-  // (No shared template store: the local template row lives in the
-  // component state above, so there is no cross-page cache to keep
-  // in sync here.)
-
-  /**
-   * A labelled version goes through the server when the template is
-   * pushed (the PUT records the label alongside the content); the local
-   * row is written first so the panel updates at once, offline or not.
-   */
-  const handleSaveVersion = async () => {
-    if (!currentTemplateDbId) {
-      toast.error("No template selected");
-      return;
-    }
-    if (offline) {
-      toast.error("Offline — connect to save a version to the server");
-      return;
-    }
-    try {
-      // A labelled save is still one manual push: the editor's content
-      // goes to the server with the label, and the accepted copy lands
-      // in the cache carrying that label.
-      const row = await getLocalTemplate(currentTemplateDbId);
-      if (isReadOnly(row)) {
-        toast.error("A saved copy from Community can’t be changed");
-        return;
+    const onPulled = async () => {
+      try {
+        const rows = await ensureStarterTemplates();
+        if (!rows || rows.length === 0) return;
+        setTemplates((prev) => {
+          const byId = new Map(rows.map((r) => [r.id, r]));
+          const next = prev.map((t) => {
+            const r = byId.get(t.id);
+            if (!r) return t;
+            if (r.id === currentTemplateDbIdRef.current) {
+              return {
+                ...t,
+                name: r.name,
+                page_w_mm: r.page_w_mm,
+                page_h_mm: r.page_h_mm,
+                orientation: r.orientation,
+              };
+            }
+            return {
+              ...t,
+              name: r.name,
+              html: r.html || t.html,
+              css: r.css || t.css,
+              page_w_mm: r.page_w_mm,
+              page_h_mm: r.page_h_mm,
+              orientation: r.orientation,
+            };
+          });
+          for (const r of rows) {
+            if (!next.some((t) => t.id === r.id)) {
+              next.push({
+                id: r.id,
+                name: r.name,
+                html: r.html || DEFAULT_TEMPLATE_HTML,
+                css: r.css || DEFAULT_TEMPLATE_CSS,
+                page_w_mm: r.page_w_mm,
+                page_h_mm: r.page_h_mm,
+                orientation: r.orientation,
+              });
+            }
+          }
+          return next;
+        });
+      } catch {
+        /* keep current list on failure */
       }
-      const content = await buildContent();
-      const result = await saveTemplateToServer(row, {
-        ...content,
-        version: { label: versionLabel || null, note: versionNote || null },
-      });
-      setRemoteId(result.remoteId);
-      setPublishedAt(result.published ? result.updatedAt : null);
-      setShowVersionDialog(false);
-      setVersionLabel("");
-      setVersionNote("");
-      await refreshVersions();
-      toast.success(
-        result.published
-          ? "Version saved — the published copy is updated"
-          : "Version saved to the server",
-      );
-    } catch (e) {
-      if (e instanceof TemplateConflictError) {
-        setConflict({ rowId: currentTemplateDbId, serverId: e.serverId });
-        return;
-      }
-      toast.error(e instanceof Error ? e.message : String(e));
-    }
-  };
+    };
+    window.addEventListener("sync:pulled", onPulled);
+    return () => window.removeEventListener("sync:pulled", onPulled);
+  }, []);
 
   const handleInsertBarcode = () => {
     const snippet = buildBarcodeSnippet(
@@ -820,9 +725,6 @@ export function DesignerPage() {
       setBarcodeError(snippet.error);
       return;
     }
-    // Insert where the cursor is. A helper call such as {{barcode "code128"
-    // order.id}} is drawn by the same renderer for the preview and for print,
-    // so each print and each CSV row gets its own code.
     insertHelper(
       snippet.kind === "static" ? "\n" + snippet.text : snippet.text,
     );
@@ -830,171 +732,6 @@ export function DesignerPage() {
     setBarcodeValue("");
     setBarcodeError(null);
     toast.success(`${barcodeType} barcode inserted`);
-  };
-
-  /**
-   * The version history, newest first. A pushed template reads the
-   * server list (the source of truth both PCs share); anything else
-   * reads the local rows. Server rows fetch bodies on demand.
-   */
-  const refreshVersions = async () => {
-    if (!currentTemplateDbId) {
-      setVersions([]);
-      return;
-    }
-    try {
-      if (remoteId) {
-        const list = await share.listRemoteVersions(remoteId);
-        setVersions(
-          list.map((v) => ({
-            key: `srv-${v.version_no}`,
-            versionNo: v.version_no,
-            label: v.label,
-            note: v.note,
-            createdAt: v.created_at,
-            createdBy: v.created_by,
-            remoteNo: v.version_no,
-          })),
-        );
-        return;
-      }
-      const list = await agent("list_versions", {
-        template_id: currentTemplateDbId,
-      });
-      setVersions(
-        (list ?? []).map((v) => ({
-          key: `local-${v.id}`,
-          versionNo: v.version_no,
-          label: v.label,
-          note: v.note,
-          createdAt: v.created_at,
-          createdBy: v.created_by,
-          html: v.html,
-          css: v.css,
-          localId: v.id,
-        })),
-      );
-      const latest = list?.[0];
-      if (latest) {
-        setHtmlCode(formatHtml(latest.html));
-        setCssCode(formatCss(latest.css));
-      }
-    } catch {
-      // Backend not available (web mode) — keep the in-editor content.
-    }
-  };
-
-  const handleRestoreVersion = async (version: VersionRow) => {
-    if (version.remoteNo != null && remoteId) {
-      // Server restore copies the version into a new revision; the
-      // current revision guards against overwriting a newer edit.
-      try {
-        const current = await share.fetchRemoteTemplate(remoteId);
-        const restored = await share.restoreRemoteVersion(
-          remoteId,
-          version.remoteNo,
-          current.revision,
-        );
-        await refreshVersions();
-        setHtmlCode(formatHtml(restored.body ?? ""));
-        setCssCode(formatCss(restored.css ?? ""));
-        toast.success(
-          `Restored v${version.versionNo} as v${restored.revision}`,
-        );
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : String(e));
-      }
-      return;
-    }
-    if (version.localId == null) return;
-    try {
-      // Restore creates a NEW version server-side; nothing is overwritten.
-      const created = await agent("restore_version", {
-        id: version.localId,
-      });
-      await refreshVersions();
-      setHtmlCode(formatHtml(created.html));
-      setCssCode(formatCss(created.css));
-      toast.success(`Restored v${version.versionNo} as v${created.version_no}`);
-    } catch {
-      if (version.html !== undefined) setHtmlCode(formatHtml(version.html));
-      if (version.css !== undefined) setCssCode(formatCss(version.css));
-      toast.success(`Restored version ${version.versionNo}`);
-    }
-  };
-
-  const handleDeleteVersion = async (version: VersionRow) => {
-    if (version.remoteNo != null && remoteId) {
-      try {
-        await share.deleteRemoteVersion(remoteId, version.remoteNo);
-        await refreshVersions();
-        toast.success(`Deleted v${version.versionNo}`);
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : String(e));
-      }
-      return;
-    }
-    if (version.localId == null) return;
-    try {
-      await agent("delete_version", { id: version.localId });
-      await refreshVersions();
-      toast.success(`Deleted v${version.versionNo}`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const openDiff = async (from: VersionRow, to: VersionRow) => {
-    // Server rows fetch bodies on demand; local rows already carry them.
-    const bodies = async (
-      v: VersionRow,
-    ): Promise<{ html: string; css: string }> => {
-      if (v.html !== undefined) return { html: v.html ?? "", css: v.css ?? "" };
-      if (v.remoteNo != null && remoteId) {
-        const full = await share.readRemoteVersion(remoteId, v.remoteNo);
-        return { html: full.body ?? "", css: full.css ?? "" };
-      }
-      return { html: "", css: "" };
-    };
-    try {
-      const [f, t] = await Promise.all([bodies(from), bodies(to)]);
-      if (from.localId != null && to.localId != null) {
-        const d = await agent("diff_versions", {
-          from_id: from.localId,
-          to_id: to.localId,
-        });
-        setDiff(d);
-        setShowDiff(true);
-        return;
-      }
-      setDiff({
-        from_version_no: from.versionNo,
-        to_version_no: to.versionNo,
-        html_from: f.html,
-        html_to: t.html,
-        css_from: f.css,
-        css_to: t.css,
-        html_changed: f.html !== t.html,
-        css_changed: f.css !== t.css,
-      });
-      setShowDiff(true);
-    } catch {
-      const [f, t] = await Promise.all([
-        bodies(from).catch(() => ({ html: "", css: "" })),
-        bodies(to).catch(() => ({ html: "", css: "" })),
-      ]);
-      setDiff({
-        from_version_no: from.versionNo,
-        to_version_no: to.versionNo,
-        html_from: f.html,
-        html_to: t.html,
-        css_from: f.css,
-        css_to: t.css,
-        html_changed: f.html !== t.html,
-        css_changed: f.css !== t.css,
-      });
-      setShowDiff(true);
-    }
   };
 
   const sampleData = useMemo<Record<string, unknown>>(() => {
@@ -1085,11 +822,6 @@ export function DesignerPage() {
     presets: PAGE_PRESETS,
     orientation,
     setOrientation,
-    versions,
-    onNewVersion: () => setShowVersionDialog(true),
-    openDiff,
-    handleRestoreVersion,
-    handleDeleteVersion,
   };
 
   const insertHelper = (text: string, back = 0) => {
@@ -1119,10 +851,7 @@ export function DesignerPage() {
         notices={<ClassWarnings html={debouncedHtml} />}
         samplePanel={sampleDataPanel}
       />
-      <DesignerActions
-        onBarcode={() => setShowBarcodeDialog(true)}
-        onSaveVersion={() => setShowVersionDialog(true)}
-      />
+      <DesignerActions onBarcode={() => setShowBarcodeDialog(true)} />
     </div>
   );
 
@@ -1161,9 +890,7 @@ export function DesignerPage() {
         publishedAt={publishedAt}
         readOnly={isReadOnly({ origin })}
         pending={pending}
-        onPublish={() => void handlePublish()}
-        onUnpublish={handleUnpublish}
-        onCacheNow={() => void handleCacheNow()}
+        onVisibilityChange={(v) => void handleVisibilityChange(v)}
       />
 
       {isDesktop ? (
@@ -1307,109 +1034,11 @@ export function DesignerPage() {
 
             <DesignerActions
               onBarcode={() => setShowBarcodeDialog(true)}
-              onSaveVersion={() => setShowVersionDialog(true)}
               onShowCanvas={handleShowCanvas}
             />
           </Tabs>
         </div>
       )}
-
-      {/* Diff Dialog */}
-      <Dialog open={showDiff} onOpenChange={setShowDiff}>
-        <DialogContent className="max-w-5xl">
-          <DialogHeader>
-            <DialogTitle>
-              Compare v{diff?.from_version_no} → v{diff?.to_version_no}
-            </DialogTitle>
-          </DialogHeader>
-          {diff && (
-            <div className="space-y-4 max-h-[70vh] overflow-auto">
-              <div className="flex items-center gap-2 mb-2">
-                <Badge variant={diff.html_changed ? "warning" : "secondary"}>
-                  {diff.html_changed ? "HTML changed" : "HTML identical"}
-                </Badge>
-                <Badge variant={diff.css_changed ? "warning" : "secondary"}>
-                  {diff.css_changed ? "CSS changed" : "CSS identical"}
-                </Badge>
-              </div>
-              <div>
-                <p className="text-xs font-semibold mb-1">
-                  HTML v{diff.from_version_no} → v{diff.to_version_no}
-                </p>
-                <ReactDiffViewer
-                  oldValue={diff.html_from || "(empty)"}
-                  newValue={diff.html_to || "(empty)"}
-                  splitView
-                  leftTitle={`v${diff.from_version_no}`}
-                  rightTitle={`v${diff.to_version_no}`}
-                  compareMethod={DiffMethod.WORDS}
-                  hideLineNumbers={false}
-                  showDiffOnly={false}
-                />
-              </div>
-              {(diff.html_changed || diff.css_changed) && (
-                <div>
-                  <p className="text-xs font-semibold mb-1">
-                    CSS v{diff.from_version_no} → v{diff.to_version_no}
-                  </p>
-                  <ReactDiffViewer
-                    oldValue={diff.css_from || "(empty)"}
-                    newValue={diff.css_to || "(empty)"}
-                    splitView
-                    leftTitle={`v${diff.from_version_no}`}
-                    rightTitle={`v${diff.to_version_no}`}
-                    compareMethod={DiffMethod.WORDS}
-                    hideLineNumbers={false}
-                    showDiffOnly={false}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowDiff(false)}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Save Version Dialog */}
-      <Dialog open={showVersionDialog} onOpenChange={setShowVersionDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Save Version</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <Label>Label</Label>
-              <Input
-                data-testid="version-label"
-                placeholder="e.g. Added logo"
-                value={versionLabel}
-                onChange={(e) => setVersionLabel(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label>Note</Label>
-              <Input
-                placeholder="Optional note"
-                value={versionNote}
-                onChange={(e) => setVersionNote(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setShowVersionDialog(false)}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleSaveVersion}>Save</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Barcode Dialog */}
       <Dialog open={showBarcodeDialog} onOpenChange={setShowBarcodeDialog}>

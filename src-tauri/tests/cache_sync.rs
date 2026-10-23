@@ -41,34 +41,20 @@ fn seed_template(conn: &Connection, fields: &HashMap<String, Value>) -> i64 {
 
     conn.execute(
         "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, readme, summary,
-                published_at, server_id, server_revision, base_revision, sync_state, kind, synced_at)
-         VALUES (?1, 210, 297, 'portrait', '', '', ?2, ?3, ?4, ?4, ?5, 'own', NULL)",
-        rusqlite::params![name, published_at, server_id, revision, sync_state],
+                html, css, published_at, server_id, server_revision, base_revision, sync_state, kind, synced_at)
+         VALUES (?1, 210, 297, 'portrait', '', '', ?2, ?3, ?4, ?5, ?6, ?6, ?7, 'own', NULL)",
+        rusqlite::params![name, html, css, published_at, server_id, revision, sync_state],
     )
     .unwrap();
-    let id = conn.last_insert_rowid();
-    let version_id: i64 = conn
-        .query_row(
-            "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-             VALUES (?1, 1, ?2, ?3, 'manual') RETURNING id",
-            rusqlite::params![id, html, css],
-            |r| r.get(0),
-        )
-        .unwrap();
-    conn.execute(
-        "UPDATE templates SET current_version_id = ?1 WHERE id = ?2",
-        rusqlite::params![version_id, id],
-    )
-    .unwrap();
-    id
+    conn.last_insert_rowid()
 }
 
 fn row_by_server_id(conn: &Connection, server_id: &str) -> Option<HashMap<String, Value>> {
     let mut stmt = conn
         .prepare(
-            "SELECT t.name, t.sync_state, t.server_revision, v.html, t.published_at,
+            "SELECT t.name, t.sync_state, t.server_revision, t.html, t.published_at,
                     t.kind, t.owner_handle
-             FROM templates t LEFT JOIN template_versions v ON v.id = t.current_version_id
+             FROM templates t
              WHERE t.server_id = ?1",
         )
         .unwrap();
@@ -571,21 +557,9 @@ fn row_by_font(conn: &Connection, server_id: &str) -> Option<HashMap<String, Val
 
 fn seed_synced(conn: &Connection, server_id: &str, revision: i64) {
     conn.execute(
-        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, readme, summary, server_id, server_revision, base_revision, sync_state, kind)
-         VALUES ('T', 210, 297, 'portrait', '', '', ?1, ?2, ?2, 'synced', 'own')",
+        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, readme, summary, html, css, server_id, server_revision, base_revision, sync_state, kind)
+         VALUES ('T', 210, 297, 'portrait', '', '', '<p></p>', '', ?1, ?2, ?2, 'synced', 'own')",
         rusqlite::params![server_id, revision],
-    )
-    .unwrap();
-    let id: i64 = conn.last_insert_rowid();
-    conn.execute(
-        "INSERT INTO template_versions (template_id, version_no, html, css, created_by) VALUES (?1, 1, '<p></p>', '', 'manual')",
-        [id],
-    )
-    .unwrap();
-    let vid: i64 = conn.last_insert_rowid();
-    conn.execute(
-        "UPDATE templates SET current_version_id = ?1 WHERE id = ?2",
-        rusqlite::params![vid, id],
     )
     .unwrap();
 }
@@ -643,8 +617,7 @@ fn conflict_marks_and_resolves_both_ways() {
     .unwrap();
     let (state, rev, html): (String, i64, String) = conn
         .query_row(
-            "SELECT t.sync_state, t.server_revision, v.html FROM templates t
-             JOIN template_versions v ON v.id = t.current_version_id
+            "SELECT t.sync_state, t.server_revision, t.html FROM templates t
              WHERE t.server_id = 'srv-c'",
             [],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
@@ -781,21 +754,9 @@ fn seed_migrated(conn: &Connection, server_id: &str, html: &str, revision: i64) 
     // A pre-Phase-3 row: linked to the server (server_id) but never
     // confirmed (base_revision NULL), with local content.
     conn.execute(
-        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, readme, summary, server_id, server_revision, base_revision, sync_state, kind)
-         VALUES ('M', 210, 297, 'portrait', '', '', ?1, ?2, NULL, 'synced', 'own')",
-        rusqlite::params![server_id, revision],
-    )
-    .unwrap();
-    let id: i64 = conn.last_insert_rowid();
-    conn.execute(
-        "INSERT INTO template_versions (template_id, version_no, html, css, created_by) VALUES (?1, 1, ?2, '', 'manual')",
-        rusqlite::params![id, html],
-    )
-    .unwrap();
-    let vid: i64 = conn.last_insert_rowid();
-    conn.execute(
-        "UPDATE templates SET current_version_id = ?1 WHERE id = ?2",
-        rusqlite::params![vid, id],
+        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, readme, summary, html, css, server_id, server_revision, base_revision, sync_state, kind)
+         VALUES ('M', 210, 297, 'portrait', '', '', ?1, '', ?2, ?3, NULL, 'synced', 'own')",
+        rusqlite::params![html, server_id, revision],
     )
     .unwrap();
 }
@@ -863,16 +824,16 @@ fn first_pull_adopts_matching_content_without_a_new_version() {
     assert_eq!(report.applied_upserts, 1);
     assert_eq!(report.skipped_dirty, 0);
     assert_eq!(sync_state_of(&conn, "srv-m"), "synced");
-    // Revisions adopted, but no new local version appended.
-    let (server_rev, base_rev, versions): (i64, i64, i64) = conn
+    // Revisions adopted; content matches the server.
+    let (server_rev, base_rev, html): (i64, i64, String) = conn
         .query_row(
-            "SELECT t.server_revision, t.base_revision, (SELECT COUNT(*) FROM template_versions v WHERE v.template_id = t.id)
+            "SELECT t.server_revision, t.base_revision, t.html
              FROM templates t WHERE t.server_id = 'srv-m'",
             [],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .unwrap();
-    assert_eq!((server_rev, base_rev, versions), (2, 2, 1));
+    assert_eq!((server_rev, base_rev, html.as_str()), (2, 2, "<p>same</p>"));
     let _ = get_sync_state(&conn).unwrap();
 }
 
@@ -886,10 +847,10 @@ fn first_pull_conflicts_instead_of_overwriting_differences() {
     assert_eq!(report.applied_upserts, 0);
     assert_eq!(report.skipped_dirty, 1);
     assert_eq!(sync_state_of(&conn, "srv-m"), "conflict");
-    // The local content is untouched and no version was appended.
+    // The local content is untouched.
     let html: String = conn
         .query_row(
-            "SELECT v.html FROM template_versions v JOIN templates t ON v.id = t.current_version_id WHERE t.server_id = 'srv-m'",
+            "SELECT t.html FROM templates t WHERE t.server_id = 'srv-m'",
             [],
             |r| r.get(0),
         )

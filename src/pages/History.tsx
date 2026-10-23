@@ -885,16 +885,6 @@ export function HistoryPage() {
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-xs text-muted-foreground">
-                    Template version
-                  </dt>
-                  <dd>
-                    {job.template_version_id
-                      ? `v${job.template_version_id}`
-                      : "—"}
-                  </dd>
-                </div>
-                <div>
                   <dt className="text-xs text-muted-foreground">Copies</dt>
                   <dd>{job.copies}</dd>
                 </div>

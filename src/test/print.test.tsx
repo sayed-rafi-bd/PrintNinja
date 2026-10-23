@@ -9,7 +9,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 vi.mock("@/lib/templates/seedTemplates", () => ({
   ensureStarterTemplates: async () => [
-    { id: 7, name: "Shipping label", page_w_mm: 100, page_h_mm: 150 },
+    { id: 7, name: "Shipping label", page_w_mm: 100, page_h_mm: 150, orientation: "portrait", html: "<p>Hi {{store.name}}</p>", css: "", compiled_css: "", compiled_key: "" },
   ],
 }));
 vi.mock("@/lib/hooks/useSystemPrinters", () => ({
@@ -50,8 +50,6 @@ beforeEach(() => {
     grayscale: false,
   });
   invoke.mockImplementation(async (cmd: string) => {
-    if (cmd === "list_versions")
-      return [{ id: 1, html: "<p>Hi {{store.name}}</p>", css: "" }];
     if (cmd === "list_batches") return [];
     if (cmd === "enumerate_system_printers")
       return [{ id: "1", name: "Dock Zebra" }];
@@ -182,7 +180,6 @@ describe("Print page", () => {
           duration_ms: 5,
           error: "Paper out",
         };
-      if (cmd === "list_versions") return [{ id: 1, html: "x", css: "" }];
       return [];
     });
     fireEvent.click(screen.getByRole("button", { name: /^Print$/ }));

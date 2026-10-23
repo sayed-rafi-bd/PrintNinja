@@ -1,4 +1,4 @@
-//! Regression tests for fonts, printer profiles, batches and version diff.
+//! Regression tests for fonts, printer profiles and batches.
 
 use rusqlite::Connection;
 
@@ -14,25 +14,12 @@ fn db() -> Connection {
 
 fn seed_template(conn: &Connection, name: &str) -> i64 {
     conn.execute(
-        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation)
-         VALUES (?1, 210, 297, 'portrait')",
+        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, html, css)
+         VALUES (?1, 210, 297, 'portrait', '', '')",
         [name],
     )
     .unwrap();
-    let id = conn.last_insert_rowid();
-    conn.execute(
-        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-         VALUES (?1, 1, '', '', 'manual')",
-        [id],
-    )
-    .unwrap();
-    let vid = conn.last_insert_rowid();
-    conn.execute(
-        "UPDATE templates SET current_version_id = ?1 WHERE id = ?2",
-        [vid, id],
-    )
-    .unwrap();
-    id
+    conn.last_insert_rowid()
 }
 
 fn seed_printer(conn: &Connection, name: &str) -> i64 {
@@ -452,78 +439,5 @@ fn batch_cascade_delete_removes_jobs() {
 // version diff (#34)
 // ───────────────────────────────────────────────────────────────
 
-#[test]
-fn version_diff_detects_html_change() {
-    let conn = db();
-    let tpl = seed_template(&conn, "Receipt");
 
-    conn.execute(
-        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-         VALUES (?1, 1, '<p>a</p>', 'p{}', 'manual')",
-        [tpl],
-    )
-    .unwrap();
-    let v1 = conn.last_insert_rowid();
 
-    conn.execute(
-        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-         VALUES (?1, 2, '<p>b</p>', 'p{}', 'manual')",
-        [tpl],
-    )
-    .unwrap();
-    let v2 = conn.last_insert_rowid();
-
-    let load = |id: i64| -> (String, String) {
-        conn.query_row(
-            "SELECT html, css FROM template_versions WHERE id=?1",
-            [id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .unwrap()
-    };
-    let (h1, c1) = load(v1);
-    let (h2, c2) = load(v2);
-
-    assert_ne!(h1, h2, "html_changed should be true");
-    assert_eq!(c1, c2, "css_changed should be false");
-}
-
-#[test]
-fn version_diff_same_version_is_unchanged() {
-    let conn = db();
-    let tpl = seed_template(&conn, "Receipt");
-    conn.execute(
-        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-         VALUES (?1, 1, '<p>same</p>', 'p{}', 'manual')",
-        [tpl],
-    )
-    .unwrap();
-    let v1 = conn.last_insert_rowid();
-
-    let html: String = conn
-        .query_row(
-            "SELECT html FROM template_versions WHERE id=?1",
-            [v1],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(html, html, "identical content must report unchanged");
-}
-
-#[test]
-fn versions_from_different_templates_are_distinct() {
-    let conn = db();
-    let a = seed_template(&conn, "A");
-    let b = seed_template(&conn, "B");
-
-    let tid: i64 = conn
-        .query_row(
-            "SELECT template_id FROM template_versions
-             WHERE template_id IN (?1, ?2) ORDER BY id LIMIT 1",
-            [a, b],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert!(tid == a || tid == b);
-    assert_ne!(a, b);
-}

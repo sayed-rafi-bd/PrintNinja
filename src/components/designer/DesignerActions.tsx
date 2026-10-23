@@ -1,21 +1,19 @@
 import { useRef } from "react";
-import { Check, QrCode, Save, Type } from "lucide-react";
+import { Check, QrCode, Type } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { agent } from "@/lib/agent/commands";
 
 interface Props {
   onBarcode: () => void;
-  onSaveVersion: () => void;
   /** Phones only: the canvas is a tab there. On desktop it is always visible, so there is nothing to switch to. */
   onShowCanvas?: () => void;
   className?: string;
 }
 
-/** Barcode, Font and Save Version. Wraps on a phone so Save is never pushed off-screen. */
+/** Barcode and Font. Wraps on a phone so Save is never pushed off-screen. */
 export function DesignerActions({
   onBarcode,
-  onSaveVersion,
   onShowCanvas,
   className,
 }: Props) {
@@ -67,15 +65,6 @@ export function DesignerActions({
         />
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onSaveVersion}
-          data-testid="designer-save-version"
-        >
-          <Save className="h-4 w-4" />
-          Save Version
-        </Button>
         {onShowCanvas && (
           <Button size="sm" onClick={onShowCanvas}>
             <Check className="h-4 w-4" />

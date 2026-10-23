@@ -61,7 +61,10 @@ const local = (over: Partial<TemplateRow> = {}): TemplateRow => ({
   summary: "A4 invoice",
   page_w_mm: 210,
   page_h_mm: 297,
-  current_version_id: null,
+  html: "<p>local</p>",
+  css: ".local {}",
+  compiled_css: "",
+  compiled_key: "",
   orientation: "portrait",
   created_at: "2026-03-01T00:00:00Z",
   readme: "# Invoice",
@@ -155,66 +158,8 @@ describe("saveTemplateToServer", () => {
     expect(result.remoteId).toBe(REMOTE.id);
   });
 
-  it("publishes when asked to", async () => {
-    client.putRemoteTemplate.mockResolvedValue({
-      ...REMOTE,
-      published_at: null,
-      revision: 3,
-    });
-    client.publishRemoteTemplate.mockResolvedValue({
-      ...REMOTE,
-      published_at: "2026-03-03T00:00:00Z",
-      revision: 3,
-    });
-    const result = await saveTemplateToServer(local({ remote_id: REMOTE.id }), {
-      ...CONTENT,
-      publish: true,
-    });
 
-    expect(client.publishRemoteTemplate).toHaveBeenCalledWith(REMOTE.id);
-    expect(result.published).toBe(true);
-    expect(invoke).toHaveBeenCalledWith("set_publish_info", {
-      req: { id: 7, remote_id: REMOTE.id, published_at: REMOTE.updated_at },
-    });
-  });
 
-  it("unpublishes when asked to", async () => {
-    client.putRemoteTemplate.mockResolvedValue({
-      ...REMOTE,
-      published_at: "2026-03-01T00:00:00Z",
-      revision: 3,
-    });
-    await saveTemplateToServer(local({ remote_id: REMOTE.id }), {
-      ...CONTENT,
-      publish: false,
-    });
-
-    expect(client.unpublishRemoteTemplate).toHaveBeenCalledWith(REMOTE.id);
-    expect(invoke).toHaveBeenCalledWith("set_publish_info", {
-      req: { id: 7, remote_id: REMOTE.id, published_at: null },
-    });
-  });
-
-  it("records a labelled version through the server", async () => {
-    client.putRemoteTemplate.mockResolvedValue({
-      ...REMOTE,
-      published_at: null,
-      revision: 3,
-    });
-    await saveTemplateToServer(local({ remote_id: REMOTE.id }), {
-      ...CONTENT,
-      version: { label: "Added logo", note: null },
-    });
-
-    expect(client.putRemoteTemplate.mock.calls[0][0]).toMatchObject({
-      if_revision: 4,
-      version: { label: "Added logo" },
-    });
-    expect(invoke).toHaveBeenCalledWith("cache_mark_pushed", {
-      server_id: REMOTE.id,
-      revision: 3,
-    });
-  });
 
   it("retries a raced create as an update instead of failing", async () => {
     client.fetchRemoteTemplate.mockResolvedValue({ ...REMOTE, revision: 1 });
@@ -228,14 +173,9 @@ describe("saveTemplateToServer", () => {
         }),
       )
       .mockResolvedValue({ ...REMOTE, published_at: null, revision: 2 });
-    client.publishRemoteTemplate.mockResolvedValue({
-      ...REMOTE,
-      published_at: "2026-03-03T00:00:00Z",
-      revision: 2,
-    });
     const result = await saveTemplateToServer(
       local({ server_id: null, base_revision: null }),
-      { ...CONTENT, publish: true },
+      { ...CONTENT },
     );
     expect(client.putRemoteTemplate.mock.calls[0][0]).not.toHaveProperty(
       "if_revision",
@@ -243,7 +183,7 @@ describe("saveTemplateToServer", () => {
     expect(client.putRemoteTemplate.mock.calls[1][0]).toMatchObject({
       if_revision: 1,
     });
-    expect(result.published).toBe(true);
+    expect(result.published).toBe(false);
   });
 
   it("creates when the guard names a server copy that never existed", async () => {
@@ -302,25 +242,26 @@ describe("takeServerCopy", () => {
     client.fetchRemoteTemplate.mockResolvedValue(PUBLISHED);
     const result = await takeServerCopy(local({ remote_id: REMOTE.id }));
 
-    expect(calls("create_version")[0][1]).toMatchObject({
-      req: {
-        template_id: 7,
+    expect(calls("update_template_meta")[0][1]).toMatchObject({
+      req: expect.objectContaining({
+        id: 7,
+        name: "Invoice",
         html: REMOTE.body,
         css: REMOTE.css,
-        created_by: "sync",
-      },
+      }),
     });
     expect(calls("update_readme")[0][1]).toEqual({
       req: { id: 7, readme: REMOTE.readme },
     });
-    expect(calls("update_template_meta")[0][1]).toEqual({
-      req: {
+    expect(calls("update_template_meta")[0][1]).toMatchObject({
+      req: expect.objectContaining({
         id: 7,
         name: "Invoice",
         page_w_mm: 210,
         page_h_mm: 297,
-        summary: "A4 invoice",
-      },
+        html: REMOTE.body,
+        css: REMOTE.css,
+      }),
     });
     expect(calls("cache_mark_pushed")[0][1]).toEqual({
       server_id: REMOTE.id,

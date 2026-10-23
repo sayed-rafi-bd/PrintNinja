@@ -101,18 +101,14 @@ export function ConflictDialog({
       if (!serverId || !conflict)
         throw new Error("This template was never on the server");
       const local = await agent("get_template", { id: conflict.id });
-      const versions = await agent("list_versions", {
-        template_id: conflict.id,
-      });
-      const latest = versions[0] ?? { html: "", css: "" };
       await agent("create_template", {
         req: {
           name: `${local.name} (copy)`,
           page_w_mm: local.page_w_mm,
           page_h_mm: local.page_h_mm,
           orientation: local.orientation,
-          html: latest.html,
-          css: latest.css,
+          html: local.html,
+          css: local.css,
           readme: local.readme,
           summary: local.summary,
         },
@@ -149,8 +145,7 @@ export function ConflictDialog({
           </DialogTitle>
           <DialogDescription>
             Your edits and the server copy disagree. Take the server copy, keep
-            pushing yours, or keep both. Keeping yours is safe: the other PC's
-            version stays in history.
+            pushing yours, or keep both.
           </DialogDescription>
         </DialogHeader>
         {error && (

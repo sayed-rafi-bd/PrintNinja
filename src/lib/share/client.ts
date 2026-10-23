@@ -235,32 +235,16 @@ export interface PutTemplateInput {
   css?: string;
   readme?: string;
   if_revision?: number;
-  /** Labelled saves record a version; the server appends one when the
-   * body or CSS changed. */
-  version?: { label?: string | null; note?: string | null };
 }
 
 /** Create or update a template by client UUID. Updates need if_revision. */
 export async function putRemoteTemplate(
   input: PutTemplateInput,
 ): Promise<RemoteTemplate> {
-  const { version, ...rest } = input;
-  // The schema takes optional strings, not nulls.
-  const body = {
-    ...rest,
-    ...(version
-      ? {
-          version: {
-            ...(version.label != null ? { label: version.label } : {}),
-            ...(version.note != null ? { note: version.note } : {}),
-          },
-        }
-      : {}),
-  };
   return callApi<RemoteTemplate>(apiDeps(), {
     method: "PUT",
     path: `/v2/templates/${input.id}`,
-    body,
+    body: input,
   });
 }
 
@@ -356,65 +340,6 @@ export async function fetchCommunityTemplates(options: {
     path: `/v2/community/templates?${params.toString()}`,
   });
   return page.items;
-}
-
-/** One server version: number, label/note, author and time. Bodies
- * come from readRemoteVersion — the list stays light. */
-export type RemoteVersionSummary =
-  paths["/v2/templates/{id}/versions"]["get"]["responses"][200]["content"]["application/json"]["items"][number];
-
-/** A server version with its body and CSS. */
-export type RemoteVersion =
-  paths["/v2/templates/{id}/versions/{n}"]["get"]["responses"][200]["content"]["application/json"];
-
-/** Version history, newest first (one page; panels show the latest 20). */
-export async function listRemoteVersions(
-  id: string,
-): Promise<RemoteVersionSummary[]> {
-  const page = await callApi<{ items: RemoteVersionSummary[] }>(apiDeps(), {
-    method: "GET",
-    path: `/v2/templates/${id}/versions?page=1&page_size=20`,
-  });
-  return page.items;
-}
-
-/** One version with its body and CSS. */
-export async function readRemoteVersion(
-  id: string,
-  n: number,
-): Promise<RemoteVersion> {
-  return callApi<RemoteVersion>(apiDeps(), {
-    method: "GET",
-    path: `/v2/templates/${id}/versions/${n}`,
-  });
-}
-
-/**
- * Copy a version's body and CSS into the template as a new revision.
- * The caller passes the revision the dialog was looking at; a stale one
- * 409s instead of overwriting a newer edit.
- */
-export async function restoreRemoteVersion(
-  id: string,
-  n: number,
-  ifRevision?: number,
-): Promise<RemoteTemplate> {
-  return callApi<RemoteTemplate>(apiDeps(), {
-    method: "POST",
-    path: `/v2/templates/${id}/versions/${n}/restore`,
-    body: ifRevision === undefined ? {} : { if_revision: ifRevision },
-  });
-}
-
-/** Delete one version. The newest cannot be deleted. */
-export async function deleteRemoteVersion(
-  id: string,
-  n: number,
-): Promise<void> {
-  await callApi<unknown>(apiDeps(), {
-    method: "DELETE",
-    path: `/v2/templates/${id}/versions/${n}`,
-  });
 }
 
 /** The community templates the signed-in user has saved. */

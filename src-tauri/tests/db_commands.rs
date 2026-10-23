@@ -110,110 +110,60 @@ fn printer_delete_reports_not_found() {
 }
 
 // ───────────────────────────────────────────────────────────────
-// templates + versions
+// templates carry their own content (versions removed)
 // ───────────────────────────────────────────────────────────────
 
 #[test]
-fn template_create_inserts_version1() {
+fn template_create_stores_content_directly() {
     let (_state, conn) = test_db();
-
-    conn.execute(
-        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation)
-         VALUES ('My Receipt', 120, 200, 'portrait')",
-        [],
+    let tpl = write_template(
+        &conn,
+        &CreateTemplateRequest {
+            html: Some("<h1>hi</h1>".to_string()),
+            css: Some(".a{}".to_string()),
+            ..new_template("My Receipt")
+        },
     )
     .unwrap();
-    let tid = conn.last_insert_rowid();
-
-    conn.execute(
-        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-         VALUES (?1, 1, '<h1>hi</h1>', '', 'manual')",
-        [tid],
-    )
-    .unwrap();
-    let vid = conn.last_insert_rowid();
-    conn.execute(
-        "UPDATE templates SET current_version_id = ?1 WHERE id = ?2",
-        [vid, tid],
-    )
-    .unwrap();
-
-    let current: i64 = conn
+    let (html, css): (String, String) = conn
         .query_row(
-            "SELECT current_version_id FROM templates WHERE id = ?1",
-            [tid],
-            |r| r.get(0),
+            "SELECT html, css FROM templates WHERE id = ?1",
+            [tpl.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap();
-    assert_eq!(current, vid);
+    assert_eq!(html, "<h1>hi</h1>");
+    assert_eq!(css, ".a{}");
 }
 
 #[test]
-fn version_numbering_increments() {
+fn template_meta_update_writes_content() {
     let (_state, conn) = test_db();
-
-    conn.execute(
-        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation)
-         VALUES ('T', 210, 297, 'portrait')",
-        [],
+    let tpl = write_template(&conn, &new_template("T")).unwrap();
+    write_template_meta(
+        &conn,
+        &UpdateTemplateMetaRequest {
+            id: tpl.id,
+            name: "T".to_string(),
+            page_w_mm: 100,
+            page_h_mm: 150,
+            summary: None,
+            html: Some("<p>v2</p>".to_string()),
+            css: Some(".b{}".to_string()),
+            compiled_css: Some("compiled".to_string()),
+            compiled_key: Some("k".to_string()),
+        },
     )
     .unwrap();
-    let tid = conn.last_insert_rowid();
-
-    for i in 1..=3 {
-        conn.execute(
-            "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-             VALUES (?1, ?2, '', '', 'manual')",
-            [tid, i],
-        )
-        .unwrap();
-    }
-
-    let next: i64 = conn
+    let (html, css, compiled): (String, String, String) = conn
         .query_row(
-            "SELECT COALESCE(MAX(version_no), 0) + 1 FROM template_versions WHERE template_id = ?1",
-            [tid],
-            |r| r.get(0),
+            "SELECT html, css, compiled_css FROM templates WHERE id = ?1",
+            [tpl.id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .unwrap();
-    assert_eq!(next, 4);
-}
-
-#[test]
-fn restore_creates_new_version_not_overwrite() {
-    let (_state, conn) = test_db();
-
-    conn.execute(
-        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation)
-         VALUES ('T', 210, 297, 'portrait')",
-        [],
-    )
-    .unwrap();
-    let tid = conn.last_insert_rowid();
-
-    conn.execute(
-        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-         VALUES (?1, 1, 'v1 html', 'v1 css', 'manual')",
-        [tid],
-    )
-    .unwrap();
-
-    // simulate restore: insert v2 with same content as v1
-    conn.execute(
-        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-         VALUES (?1, 2, 'v1 html', 'v1 css', 'restore')",
-        [tid],
-    )
-    .unwrap();
-
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM template_versions WHERE template_id = ?1",
-            [tid],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(count, 2, "restore must not delete history");
+    assert_eq!(html, "<p>v2</p>");
+    assert_eq!(compiled, "compiled");
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -221,9 +171,7 @@ fn restore_creates_new_version_not_overwrite() {
 // ───────────────────────────────────────────────────────────────
 
 fn version_columns(conn: &Connection) -> Vec<String> {
-    let mut stmt = conn
-        .prepare("PRAGMA table_info(template_versions)")
-        .unwrap();
+    let mut stmt = conn.prepare("PRAGMA table_info(templates)").unwrap();
     stmt.query_map([], |r| r.get::<_, String>(1))
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
@@ -232,26 +180,18 @@ fn version_columns(conn: &Connection) -> Vec<String> {
 
 #[test]
 fn compiled_css_columns_are_added_to_an_existing_database() {
-    // A database created before per-template compilation: schema.sql alone has
-    // no compiled_* columns, and already holds a saved version.
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(include_str!("../src/db/schema.sql"))
         .unwrap();
-    assert!(!version_columns(&conn).contains(&"compiled_css".to_string()));
+    assert!(version_columns(&conn).contains(&"compiled_css".to_string()));
 
     conn.execute(
-        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation)
-         VALUES ('Old', 120, 200, 'portrait')",
+        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, html, css)
+         VALUES ('Old', 120, 200, 'portrait', '<p class=\"flex\">x</p>', '.a{b:c}')",
         [],
     )
     .unwrap();
     let tid = conn.last_insert_rowid();
-    conn.execute(
-        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-         VALUES (?1, 1, '<p class=\"flex\">x</p>', '.a{b:c}', 'manual')",
-        [tid],
-    )
-    .unwrap();
 
     printninja_lib::db::ensure_v2_schema(&conn).unwrap();
 
@@ -259,12 +199,10 @@ fn compiled_css_columns_are_added_to_an_existing_database() {
     assert!(cols.contains(&"compiled_css".to_string()), "{cols:?}");
     assert!(cols.contains(&"compiled_key".to_string()), "{cols:?}");
 
-    // Old rows read back as "not compiled", which makes printing fall back to
-    // the shared bundle, and their html/css are untouched.
     let (html, css, compiled, key): (String, String, String, String) = conn
         .query_row(
             "SELECT html, css, compiled_css, compiled_key
-             FROM template_versions WHERE template_id = ?1",
+             FROM templates WHERE id = ?1",
             [tid],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
@@ -285,48 +223,23 @@ fn compiled_css_migration_is_idempotent() {
 }
 
 #[test]
-fn compiled_css_is_stored_per_version_and_copied_on_restore() {
+fn compiled_css_is_stored_on_the_template_row() {
     let (_state, conn) = test_db();
-
-    conn.execute(
-        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation)
-         VALUES ('T', 120, 200, 'portrait')",
-        [],
+    let tpl = write_template(
+        &conn,
+        &CreateTemplateRequest {
+            html: Some("<p class=\"w-[37mm]\">x</p>".to_string()),
+            css: Some(String::new()),
+            compiled_css: Some(".w{width:37mm}".to_string()),
+            compiled_key: Some("k1".to_string()),
+            ..new_template("T")
+        },
     )
     .unwrap();
-    let tid = conn.last_insert_rowid();
-
-    conn.execute(
-        "INSERT INTO template_versions
-           (template_id, version_no, html, css, created_by, compiled_css, compiled_key)
-         VALUES (?1, 1, '<p class=\"w-[37mm]\">x</p>', '', 'manual', '.w{width:37mm}', 'k1')",
-        [tid],
-    )
-    .unwrap();
-    // The next version has different html, so it carries different compiled CSS.
-    conn.execute(
-        "INSERT INTO template_versions
-           (template_id, version_no, html, css, created_by, compiled_css, compiled_key)
-         VALUES (?1, 2, '<p class=\"flex\">x</p>', '', 'manual', '.flex{display:flex}', 'k2')",
-        [tid],
-    )
-    .unwrap();
-
-    // Restoring v1 copies its html together with the CSS compiled from it.
-    conn.execute(
-        "INSERT INTO template_versions
-           (template_id, version_no, html, css, created_by, compiled_css, compiled_key)
-         SELECT template_id, 3, html, css, 'restore', compiled_css, compiled_key
-         FROM template_versions WHERE template_id = ?1 AND version_no = 1",
-        [tid],
-    )
-    .unwrap();
-
     let (compiled, key): (String, String) = conn
         .query_row(
-            "SELECT compiled_css, compiled_key FROM template_versions
-             WHERE template_id = ?1 AND version_no = 3",
-            [tid],
+            "SELECT compiled_css, compiled_key FROM templates WHERE id = ?1",
+            [tpl.id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap();
@@ -544,8 +457,6 @@ use printninja_lib::commands::template::{
     write_delete_template, write_template, write_template_meta, CreateTemplateRequest,
     UpdateTemplateMetaRequest,
 };
-use printninja_lib::commands::version::create_version_conn;
-use printninja_lib::commands::version::CreateVersionRequest;
 
 fn new_template(name: &str) -> CreateTemplateRequest {
     CreateTemplateRequest {
@@ -638,20 +549,25 @@ fn edits_mark_the_row_dirty_but_never_undelete_it() {
             page_w_mm: 210,
             page_h_mm: 297,
             summary: None,
+            html: None,
+            css: None,
+            compiled_css: None,
+            compiled_key: None,
         },
     )
     .unwrap();
     assert_eq!(sync_row(&conn, tpl.id).1, "dirty");
 
-    create_version_conn(
+    write_template_meta(
         &conn,
-        CreateVersionRequest {
-            template_id: tpl.id,
-            html: "<p>v2</p>".to_string(),
-            css: String::new(),
-            label: None,
-            note: None,
-            created_by: None,
+        &UpdateTemplateMetaRequest {
+            id: tpl.id,
+            name: "Editable".to_string(),
+            page_w_mm: 210,
+            page_h_mm: 297,
+            summary: None,
+            html: Some("<p>v2</p>".to_string()),
+            css: Some(String::new()),
             compiled_css: None,
             compiled_key: None,
         },
@@ -664,15 +580,6 @@ fn edits_mark_the_row_dirty_but_never_undelete_it() {
 fn delete_tombstones_and_hides_the_row_while_keeping_history() {
     let (_state, conn) = test_db();
     let tpl = write_template(&conn, &new_template("Doomed")).unwrap();
-    let versions_before: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM template_versions WHERE template_id = ?1",
-            [tpl.id],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(versions_before, 1);
-
     write_delete_template(&conn, tpl.id).unwrap();
     assert_eq!(sync_row(&conn, tpl.id).1, "deleted_pending");
 
@@ -691,15 +598,15 @@ fn delete_tombstones_and_hides_the_row_while_keeping_history() {
     let tpl2 = write_template(&conn, &new_template("Doomed")).unwrap();
     assert_ne!(tpl2.id, tpl.id);
 
-    // The version history survives for restore and diff.
-    let versions_after: i64 = conn
+    // No version table remains.
+    let tables: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM template_versions WHERE template_id = ?1",
-            [tpl.id],
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='template_versions'",
+            [],
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(versions_after, 1);
+    assert_eq!(tables, 0);
 }
 
 #[test]
@@ -781,12 +688,7 @@ fn reset_database_recreates_the_file_fresh() {
         )
         .unwrap();
         let template: i64 = conn.last_insert_rowid();
-        conn.execute(
-            "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-             VALUES (?1, 1, '<p></p>', '', 'manual')",
-            [template],
-        )
-        .unwrap();
+
         conn.execute(
             "INSERT INTO batches (template_id, printer_id) VALUES (?1, ?2)",
             rusqlite::params![template, printer],
@@ -836,7 +738,6 @@ fn reset_database_recreates_the_file_fresh() {
 
     let report = recreate_database(&mut state.lock().unwrap(), &fonts_dir).unwrap();
     assert_eq!(report.templates, 1);
-    assert_eq!(report.template_versions, 1);
     assert_eq!(report.print_jobs, 1);
     assert_eq!(report.fonts, 1);
     assert_eq!(report.datasets, 1);
@@ -850,7 +751,6 @@ fn reset_database_recreates_the_file_fresh() {
         // Every user table is empty; settings lost the session token too.
         for table in [
             "print_jobs",
-            "template_versions",
             "templates",
             "fonts",
             "synced_datasets",

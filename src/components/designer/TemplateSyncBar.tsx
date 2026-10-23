@@ -1,8 +1,6 @@
-import { useState } from "react";
-import { ArrowDownToLine } from "lucide-react";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 
 interface Props {
   templateName: string;
@@ -10,18 +8,14 @@ interface Props {
   publishedAt: string | null;
   /** Saved (community) copies are read-only: actions are hidden. */
   readOnly?: boolean;
-  /** The action running right now, so only its button says so. */
-  pending: "save" | "publish" | "unpublish" | "sync" | null;
-  onPublish: () => void;
-  onUnpublish: () => void | Promise<void>;
-  onCacheNow: () => void;
+  /** The action running right now, so the switch disables while it runs. */
+  pending: "save" | "visibility" | null;
+  onVisibilityChange: (makePublic: boolean) => void;
 }
 
 /**
- * Where the local copy stands with the server. Saving happens in the
- * Designer toolbar (a manual, blocking push); this bar holds the
- * one-time Publish/Unpublish switch and a cache refresh. Nothing here
- * sends automatically.
+ * Where the local copy stands with the server. Publish is visibility-only:
+ * a switch showing Public/Private that calls publish/unpublish immediately.
  */
 export function TemplateSyncBar({
   templateName,
@@ -29,11 +23,8 @@ export function TemplateSyncBar({
   publishedAt,
   readOnly = false,
   pending,
-  onPublish,
-  onUnpublish,
-  onCacheNow,
+  onVisibilityChange,
 }: Props) {
-  const [unpublishOpen, setUnpublishOpen] = useState(false);
   const busy = pending != null;
   const published = !!remoteId && !!publishedAt;
 
@@ -62,40 +53,19 @@ export function TemplateSyncBar({
             </span>
           )}
         </div>
-        {!readOnly && (
-          <div className="flex flex-wrap items-center gap-2">
-            {published ? (
-              <Button
-                data-testid="template-unpublish"
-                variant="outline"
-                size="sm"
-                onClick={() => setUnpublishOpen(true)}
-                disabled={busy}
-                className="border-danger/30 text-danger hover:bg-danger-soft hover:text-danger"
-              >
-                Unpublish
-              </Button>
-            ) : (
-              <Button
-                data-testid="template-publish"
-                variant="outline"
-                size="sm"
-                onClick={onPublish}
-                disabled={busy}
-              >
-                {pending === "publish" ? "Publishing…" : "Publish to Community"}
-              </Button>
-            )}
-            <Button
-              data-testid="template-sync-now"
-              variant="outline"
-              size="sm"
-              onClick={onCacheNow}
+        {!readOnly && remoteId && (
+          <div className="flex items-center gap-2">
+            <Label htmlFor="template-visibility" className="text-xs">
+              {published ? "Public" : "Private"}
+            </Label>
+            <Switch
+              id="template-visibility"
+              data-testid="template-visibility"
+              checked={published}
               disabled={busy}
-            >
-              <ArrowDownToLine className="h-4 w-4" aria-hidden="true" />
-              {pending === "sync" ? "Refreshing…" : "Refresh cache"}
-            </Button>
+              onCheckedChange={(v) => onVisibilityChange(v)}
+              aria-label={`Template visibility: ${published ? "Public" : "Private"}`}
+            />
           </div>
         )}
       </div>
@@ -108,29 +78,19 @@ export function TemplateSyncBar({
       )}
       {!readOnly && remoteId && !published && (
         <p role="status" className="text-xs text-muted-foreground">
-          Saved on the server as a private copy. Publish to show it in
-          Community.
+          Private copy on the server. Flip the switch to show it in Community.
         </p>
       )}
       {!readOnly && published && (
         <p role="status" className="text-xs text-muted-foreground">
-          Published — Save updates the live copy, no need to publish again.
+          Public — Save updates the live copy, no need to publish again.
         </p>
       )}
-
-      <ConfirmDialog
-        open={unpublishOpen}
-        onOpenChange={setUnpublishOpen}
-        title={`Unpublish “${templateName}”?`}
-        description="It stays on this computer and on the server, but disappears from Community."
-        confirmLabel="Unpublish"
-        destructive
-        busy={pending === "unpublish"}
-        onConfirm={async () => {
-          await onUnpublish();
-          setUnpublishOpen(false);
-        }}
-      />
+      {!readOnly && !remoteId && (
+        <p role="status" className="sr-only">
+          Template {templateName} is local only
+        </p>
+      )}
     </>
   );
 }

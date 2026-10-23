@@ -85,10 +85,11 @@ export function PrintPage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showBatches, setShowBatches] = useState(false);
 
-  // Fetch printers + templates once on mount.
+  // Fetch printers + templates fresh every time (mount, sync pull,
+  // window focus) so a height saved in Designer is visible here.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const load = async (first: boolean) => {
       try {
         const [p, tpl] = await Promise.all([
           agent("enumerate_system_printers", {}).catch(() => []),
@@ -104,11 +105,18 @@ export function PrintPage() {
       } catch (e) {
         console.error("Failed to load printers/templates:", e);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (first && !cancelled) setLoading(false);
       }
-    })();
+    };
+    void load(true);
+    const onPulled = () => void load(false);
+    const onFocus = () => void load(false);
+    window.addEventListener("sync:pulled", onPulled);
+    window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
+      window.removeEventListener("sync:pulled", onPulled);
+      window.removeEventListener("focus", onFocus);
     };
   }, []);
 
@@ -135,38 +143,36 @@ export function PrintPage() {
     let cancelled = false;
     (async () => {
       try {
-        const versions = await agent("list_versions", {
-          template_id: template.id,
-        });
-        const latest = versions?.[0];
-        if (!latest) {
+        const html = template.html ?? "";
+        const css = template.css ?? "";
+        if (!html.trim()) {
           if (!cancelled) {
             setPreviewHtml("");
             setPreviewError(
-              "This template has no versions yet. Open it in Designer and save it.",
+              "This template is empty. Open it in Designer and save it.",
             );
           }
           return;
         }
         const { renderTemplate } = await import("@/lib/render/renderTemplate");
 
-        // A version saved before per-template compilation existed (or whose
-        // compile failed) has no stored Tailwind CSS. Compile it now so the
-        // preview matches the Designer, and store the result on the same
-        // row so the actual print job (which reads the stored stylesheet)
-        // is styled too. This updates the version in place: previews must
-        // not mint new versions just for being looked at.
-        let compiledCss = latest.compiled_css ?? "";
-        if (!compiledCss.trim() && !cssBackfilled.current.has(latest.id)) {
-          cssBackfilled.current.add(latest.id);
-          const built = await compileTemplateCss(latest.html);
+        // Templates saved before per-template compilation have no stored
+        // Tailwind CSS. Compile on the fly so the preview matches.
+        let compiledCss = template.compiled_css ?? "";
+        if (!compiledCss.trim() && !cssBackfilled.current.has(template.id)) {
+          cssBackfilled.current.add(template.id);
+          const built = await compileTemplateCss(html);
           compiledCss = built.css;
           if (built.css.trim() && !cancelled) {
-            // A cache backfill, not a user edit: nothing to send.
-            agent("set_version_compiled", {
-              id: latest.id,
-              compiled_css: built.css,
-              compiled_key: built.key,
+            agent("update_template_meta", {
+              req: {
+                id: template.id,
+                name: template.name,
+                page_w_mm: template.page_w_mm,
+                page_h_mm: template.page_h_mm,
+                compiled_css: built.css,
+                compiled_key: built.key,
+              },
             }).catch((e) => console.warn("Could not store compiled CSS:", e));
           }
         }
@@ -195,7 +201,7 @@ export function PrintPage() {
 
         if (!cancelled) {
           setPreviewHtml(
-            renderTemplate(latest.html, latest.css, data as any, compiledCss),
+            renderTemplate(html, css, data as any, compiledCss),
           );
           setPreviewError("");
           setPreviewNotice(notice);

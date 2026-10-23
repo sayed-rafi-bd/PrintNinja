@@ -12,7 +12,6 @@ pub mod profile;
 pub mod reset;
 pub mod settings;
 pub mod template;
-pub mod version;
 
 #[tauri::command]
 pub fn ping() -> String {

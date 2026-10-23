@@ -29,11 +29,14 @@ const TEMPLATE_ROW = {
   page_w_mm: 80,
   page_h_mm: 200,
   orientation: "portrait",
+  html: "<p>hi</p>",
+  css: "",
+  compiled_css: "",
+  compiled_key: "",
 };
 let templateId = 0;
 const EMPTY_LISTS = new Set([
   "list_templates",
-  "list_versions",
   "list_fonts",
   "list_printers",
   "list_datasets",
@@ -151,10 +154,10 @@ describe("Designer page layout on a phone", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("keeps Templates, Page Setup and Versions collapsed above the tabs", async () => {
+  it("keeps Templates and Page Setup collapsed above the tabs", async () => {
     renderDesigner();
     await screen.findByRole("tablist", { name: "Designer views" });
-    for (const name of ["Templates", "Page Setup", "Versions"]) {
+    for (const name of ["Templates", "Page Setup"]) {
       expect(screen.getByRole("button", { name })).toHaveAttribute(
         "aria-expanded",
         "false",
@@ -230,9 +233,7 @@ describe("Designer page layout on a phone", () => {
     );
   });
 
-  it("loads all rows' content with one batched query, not one call per template", async () => {
-    // ensureStarterTemplates memoizes per module: earlier tests already
-    // settled it, so import a fresh page for a true mount.
+  it("loads row content directly with the template list", async () => {
     vi.resetModules();
     const { DesignerPage: FreshDesigner } = await import("@/pages/Designer");
     invoke.mockImplementation(async (...args: any[]): Promise<any> => {
@@ -243,8 +244,6 @@ describe("Designer page layout on a phone", () => {
           { ...TEMPLATE_ROW, id: 2, name: "Two" },
           { ...TEMPLATE_ROW, id: 3, name: "Three" },
         ];
-      if (cmd === "list_latest_versions") return [];
-      if (cmd === "list_versions") return [];
       if (cmd === "get_template")
         return {
           ...TEMPLATE_ROW,
@@ -272,92 +271,13 @@ describe("Designer page layout on a phone", () => {
     await screen.findByTitle("Canvas preview");
     await waitFor(() =>
       expect(
-        invoke.mock.calls.filter((c) => c[0] === "list_latest_versions"),
-      ).toHaveLength(1),
+        invoke.mock.calls.filter((c) => c[0] === "list_templates").length,
+      ).toBeGreaterThan(0),
     );
-    expect(
-      invoke.mock.calls.filter((c) => c[0] === "list_latest_versions")[0][1],
-    ).toMatchObject({ template_ids: [1, 2, 3] });
-    // The versions panel loads once for the opened row — never one call
-    // per template.
-    await waitFor(() =>
-      expect(
-        invoke.mock.calls.filter((c) => c[0] === "list_versions"),
-      ).toHaveLength(1),
-    );
-    expect(
-      invoke.mock.calls.filter((c) => c[0] === "list_versions")[0][1],
-    ).toMatchObject({ template_id: 1 });
+    expect(invoke.mock.calls.filter((c) => c[0] === "list_versions")).toHaveLength(0);
+    expect(invoke.mock.calls.filter((c) => c[0] === "list_latest_versions")).toHaveLength(0);
   });
 
-  it("shows version diffs in the Pavilion viewer, not raw dumps", async () => {
-    vi.resetModules();
-    const { DesignerPage: FreshDesigner } = await import("@/pages/Designer");
-    const v = (no: number, html: string) => ({
-      id: no,
-      template_id: 1,
-      version_no: no,
-      html,
-      css: ".a{}",
-      label: null,
-      note: null,
-      created_at: "2026-01-01T00:00:00Z",
-      created_by: "manual",
-      compiled_css: "",
-      compiled_key: "",
-    });
-    invoke.mockImplementation(async (...args: any[]): Promise<any> => {
-      const cmd = args[0] as string;
-      if (cmd === "list_templates") return [{ ...TEMPLATE_ROW, id: 1 }];
-      if (cmd === "list_latest_versions") return [v(2, "<p>beta</p>")];
-      if (cmd === "list_versions")
-        return [v(2, "<p>beta</p>"), v(1, "<p>alpha</p>")];
-      if (cmd === "diff_versions")
-        return {
-          from_version_no: 1,
-          to_version_no: 2,
-          html_from: "<p>alpha</p>",
-          html_to: "<p>beta</p>",
-          css_from: "",
-          css_to: "",
-          html_changed: true,
-          css_changed: false,
-        };
-      if (cmd === "get_template")
-        return {
-          ...TEMPLATE_ROW,
-          summary: "",
-          readme: "",
-          remote_id: null,
-          published_at: null,
-          origin: "own",
-          withdrawn: false,
-        };
-      return null;
-    });
-    const qc = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    render(
-      <QueryClientProvider client={qc}>
-        <MemoryRouter initialEntries={["/"]}>
-          <Routes>
-            <Route path="/" element={<FreshDesigner />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-    await screen.findByTitle("Canvas preview");
-    fireEvent.click(await screen.findByRole("button", { name: "Versions" }));
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Diff v1 to v2" }),
-    );
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText("Compare v1 → v2")).toBeInTheDocument();
-    // Both sides render through the diff viewer.
-    expect(within(dialog).getByText("alpha")).toBeInTheDocument();
-    expect(within(dialog).getByText("beta")).toBeInTheDocument();
-  });
 });
 
 describe("Designer page layout on desktop", () => {
@@ -399,7 +319,7 @@ describe("Designer page layout on desktop", () => {
     const controls = within(
       screen.getByRole("complementary", { name: "Designer controls" }),
     );
-    const states = ["Templates", "Page Setup", "Versions", "Helpers"].map(
+    const states = ["Templates", "Page Setup", "Helpers"].map(
       (name) => [
         name,
         controls.getByRole("button", { name }).getAttribute("aria-expanded"),
@@ -408,7 +328,6 @@ describe("Designer page layout on desktop", () => {
     expect(states).toEqual([
       ["Templates", "false"],
       ["Page Setup", "true"],
-      ["Versions", "false"],
       ["Helpers", "false"],
     ]);
     expect(controls.getByLabelText("Width (mm)")).toBeInTheDocument();
@@ -496,10 +415,10 @@ describe("Designer page layout on desktop", () => {
     expect(screen.getByTitle("Canvas preview")).toBeInTheDocument();
   });
 
-  it("keeps the Barcode, Font and Save Version actions, without a Save & Preview button", async () => {
+  it("keeps the Barcode and Font actions, without a Save & Preview button", async () => {
     renderDesigner();
     await screen.findByTitle("Canvas preview");
-    for (const name of ["Barcode", "Font", "Save Version"]) {
+    for (const name of ["Barcode", "Font"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
     expect(
@@ -511,7 +430,7 @@ describe("Designer page layout on desktop", () => {
     renderDesigner();
     await screen.findByTitle("Canvas preview");
     expect(screen.getByTestId("designer-save")).toBeInTheDocument();
-    expect(screen.getByTestId("template-sync-now")).toBeInTheDocument();
+    expect(screen.getByTestId("template-state")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /New/ })).toBeInTheDocument();
   });
 });
@@ -561,7 +480,7 @@ describe("Designer page, phase 3 polish on desktop", () => {
     const aside = await screen.findByRole("complementary", {
       name: "Designer controls",
     });
-    fireEvent.click(within(aside).getByRole("button", { name: "Versions" }));
+    fireEvent.click(within(aside).getByRole("button", { name: "Helpers" }));
     first.unmount();
 
     renderDesigner();
@@ -569,7 +488,7 @@ describe("Designer page, phase 3 polish on desktop", () => {
       name: "Designer controls",
     });
     expect(
-      within(again).getByRole("button", { name: "Versions" }),
+      within(again).getByRole("button", { name: "Helpers" }),
     ).toHaveAttribute("aria-expanded", "true");
     expect(
       within(again).getByRole("button", { name: "Page Setup" }),
@@ -626,12 +545,12 @@ describe("Designer page, phase 3 polish on desktop", () => {
     expect(
       screen.queryByRole("complementary", { name: "Designer controls" }),
     ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Open Versions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Helpers" }));
     const aside = await screen.findByRole("complementary", {
       name: "Designer controls",
     });
     expect(
-      within(aside).getByRole("button", { name: "Versions" }),
+      within(aside).getByRole("button", { name: "Helpers" }),
     ).toHaveAttribute("aria-expanded", "true");
     // It can be collapsed again by hand.
     fireEvent.click(

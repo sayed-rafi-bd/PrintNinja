@@ -1,7 +1,7 @@
 //! Full local database reset (Settings → Retention → Reset).
 //!
 //! Unlike `cache_clear_account` (account cache only, device tables kept),
-//! this wipes everything the app owns on this PC: templates and versions,
+//! this wipes everything the app owns on this PC: templates,
 //! print history and batches, printers, fonts (rows and files), the synced
 //! library rows, the sync state, queued uses, API clients and every
 //! setting — including the session token and server URL, so the app
@@ -27,7 +27,6 @@ use tauri::{AppHandle, Manager, State};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ResetReport {
     pub templates: usize,
-    pub template_versions: usize,
     pub print_jobs: usize,
     pub fonts: usize,
     pub datasets: usize,
@@ -47,7 +46,6 @@ fn count(conn: &Connection, table: &str) -> AppResult<usize> {
 pub fn recreate_database(db: &mut Database, fonts_dir: &Path) -> AppResult<ResetReport> {
     let report = ResetReport {
         templates: count(db.connection(), "templates")?,
-        template_versions: count(db.connection(), "template_versions")?,
         print_jobs: count(db.connection(), "print_jobs")?,
         fonts: count(db.connection(), "fonts")?,
         datasets: count(db.connection(), "synced_datasets")?,

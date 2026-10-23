@@ -308,8 +308,7 @@ async fn list_templates(State(state): State<ApiState>) -> Result<Json<Value>, Ap
 
     let mut stmt = conn
         .prepare(
-            "SELECT t.id, t.name, t.page_w_mm, t.page_h_mm, t.orientation,
-                    (SELECT COUNT(*) FROM template_versions v WHERE v.template_id = t.id)
+            "SELECT t.id, t.name, t.page_w_mm, t.page_h_mm, t.orientation
              FROM templates t WHERE t.sync_state <> 'deleted_pending' ORDER BY t.name",
         )
         .map_err(ApiRejection::from)?;
@@ -322,7 +321,6 @@ async fn list_templates(State(state): State<ApiState>) -> Result<Json<Value>, Ap
                 "page_w_mm": row.get::<_, i64>(2)?,
                 "page_h_mm": row.get::<_, i64>(3)?,
                 "orientation": row.get::<_, String>(4)?,
-                "version_count": row.get::<_, i64>(5)?,
             }))
         })
         .map_err(ApiRejection::from)?
@@ -382,7 +380,7 @@ async fn print_job(
     // `MutexGuard` is definitely released before the print. Holding it across
     // a network round-trip to a thermal printer would stall every other
     // command, and the pipeline takes the lock again for its history write.
-    let (template_id, version_id) = {
+    let template_id = {
         let guard = db.lock().map_err(ApiRejection::from)?;
         let conn = guard.connection();
 
@@ -421,16 +419,7 @@ async fn print_job(
             )));
         }
 
-        let version_id: Option<i64> = conn
-            .query_row(
-                "SELECT current_version_id FROM templates WHERE id = ?1",
-                [template_id],
-                |r| r.get(0),
-            )
-            .ok()
-            .flatten();
-
-        (Some(template_id), version_id)
+        Some(template_id)
     };
 
     // Run the real pipeline. This used to insert a row with
@@ -464,7 +453,6 @@ async fn print_job(
             .and_then(|v| v.as_str())
             .map(str::to_string),
         template_id,
-        template_version_id: version_id,
         data: req.data.clone(),
         data_url: req.data_url.clone(),
         test: req.test,
@@ -576,29 +564,19 @@ async fn batch_print(
     .map_err(ApiRejection::from)?;
     let batch_id = tx.last_insert_rowid();
 
-    let version_id: Option<i64> = tx
-        .query_row(
-            "SELECT current_version_id FROM templates WHERE id = ?1",
-            [template_id],
-            |r| r.get(0),
-        )
-        .ok()
-        .flatten();
-
     if mode == "per_record" {
         // Each record's own payload rides on its row in `data_json` —
         // without it the worker would have nothing to render (P3).
         for (i, record) in records.iter().enumerate() {
             tx.execute(
                 "INSERT INTO print_jobs
-                   (batch_id, record_index, template_id, template_version_id,
+                   (batch_id, record_index, template_id,
                     printer_id, source, status, copies, is_test, data_json)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'api', 'queued', 1, 0, ?6)",
+                 VALUES (?1, ?2, ?3, ?4, 'api', 'queued', 1, 0, ?5)",
                 rusqlite::params![
                     batch_id,
                     i as i64,
                     template_id,
-                    version_id,
                     printer_id,
                     record.to_string()
                 ],
@@ -610,13 +588,12 @@ async fn batch_print(
         // by the template as an array context.
         tx.execute(
             "INSERT INTO print_jobs
-               (batch_id, record_index, template_id, template_version_id,
+               (batch_id, record_index, template_id,
                 printer_id, source, status, copies, is_test, data_json)
-             VALUES (?1, 0, ?2, ?3, ?4, 'api', 'queued', 1, 0, ?5)",
+             VALUES (?1, 0, ?2, ?3, 'api', 'queued', 1, 0, ?4)",
             rusqlite::params![
                 batch_id,
                 template_id,
-                version_id,
                 printer_id,
                 serde_json::to_string(records).unwrap_or_default()
             ],
