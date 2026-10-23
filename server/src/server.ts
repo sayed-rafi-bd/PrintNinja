@@ -1,4 +1,6 @@
-import { buildStack } from "./boot.js";
+import { randomUUID } from "node:crypto";
+import { buildApp } from "./app.js";
+import { loadConfig } from "./config.js";
 import { purgeExpiredSessions } from "./domain/auth/index.js";
 import { purgeOldTombstones } from "./domain/sync/index.js";
 import type { AppDeps } from "./domain/ports.js";
@@ -107,7 +109,8 @@ app.addHook("onClose", async () => {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     app.log.info({ signal }, "shutting down");
-    close()
+    app
+      .close()
       .then(() => process.exit(0))
       .catch((error: unknown) => {
         app.log.error({ err: error }, "error during shutdown");
