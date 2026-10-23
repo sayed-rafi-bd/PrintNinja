@@ -196,7 +196,7 @@ test("F6 a fresh save after the pull needs no dialog", async ({ browser }) => {
     "f6clean",
   );
   // B refreshes first, then saves the same edit: the guard is current.
-  await pageB.getByTestId(testids.templateSyncNow).click();
+  await pageB.getByTestId(testids.syncChip).click();
   await pageB.getByTestId(testids.designerSave).click();
   await expect(pageB.getByText("Saved to the server")).toBeVisible({
     timeout: 30_000,

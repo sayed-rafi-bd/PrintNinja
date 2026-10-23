@@ -62,7 +62,7 @@ test("F7 publish, find, save, withdraw, republish", async ({ browser }) => {
       ),
   );
   await pageA.goto(`/template/${idA}`);
-  await pageA.getByTestId(testids.templatePublish).click();
+  await pageA.getByTestId(testids.templateVisibility).click();
   await expect(async () => {
     const community = await apiCommunity(auth.token, "Community Gem");
     expect(community.items.map((t) => t.name)).toContain("Community Gem");
@@ -110,11 +110,7 @@ test("F7 publish, find, save, withdraw, republish", async ({ browser }) => {
 
   // A unpublishes; B's copy shows "Withdrawn by author" after the pull.
   await pageA.bringToFront();
-  await pageA.getByTestId(testids.templateUnpublish).click();
-  const dialog = pageA.getByRole("dialog");
-  await dialog
-    .getByRole("button", { name: "Unpublish", exact: true })
-    .click({ timeout: 15000 });
+  await pageA.getByTestId(testids.templateVisibility).click();
   await expect(async () => {
     const community = await apiCommunity(auth.token, "Community Gem");
     expect(community.items.map((t) => t.name)).not.toContain("Community Gem");
@@ -127,7 +123,7 @@ test("F7 publish, find, save, withdraw, republish", async ({ browser }) => {
 
   // A republishes and it is available again.
   await pageA.bringToFront();
-  await pageA.getByTestId(testids.templatePublish).click();
+  await pageA.getByTestId(testids.templateVisibility).click();
   await expect(async () => {
     const community = await apiCommunity(auth.token, "Community Gem");
     expect(community.items.map((t) => t.name)).toContain("Community Gem");
