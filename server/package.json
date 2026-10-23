@@ -17,6 +17,7 @@
     "openapi:generate": "tsx scripts/openapi-generate.ts",
     "db:migrate": "node --env-file-if-exists=.env ./node_modules/prisma/build/index.js migrate dev",
     "db:apply": "tsx src/infra/db/migrate.ts",
+    "db:reset": "tsx scripts/db-reset.ts",
     "db:generate": "node --env-file-if-exists=.env ./node_modules/prisma/build/index.js generate",
     "db:validate": "node --env-file-if-exists=.env ./node_modules/prisma/build/index.js validate",
     "db:import": "tsx scripts/import-v1.ts"
