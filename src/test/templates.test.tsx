@@ -34,28 +34,31 @@ const share = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/share/client", () => share);
 const sync = vi.hoisted(() => ({
-  saveToServer: vi.fn(async () => ({
-    remoteId: "new-uuid",
-    updatedAt: "2026-03-01T00:00:00Z",
-    published: false,
-  })),
-  refreshFromServer: vi.fn(async (t: { name: string }) => ({
-    template: {
-      id: "r2",
-      body: "<p>new</p>",
-      css: ".a{}",
-      readme: "",
-      published_at: "2026-03-01 00:00:00",
-      updated_at: "2026-03-01 00:00:00",
-    },
-    name: t.name,
-    page_w_mm: 80,
-    page_h_mm: 200,
-  })),
   downloadToLocal: vi.fn(async () => ({ id: 9, created: true })),
   listAvailableRemoteTemplates: vi.fn(async () => ({ mine: [], saved: [] })),
 }));
 vi.mock("@/lib/share/sync", () => sync);
+const save = vi.hoisted(() => ({
+  saveRowToServer: vi.fn(async () => ({
+    remoteId: "new-uuid",
+    revision: 1,
+    updatedAt: "2026-03-01T00:00:00Z",
+    published: false,
+  })),
+  takeServerCopy: vi.fn(async (t: { name: string }) => ({
+    html: "<p>new</p>",
+    css: ".a{}",
+    name: t.name,
+    summary: "",
+    readme: "",
+    page_w_mm: 80,
+    page_h_mm: 200,
+    revision: 2,
+    updatedAt: "2026-03-01T00:00:00Z",
+  })),
+  deleteTemplateEverywhere: vi.fn(async () => {}),
+}));
+vi.mock("@/lib/share/save", () => save);
 
 import { TemplatesPage } from "@/pages/Templates";
 import { usePrintStore } from "@/lib/store/printStore";
@@ -79,6 +82,9 @@ const LIST = [
     id: 2,
     name: "Receipt",
     remote_id: "r2",
+    server_id: "r2",
+    base_revision: 3,
+    sync_state: "synced",
     published_at: "2026-02-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
   },
@@ -87,6 +93,9 @@ const LIST = [
     id: 3,
     name: "Pallet tag",
     remote_id: "r3",
+    server_id: "r3",
+    base_revision: 2,
+    sync_state: "synced",
     published_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-02-01T00:00:00Z",
   },
@@ -144,26 +153,25 @@ beforeEach(() => {
   share.fetchRemoteTemplate.mockResolvedValue({ id: "x1" } as any);
   share.saveRemoteTemplate.mockResolvedValue(undefined);
   share.unsaveRemoteTemplate.mockResolvedValue(undefined);
-  sync.saveToServer.mockResolvedValue({
+  sync.downloadToLocal.mockResolvedValue({ id: 9, created: true });
+  sync.listAvailableRemoteTemplates.mockResolvedValue({ mine: [], saved: [] });
+  save.saveRowToServer.mockResolvedValue({
     remoteId: "new-uuid",
+    revision: 1,
     updatedAt: "2026-03-01T00:00:00Z",
     published: false,
   });
-  sync.refreshFromServer.mockResolvedValue({
-    template: {
-      id: "r2",
-      body: "<p>new</p>",
-      css: ".a{}",
-      readme: "",
-      published_at: "2026-03-01 00:00:00",
-      updated_at: "2026-03-01 00:00:00",
-    },
-    name: "Receipt",
+  save.takeServerCopy.mockImplementation(async (t: { name: string }) => ({
+    html: "<p>new</p>",
+    css: ".a{}",
+    name: t.name,
+    summary: "",
+    readme: "",
     page_w_mm: 80,
     page_h_mm: 200,
-  } as any);
-  sync.downloadToLocal.mockResolvedValue({ id: 9, created: true });
-  sync.listAvailableRemoteTemplates.mockResolvedValue({ mine: [], saved: [] });
+    revision: 2,
+    updatedAt: "2026-03-01T00:00:00Z",
+  }));
   invoke.mockImplementation(async (cmd: string) => {
     if (cmd === "list_templates") return LIST;
     if (cmd === "cache_list_conflicted") return [];
@@ -213,7 +221,7 @@ describe("Templates page", () => {
       screen.getByRole("button", { name: "Save Shipping label to the server" }),
     );
     await waitFor(() =>
-      expect(sync.saveToServer).toHaveBeenCalledWith(
+      expect(save.saveRowToServer).toHaveBeenCalledWith(
         expect.objectContaining({ id: 1 }),
       ),
     );
@@ -229,19 +237,19 @@ describe("Templates page", () => {
     expect(
       within(dialog).getByText("Refresh “Receipt” from the server?"),
     ).toBeInTheDocument();
-    expect(sync.refreshFromServer).not.toHaveBeenCalled();
+    expect(save.takeServerCopy).not.toHaveBeenCalled();
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Refresh template" }),
     );
     await waitFor(() =>
-      expect(sync.refreshFromServer).toHaveBeenCalledWith(
+      expect(save.takeServerCopy).toHaveBeenCalledWith(
         expect.objectContaining({ id: 2 }),
       ),
     );
   });
 
   it("keeps the local copy when Refresh fails", async () => {
-    sync.refreshFromServer.mockRejectedValueOnce(
+    save.takeServerCopy.mockRejectedValueOnce(
       new Error("Cannot reach the server"),
     );
     renderPage();
@@ -253,7 +261,7 @@ describe("Templates page", () => {
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Refresh template" }),
     );
-    await waitFor(() => expect(sync.refreshFromServer).toHaveBeenCalled());
+    await waitFor(() => expect(save.takeServerCopy).toHaveBeenCalled());
     // Nothing local is written on the way out, so the copy still prints.
     const row = screen.getByText("Receipt").closest("tr")!;
     expect(
@@ -324,6 +332,28 @@ describe("Templates page", () => {
     expect(
       within(row).queryByText("Withdrawn by author"),
     ).not.toBeInTheDocument();
+  });
+
+  it("asks before deleting a template everywhere, naming it", async () => {
+    renderPage();
+    await screen.findByText("Shipping label");
+    const row = screen.getByText("Shipping label").closest("tr")!;
+    fireEvent.click(
+      within(row).getByRole("button", { name: /Delete/ }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByText("Delete “Shipping label” everywhere?"),
+    ).toBeInTheDocument();
+    expect(save.deleteTemplateEverywhere).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Delete template" }),
+    );
+    await waitFor(() =>
+      expect(save.deleteTemplateEverywhere).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 1 }),
+      ),
+    );
   });
 
   it("asks before removing a saved template, naming it", async () => {

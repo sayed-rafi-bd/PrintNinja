@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { apiMine, apiRegister } from "../support/api";
+import {
+  apiPutTemplate,
+  apiRegister,
+} from "../support/api";
 import { pc } from "../support/fixtures";
 import { testids } from "../support/testids";
 
@@ -14,6 +17,11 @@ test("F8 version history on the server", async ({ browser }) => {
     `f8-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`,
     "password123",
   );
+  // Server-first: the template starts on the server, A pulls it.
+  await apiPutTemplate(auth.token, crypto.randomUUID(), {
+    name: "Versioned",
+    body: "<p>v1</p>",
+  });
   const pcA = await pc(browser, {
     settings: { share_session_token: auth.token },
   });
@@ -22,30 +30,7 @@ test("F8 version history on the server", async ({ browser }) => {
   await expect(pageA.getByTestId(testids.shellApp)).toBeVisible({
     timeout: 15_000,
   });
-  await pageA.evaluate(
-    (n: string) =>
-      (
-        window as unknown as {
-          __TAURI_INTERNALS__: {
-            invoke: (cmd: string, args?: unknown) => Promise<unknown>;
-          };
-        }
-      ).__TAURI_INTERNALS__.invoke("create_template", {
-        req: {
-          name: n,
-          page_w_mm: 210,
-          page_h_mm: 297,
-          html: "<p>v1</p>",
-          css: "",
-        },
-      }),
-    "Versioned",
-  );
-  await pageA.reload();
-  await expect(async () => {
-    const mine = await apiMine(auth.token);
-    expect(mine.items.map((t) => t.name)).toContain("Versioned");
-  }).toPass({ timeout: 30_000 });
+  await expect(pageA.getByText("Versioned")).toBeVisible({ timeout: 30_000 });
 
   const idA: number = await pageA.evaluate(() =>
     (
@@ -87,9 +72,13 @@ test("F8 version history on the server", async ({ browser }) => {
   }
 
   async function saveLabelled(html: string, label: string) {
-    await pageA.getByLabel("HTML editor").locator(".cm-content").click();
-    await pageA.keyboard.press("ControlOrMeta+a");
-    await pageA.keyboard.press("Backspace");
+    const content = pageA.getByLabel("HTML editor").locator(".cm-content");
+    await content.click();
+    await expect(async () => {
+      await pageA.keyboard.press("ControlOrMeta+a");
+      await pageA.keyboard.press("Backspace");
+      expect(await content.textContent()).toBe("");
+    }).toPass({ timeout: 15_000 });
     await pageA.keyboard.type(html, { delay: 10 });
     await pageA.getByTestId(testids.designerSaveVersion).click();
     await pageA.getByTestId(testids.versionLabel).fill(label);
@@ -97,6 +86,10 @@ test("F8 version history on the server", async ({ browser }) => {
       .getByRole("dialog")
       .getByRole("button", { name: "Save", exact: true })
       .click();
+    // A labelled save is one push: the server records the version.
+    await expect(
+      pageA.getByText("Version saved to the server"),
+    ).toBeVisible({ timeout: 30_000 });
     await openVersions(pageA);
     await expect(pageA.getByText(label)).toBeVisible({ timeout: 15_000 });
   }

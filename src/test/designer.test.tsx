@@ -94,23 +94,16 @@ describe("TemplateSyncBar", () => {
     pending: null,
     onPublish: vi.fn(),
     onUnpublish: vi.fn(),
-    onSyncNow: vi.fn(),
+    onCacheNow: vi.fn(),
   };
 
-  it("marks a template that is only on this computer, and offers Publish and Sync now", () => {
-    render(
-      <TemplateSyncBar
-        {...base}
-        remoteId={null}
-        publishedAt={null}
-        templateUpdatedAt={null}
-      />,
-    );
+  it("marks a template that is only on this computer, and offers Publish and Refresh cache", () => {
+    render(<TemplateSyncBar {...base} remoteId={null} publishedAt={null} />);
     expect(screen.getByText("Draft")).toBeInTheDocument();
     expect(screen.getByText("Only on this computer")).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /Refresh/ }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: /Refresh cache/ }),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /Save to server/ }),
     ).not.toBeInTheDocument();
@@ -119,21 +112,20 @@ describe("TemplateSyncBar", () => {
     );
     expect(base.onPublish).toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("template-sync-now"));
-    expect(base.onSyncNow).toHaveBeenCalled();
+    expect(base.onCacheNow).toHaveBeenCalled();
   });
 
-  it("offers Unpublish and Sync now once a template is published", () => {
+  it("offers Unpublish and Refresh cache once a template is published", () => {
     render(
       <TemplateSyncBar
         {...base}
         remoteId="r1"
         publishedAt="2026-02-01T00:00:00Z"
-        templateUpdatedAt="2026-01-01T00:00:00Z"
       />,
     );
     expect(screen.getByText("Published")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /Sync now/ }),
+      screen.getByRole("button", { name: /Refresh cache/ }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Unpublish" }),
@@ -144,30 +136,23 @@ describe("TemplateSyncBar", () => {
   });
 
   it("says when a private template is saved but not published", () => {
-    render(
-      <TemplateSyncBar
-        {...base}
-        remoteId="r1"
-        publishedAt={null}
-        templateUpdatedAt="2026-02-01T00:00:00Z"
-      />,
-    );
+    render(<TemplateSyncBar {...base} remoteId="r1" publishedAt={null} />);
     expect(screen.getByText(/private copy/)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Publish to Community" }),
     ).toBeInTheDocument();
   });
 
-  it("warns once when local changes are not on the server yet", () => {
+  it("says Save updates the live copy once published, instead of warning about unsent changes", () => {
     render(
       <TemplateSyncBar
         {...base}
         remoteId="r1"
         publishedAt="2026-01-01T00:00:00Z"
-        templateUpdatedAt="2026-02-01T00:00:00Z"
       />,
     );
-    expect(screen.getAllByText(/not on the server yet/)).toHaveLength(1);
+    expect(screen.getByText(/Save updates the live copy/)).toBeInTheDocument();
+    expect(screen.queryByText(/not on the server yet/)).not.toBeInTheDocument();
   });
 
   it("asks before unpublishing, naming the template", async () => {
@@ -178,7 +163,6 @@ describe("TemplateSyncBar", () => {
         onUnpublish={onUnpublish}
         remoteId="r1"
         publishedAt="2026-02-01T00:00:00Z"
-        templateUpdatedAt="2026-01-01T00:00:00Z"
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Unpublish" }));
@@ -196,7 +180,6 @@ describe("TemplateSyncBar", () => {
         readOnly
         remoteId="x1"
         publishedAt="2026-02-01T00:00:00Z"
-        templateUpdatedAt="2026-02-01T00:00:00Z"
       />,
     );
     expect(screen.getByText("Read-only copy")).toBeInTheDocument();
