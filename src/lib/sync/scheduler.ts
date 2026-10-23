@@ -1,58 +1,51 @@
 import {
-  drainUses,
-  pushDirty,
-  pushLibraryDirty,
-  pushLibraryTombstones,
   downloadFontFiles,
-  pushTombstones,
-  syncOnce,
+  drainUses,
+  flushTombstones,
+  pull,
   type EngineApi,
   type EngineCache,
-  type LibraryApi,
   type LibraryCache,
 } from "./engine";
 
-export type SyncStatusName =
-  | "synced"
-  | "syncing"
-  | "pending"
-  | "offline"
-  | "conflict";
+export type SyncStatusName = "synced" | "syncing" | "offline";
 
-export interface SyncStatus {
+export interface SyncState {
   state: SyncStatusName;
-  /** Local dirty rows not yet pushed. */
-  pending: number;
-  /** Rows waiting on the conflict dialog. */
-  conflicts: number;
-  lastPullAt: string | null;
+  /** Local rows with edits not yet saved to the server (legacy drafts). */
+  drafts: number;
+  lastPulledAt: string | null;
   lastError: string | null;
 }
 
 export interface SchedulerDeps {
   cache: EngineCache;
   api: EngineApi;
-  library?: { cache: LibraryCache; api: LibraryApi };
+  library?: { cache: LibraryCache };
   now?: () => number;
-  onStatus?: (status: SyncStatus) => void;
+  onStatus?: (status: SyncState) => void;
 }
 
 const FOCUS_MIN_INTERVAL_MS = 60_000;
 const PERIODIC_MS = 5 * 60_000;
-const PUSH_DEBOUNCE_MS = 3_000;
 const BASE_BACKOFF_MS = 5_000;
 const MAX_BACKOFF_MS = 5 * 60_000;
 
 /**
- * Background sync triggers (REFACTORING.md section 6.5): startup (the
- * caller runs `syncNow` after the sign-in gate), window focus at most
- * once a minute, every 5 minutes, 3 s after a local edit (push only),
- * and on the browser `online` event. Never at print time — the print
- * pipeline never calls this module.
+ * Cache-refresh triggers for the server-authoritative model. The server
+ * owns the data; this keeps the local cache fresh: startup (the caller
+ * runs `refreshNow` after the sign-in gate), window focus at most once a
+ * minute, every 5 minutes, and on the browser `online` event.
+ *
+ * It never pushes edits — saving is a manual, synchronous action, so
+ * there is no background queue for work to hide in. The only thing it
+ * sends is the queued print-usage count (a print must never fail on a
+ * network blip) and failed font downloads. Never at print time — the
+ * print pipeline never calls this module.
  *
  * Failures back off exponentially (5 s doubling to 5 min) and report
  * `offline`; success resets the backoff. Concurrent runs never overlap:
- * a trigger while syncing sets a flag for one re-run afterwards.
+ * a trigger while refreshing sets a flag for one re-run afterwards.
  */
 export function createSyncScheduler(deps: SchedulerDeps) {
   const now = deps.now ?? (() => Date.now());
@@ -61,62 +54,27 @@ export function createSyncScheduler(deps: SchedulerDeps) {
   let rerun = false;
   let failures = 0;
   let backoffUntil = 0;
-  let lastPullAt: string | null = null;
+  let lastPulledAt: string | null = null;
   let lastError: string | null = null;
-  let conflictIds: string[] = [];
-  let pushTimer: ReturnType<typeof setTimeout> | null = null;
   let periodicTimer: ReturnType<typeof setInterval> | null = null;
   let lastFocusRun = 0;
   let disposed = false;
 
   const emit = async (state: SyncStatusName) => {
-    if (!deps.onStatus) {
-      return;
-    }
-    let pending = 0;
+    if (!deps.onStatus) return;
+    let drafts = 0;
     try {
-      pending = (await deps.cache.listDirty()).length;
-      if (deps.library) {
-        const [datasets, profiles, settings, fonts] = await Promise.all([
-          deps.library.cache.listDirtyDatasets(),
-          deps.library.cache.listDirtyProfiles(),
-          deps.library.cache.listDirtySettings(),
-          deps.library.cache.listDirtyFonts(),
-        ]);
-        pending +=
-          datasets.length + profiles.length + settings.length + fonts.length;
-      }
+      drafts = (await deps.cache.listDirty()).length;
     } catch {
-      pending = 0;
+      drafts = 0;
     }
-    deps.onStatus({
-      state,
-      pending,
-      conflicts: conflictIds.length,
-      lastPullAt,
-      lastError,
-    });
+    deps.onStatus({ state, drafts, lastPulledAt, lastError });
   };
 
   const backoffMs = () =>
     Math.min(BASE_BACKOFF_MS * 2 ** failures, MAX_BACKOFF_MS);
 
-  async function runPushOnly(): Promise<void> {
-    await pushTombstones(deps.cache, deps.api);
-    if (deps.library) {
-      await pushLibraryTombstones(deps.library.cache, deps.library.api);
-    }
-    const { conflicts } = await pushDirty(deps.cache, deps.api);
-    conflictIds = conflicts;
-    if (deps.library) {
-      await pushLibraryDirty(deps.library.cache, deps.library.api);
-      // Retries failed font downloads without a full pull.
-      await downloadFontFiles(deps.library.cache);
-    }
-    await drainUses(deps.cache, deps.api);
-  }
-
-  async function syncNowFull(): Promise<void> {
+  async function refreshNow(): Promise<void> {
     if (running) {
       rerun = true;
       return;
@@ -127,19 +85,38 @@ export function createSyncScheduler(deps: SchedulerDeps) {
     running = true;
     await emit("syncing");
     try {
-      const res = await syncOnce(deps.cache, deps.api, deps.library);
-      conflictIds = res.conflicts;
-      lastPullAt = new Date(now()).toISOString();
+      await pull(deps.cache, deps.api, deps.library?.cache);
+      // Legacy tombstones left behind by the old local-first model: a row
+      // the user deleted before deletes went straight to the server. This
+      // drains them once and then finds nothing. A 404 means the server
+      // copy is already gone — same end state.
+      await flushTombstones(deps.cache, deps.api);
+      // Usage counts and font files are the only things still sent: a
+      // print records offline and reports on the next refresh, and a
+      // font fetched with the pull retries here without another pull.
+      const usesSent = await drainUses(deps.cache, deps.api);
+      let fontsDownloaded = 0;
+      let fontsFailed = 0;
+      if (deps.library) {
+        ({ downloaded: fontsDownloaded, failed: fontsFailed } =
+          await downloadFontFiles(deps.library.cache));
+      }
+      lastPulledAt = new Date(now()).toISOString();
       lastError = null;
       failures = 0;
       backoffUntil = 0;
-      await emit(conflictIds.length > 0 ? "conflict" : "synced");
+      await emit("synced");
       // Lists read the cache on mount; a completed pull must refresh
-      // them (F3/F4: B shows A's template with no manual step).
+      // them (B shows A's template with no manual step).
       if (typeof window !== "undefined" && !disposed) {
         window.dispatchEvent(
           new CustomEvent("sync:pulled", {
-            detail: { pulled: res.pulled, pushed: res.pushed },
+            detail: {
+              pulled: 0,
+              usesSent,
+              fontsDownloaded,
+              fontsFailed,
+            },
           }),
         );
       }
@@ -152,89 +129,38 @@ export function createSyncScheduler(deps: SchedulerDeps) {
       running = false;
       if (rerun && !disposed) {
         rerun = false;
-        void syncNowFull();
+        void refreshNow();
       }
     }
-  }
-
-  async function pushSoon(): Promise<void> {
-    if (running) {
-      rerun = true;
-      return;
-    }
-    if (now() < backoffUntil) {
-      return;
-    }
-    running = true;
-    try {
-      await runPushOnly();
-      lastError = null;
-      failures = 0;
-      backoffUntil = 0;
-      await emit(conflictIds.length > 0 ? "conflict" : "pending");
-    } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
-      failures += 1;
-      backoffUntil = now() + backoffMs();
-      await emit("offline");
-    } finally {
-      running = false;
-      if (rerun && !disposed) {
-        rerun = false;
-        void syncNowFull();
-      }
-    }
-  }
-
-  function schedulePushSoon(): void {
-    if (disposed) {
-      return;
-    }
-    if (pushTimer) {
-      clearTimeout(pushTimer);
-    }
-    void emit("pending");
-    pushTimer = setTimeout(() => {
-      pushTimer = null;
-      void pushSoon();
-    }, PUSH_DEBOUNCE_MS);
   }
 
   function onFocus(): void {
-    if (now() - lastFocusRun < FOCUS_MIN_INTERVAL_MS) {
-      return;
-    }
+    if (now() - lastFocusRun < FOCUS_MIN_INTERVAL_MS) return;
     lastFocusRun = now();
-    void syncNowFull();
+    void refreshNow();
   }
 
   function onOnline(): void {
-    void syncNowFull();
+    void refreshNow();
   }
 
   function start(): void {
-    if (started) {
-      return;
-    }
+    if (started) return;
     started = true;
     if (typeof window !== "undefined") {
       window.addEventListener("focus", onFocus);
       window.addEventListener("online", onOnline);
     }
     periodicTimer = setInterval(() => {
-      void syncNowFull();
+      void refreshNow();
     }, PERIODIC_MS);
     // Startup trigger: the caller starts the scheduler after the gate.
-    void syncNowFull();
+    void refreshNow();
   }
 
   function stop(): void {
     disposed = true;
     started = false;
-    if (pushTimer) {
-      clearTimeout(pushTimer);
-      pushTimer = null;
-    }
     if (periodicTimer) {
       clearInterval(periodicTimer);
       periodicTimer = null;
@@ -248,10 +174,8 @@ export function createSyncScheduler(deps: SchedulerDeps) {
   return {
     start,
     stop,
-    /** Full sync now (startup, focus, timer, online). */
-    syncNow: syncNowFull,
-    /** Push-only 3 s after a local edit. */
-    schedulePushSoon,
+    /** Refresh the cache now (startup, focus, timer, online, manual). */
+    refreshNow,
     /** Test seam: backoff state. */
     _debug: () => ({ failures, backoffUntil, running }),
   };
