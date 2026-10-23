@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppearanceSettings } from "@/components/AppearanceSettings";
+import { SyncStatusCard } from "@/components/SyncStatusCard";
 import { PageHeader } from "@/components/PageHeader";
 import { SetupChecklist } from "@/components/SetupChecklist";
 import {
@@ -870,6 +871,7 @@ export function SettingsPage() {
                 )}
               </CardContent>
             </Card>
+            <SyncStatusCard />
           </TabsContent>
 
           <TabsContent value="api" className="mt-0 space-y-4">
