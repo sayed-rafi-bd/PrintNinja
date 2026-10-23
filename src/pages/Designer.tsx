@@ -64,7 +64,6 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { PanelLeftClose, QrCode } from "lucide-react";
-import type { TemplateRow, TemplateVersionRow } from "@/lib/agent/types";
 import { toast } from "sonner";
 import CodeMirror from "@uiw/react-codemirror";
 import { json } from "@codemirror/lang-json";
@@ -80,18 +79,21 @@ import {
   DEFAULT_MOCK_DATA,
   STARTER_TEMPLATES,
 } from "@/lib/templates/defaultTemplate";
-import { compiledFields } from "@/lib/templates/compileTemplateCss";
 import { useCompiledCss } from "@/lib/templates/useCompiledCss";
 import { formatCss, formatHtml } from "@/lib/utils/format";
 import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
 import * as share from "@/lib/share/client";
-import { notifyLocalEdit, syncNow } from "@/lib/sync/useSyncStatus";
+import { cacheNow } from "@/lib/sync/useSyncStatus";
+import { useShareStatus } from "@/lib/shell/useShareStatus";
+import { getLocalTemplate, isReadOnly } from "@/lib/share/sync";
 import {
-  getLocalTemplate,
-  isReadOnly,
-  saveToServer,
-  type SaveOptions,
-} from "@/lib/share/sync";
+  createTemplateOnServer,
+  saveTemplateToServer,
+  overwriteWithMine,
+  takeServerCopy,
+  TemplateConflictError,
+  type TemplateContent,
+} from "@/lib/share/save";
 
 const PAGE_PRESETS = [
   { label: "A4", width: 210, height: 297 },
@@ -172,11 +174,18 @@ export function DesignerPage() {
   const [readmeSaving, setReadmeSaving] = useState(false);
   const [remoteId, setRemoteId] = useState<string | null>(null);
   const [publishedAt, setPublishedAt] = useState<string | null>(null);
-  const [templateUpdatedAt, setTemplateUpdatedAt] = useState<string | null>(
-    null,
-  );
   const [origin, setOrigin] = useState<"own" | "saved">("own");
   const [pending, setPending] = useState<SyncAction | null>(null);
+  // A save the server refused because its copy moved since this PC last
+  // synced it. The dialog resolves it: take the server copy, or overwrite.
+  const [conflict, setConflict] = useState<{
+    rowId: number;
+    serverId: string;
+  } | null>(null);
+  // Offline the cache is view/print only: the server owns the copies, so
+  // Save (and creating) has nowhere to go and stays disabled.
+  const shareStatus = useShareStatus();
+  const offline = shareStatus.state !== "online";
   const [debouncedHtml, setDebouncedHtml] = useState(htmlCode);
   const [debouncedCss, setDebouncedCss] = useState(cssCode);
   useEffect(() => {
@@ -307,7 +316,6 @@ export function DesignerPage() {
       setReadme(tpl.readme);
       setRemoteId(tpl.server_id ?? tpl.remote_id ?? null);
       setPublishedAt(tpl.published_at ?? null);
-      setTemplateUpdatedAt(tpl.updated_at ?? null);
       setOrigin((tpl.origin ?? "own") === "saved" ? "saved" : "own");
     } else {
       (async () => {
@@ -316,13 +324,11 @@ export function DesignerPage() {
           setReadme(full.readme ?? "");
           setRemoteId(full.server_id ?? full.remote_id ?? null);
           setPublishedAt(full.published_at ?? null);
-          setTemplateUpdatedAt(full.updated_at ?? null);
           setOrigin(full.origin === "saved" ? "saved" : "own");
         } catch {
           setReadme("");
           setRemoteId(null);
           setPublishedAt(null);
-          setTemplateUpdatedAt(null);
           setOrigin("own");
         }
       })();
@@ -354,99 +360,99 @@ export function DesignerPage() {
   };
 
   /**
-   * Write the editor into the local cache (a new version plus the
-   * metadata) and tell the engine to push. Saving is local-first: the
-   * server copy arrives through the next sync, not through a direct PUT.
+   * Save is the one way content reaches the server: a manual, blocking
+   * push of the editor's state. Success records the copy the server
+   * accepted; a revision conflict asks the user which copy wins; a
+   * failed save leaves nothing behind to rot (the edit stays in the
+   * editor, and the row keeps its old synced content).
    */
-  const saveLocal = async (): Promise<TemplateRow | null> => {
+  const buildContent = async (publish?: boolean): Promise<TemplateContent> => {
+    const row = await getLocalTemplate(currentTemplateDbId!);
+    return {
+      name: templateName,
+      summary: row.summary ?? "",
+      page_w_mm: pageWidth,
+      page_h_mm: pageHeight,
+      html: htmlCode,
+      css: cssCode,
+      readme,
+      ...(publish === undefined ? {} : { publish }),
+    };
+  };
+
+  const handleSave = async () => {
     if (!currentTemplateDbId) {
       toast.error("No template selected");
-      return null;
+      return;
+    }
+    if (offline) {
+      toast.error("Offline — connect to save this template to the server");
+      return;
     }
     setPending("save");
     try {
       const row = await getLocalTemplate(currentTemplateDbId);
       if (isReadOnly(row)) {
         toast.error("A saved copy from Community can’t be changed");
-        return null;
+        return;
       }
-      // The editor holds the copy this PC would print. Put its content and its
-      // metadata into the local row first, so Print and this PC read the same copy.
-      await agent("create_version", {
-        req: {
-          template_id: currentTemplateDbId,
-          html: htmlCode,
-          css: cssCode,
-          ...(await compiledFields(htmlCode)),
-          label: null,
-          note: null,
-          created_by: "manual",
-        },
-      });
-      const updated = await agent("update_template_meta", {
-        req: {
-          id: currentTemplateDbId,
-          name: templateName,
-          page_w_mm: pageWidth,
-          page_h_mm: pageHeight,
-          summary: row.summary ?? "",
-        },
-      });
-      setRemoteId(
-        (updated as { server_id?: string | null }).server_id ??
-          row.server_id ??
-          null,
+      const content = await buildContent();
+      const result = await saveTemplateToServer(row, content);
+      setRemoteId(result.remoteId);
+      setPublishedAt(result.published ? result.updatedAt : null);
+      toast.success(
+        result.published
+          ? "Saved — the published copy is updated"
+          : "Saved to the server",
       );
-      notifyLocalEdit();
-      return {
-        ...row,
-        name: templateName,
-        page_w_mm: pageWidth,
-        page_h_mm: pageHeight,
-      };
+    } catch (e) {
+      if (e instanceof TemplateConflictError) {
+        setConflict({ rowId: currentTemplateDbId, serverId: e.serverId });
+        return;
+      }
+      toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setPending(null);
     }
   };
 
-  const handleSave = async () => {
-    try {
-      const saved = await saveLocal();
-      if (saved) toast.success("Saved on this PC");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const runPublish = async (options: SaveOptions, done: string) => {
+  /**
+   * Publish is a one-time switch to public: it saves and makes the copy
+   * visible. After that, Save alone keeps the published copy current —
+   * the server never clears published_at on an update.
+   */
+  const handlePublish = async () => {
     if (!currentTemplateDbId) {
       toast.error("No template selected");
       return;
     }
+    if (offline) {
+      toast.error("Offline — connect to publish to the server");
+      return;
+    }
     setPending("publish");
     try {
-      const saved = await saveLocal();
-      if (!saved) return;
-      setPending("publish");
-      const result = await saveToServer(saved, options);
+      const row = await getLocalTemplate(currentTemplateDbId);
+      const content = await buildContent(true);
+      const result = await saveTemplateToServer(row, content);
       setRemoteId(result.remoteId);
       setPublishedAt(result.published ? result.updatedAt : null);
-      setTemplateUpdatedAt(result.updatedAt);
-      toast.success(done);
+      toast.success("Published to Community");
     } catch (e) {
+      if (e instanceof TemplateConflictError) {
+        setConflict({ rowId: currentTemplateDbId, serverId: e.serverId });
+        return;
+      }
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setPending(null);
     }
   };
 
-  const handlePublish = () =>
-    runPublish({ publish: true }, "Published to Community");
-
-  const handleSyncNow = async () => {
+  const handleCacheNow = async () => {
     setPending("sync");
     try {
-      await syncNow();
+      await cacheNow();
     } finally {
       setPending(null);
     }
@@ -454,14 +460,65 @@ export function DesignerPage() {
 
   const handleUnpublish = async () => {
     if (!currentTemplateDbId || !remoteId) return;
+    if (offline) {
+      toast.error("Offline — connect to unpublish on the server");
+      return;
+    }
     setPending("unpublish");
     try {
-      await share.unpublishTemplate(remoteId);
-      await agent("clear_publish_info", { req: { id: currentTemplateDbId } });
-      setRemoteId(null);
-      setPublishedAt(null);
-      toast.success("Unpublished");
+      // Unpublish makes the copy private; it stays on the server and on
+      // this PC, so Save keeps working and can publish it again later.
+      const remote = await share.unpublishRemoteTemplate(remoteId);
+      setPublishedAt(remote.published_at ?? null);
+      toast.success("Unpublished — the copy stays on the server");
     } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPending(null);
+    }
+  };
+
+  /** Resolve a save conflict by taking the server's copy into the editor. */
+  const resolveTakeServer = async () => {
+    if (!conflict) return;
+    const row = await getLocalTemplate(conflict.rowId);
+    setPending("save");
+    try {
+      const taken = await takeServerCopy(row);
+      setHtmlCode(formatHtml(taken.html));
+      setCssCode(formatCss(taken.css));
+      setTemplateName(taken.name);
+      setPageWidth(taken.page_w_mm);
+      setPageHeight(taken.page_h_mm);
+      setReadme(taken.readme);
+      setRemoteId(conflict.serverId);
+      setPublishedAt(taken.updatedAt);
+      setConflict(null);
+      toast.success("Loaded the server copy");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPending(null);
+    }
+  };
+
+  /** Resolve a save conflict by overwriting the server with this copy. */
+  const resolveOverwrite = async () => {
+    if (!conflict) return;
+    setPending("save");
+    try {
+      const row = await getLocalTemplate(conflict.rowId);
+      const content = await buildContent();
+      const result = await overwriteWithMine(row, content);
+      setRemoteId(result.remoteId);
+      setPublishedAt(result.published ? result.updatedAt : null);
+      setConflict(null);
+      toast.success("Overwrote the server copy");
+    } catch (e) {
+      if (e instanceof TemplateConflictError) {
+        toast.error("The server copy moved again — reload and try once more");
+        return;
+      }
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setPending(null);
@@ -515,17 +572,20 @@ export function DesignerPage() {
       toast.error("Template already exists");
       return;
     }
+    // Server-first: the server owns the copies, so a new template starts
+    // there and is cached locally synced. Offline there is no creation.
+    if (offline) {
+      toast.error("Offline — connect to create a template on the server");
+      return;
+    }
     try {
-      const created = await agent("create_template", {
-        req: {
-          name,
-          page_w_mm: STARTER_TEMPLATES[0].page_w_mm,
-          page_h_mm: STARTER_TEMPLATES[0].page_h_mm,
-          orientation: STARTER_TEMPLATES[0].orientation,
-          html: DEFAULT_TEMPLATE_HTML,
-          css: DEFAULT_TEMPLATE_CSS,
-          ...(await compiledFields(DEFAULT_TEMPLATE_HTML)),
-        },
+      const created = await createTemplateOnServer({
+        name,
+        page_w_mm: STARTER_TEMPLATES[0].page_w_mm,
+        page_h_mm: STARTER_TEMPLATES[0].page_h_mm,
+        orientation: STARTER_TEMPLATES[0].orientation,
+        html: DEFAULT_TEMPLATE_HTML,
+        css: DEFAULT_TEMPLATE_CSS,
       });
       const tpl = {
         id: created.id,
@@ -541,8 +601,7 @@ export function DesignerPage() {
       loadTemplate(tpl);
       setVersions([]);
       setCurrentTemplateDbId(tpl.id);
-      notifyLocalEdit();
-      toast.success(`Template "${name}" created`);
+      toast.success(`Template "${name}" created on the server`);
     } catch {
       // Web mode / DB unavailable — keep in-memory fallback so UI stays usable.
       const id = templates.length
@@ -648,13 +707,11 @@ export function DesignerPage() {
             setReadme(full.readme ?? "");
             setRemoteId(full.server_id ?? full.remote_id ?? null);
             setPublishedAt(full.published_at ?? null);
-            setTemplateUpdatedAt(full.updated_at ?? null);
             setOrigin(full.origin === "saved" ? "saved" : "own");
           } catch {
             setReadme("");
             setRemoteId(null);
             setPublishedAt(null);
-            setTemplateUpdatedAt(null);
           }
         } else {
           const starters = STARTER_TEMPLATES.map((t, i) => ({
@@ -711,75 +768,45 @@ export function DesignerPage() {
    * row is written first so the panel updates at once, offline or not.
    */
   const handleSaveVersion = async () => {
+    if (!currentTemplateDbId) {
+      toast.error("No template selected");
+      return;
+    }
+    if (offline) {
+      toast.error("Offline — connect to save a version to the server");
+      return;
+    }
     try {
-      const version = await agent("create_version", {
-        req: {
-          template_id: currentTemplateDbId,
-          html: htmlCode,
-          css: cssCode,
-          ...(await compiledFields(htmlCode)),
-          label: versionLabel || null,
-          note: versionNote || null,
-          created_by: "manual",
-        },
-      });
-      setShowVersionDialog(false);
-      setVersionLabel("");
-      setVersionNote("");
-      if (remoteId) {
-        try {
-          const row = await getLocalTemplate(currentTemplateDbId);
-          const saved = await saveToServer(
-            {
-              ...row,
-              name: templateName,
-              page_w_mm: pageWidth,
-              page_h_mm: pageHeight,
-            },
-            { version: { label: version.label, note: version.note } },
-          );
-          setRemoteId(saved.remoteId);
-          setPublishedAt(saved.published ? saved.updatedAt : null);
-          setTemplateUpdatedAt(saved.updatedAt);
-        } catch (e) {
-          toast.error(e instanceof Error ? e.message : String(e));
-        }
-      } else {
-        notifyLocalEdit();
+      // A labelled save is still one manual push: the editor's content
+      // goes to the server with the label, and the accepted copy lands
+      // in the cache carrying that label.
+      const row = await getLocalTemplate(currentTemplateDbId);
+      if (isReadOnly(row)) {
+        toast.error("A saved copy from Community can’t be changed");
+        return;
       }
-      await refreshVersions();
-      toast.success(`Version ${version.version_no} saved`);
-    } catch (e) {
-      // Web mode / no backend: keep a local snapshot so the UI stays usable.
-      const local: TemplateVersionRow = {
-        id: Date.now(),
-        template_id: currentTemplateDbId,
-        version_no: versions.length + 1,
-        html: htmlCode,
-        css: cssCode,
-        label: versionLabel || null,
-        note: versionNote || null,
-        created_at: new Date().toISOString(),
-        created_by: "manual",
-      };
-      setVersions((prev) => [
-        {
-          key: `local-${local.id}`,
-          versionNo: local.version_no,
-          label: local.label,
-          note: local.note,
-          createdAt: local.created_at,
-          createdBy: local.created_by,
-          html: local.html,
-          css: local.css,
-          localId: local.id,
-        },
-        ...prev,
-      ]);
+      const content = await buildContent();
+      const result = await saveTemplateToServer(row, {
+        ...content,
+        version: { label: versionLabel || null, note: versionNote || null },
+      });
+      setRemoteId(result.remoteId);
+      setPublishedAt(result.published ? result.updatedAt : null);
       setShowVersionDialog(false);
       setVersionLabel("");
       setVersionNote("");
-      toast.success(`Version ${local.version_no} saved locally`);
+      await refreshVersions();
+      toast.success(
+        result.published
+          ? "Version saved — the published copy is updated"
+          : "Version saved to the server",
+      );
+    } catch (e) {
+      if (e instanceof TemplateConflictError) {
+        setConflict({ rowId: currentTemplateDbId, serverId: e.serverId });
+        return;
+      }
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -871,7 +898,6 @@ export function DesignerPage() {
         await refreshVersions();
         setHtmlCode(formatHtml(restored.body ?? ""));
         setCssCode(formatCss(restored.css ?? ""));
-        setTemplateUpdatedAt(restored.updated_at);
         toast.success(
           `Restored v${version.versionNo} as v${restored.revision}`,
         );
@@ -997,8 +1023,8 @@ export function DesignerPage() {
       await agent("update_readme", {
         req: { id: currentTemplateDbId, readme },
       });
-      notifyLocalEdit();
-      toast.success("README saved");
+      // The README rides along with the next Save; nothing to send here.
+      toast.success("README saved locally — Save sends it to the server");
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -1032,7 +1058,6 @@ export function DesignerPage() {
             const row = datasets.find((d) => d.name === ds.name);
             if (row?.id != null) {
               await agent("delete_dataset", { id: row.id });
-              notifyLocalEdit();
             }
             await loadDatasets();
             if (selectedDatasetName === ds.name) {
@@ -1123,6 +1148,10 @@ export function DesignerPage() {
           onSave={() => void handleSave()}
           onImportFile={handleImportFile}
           onExport={handleExport}
+          saveDisabled={offline || isReadOnly({ origin })}
+          saveTitle={
+            offline ? "Offline — connect to save to the server" : undefined
+          }
         />
       </PageHeader>
 
@@ -1130,12 +1159,11 @@ export function DesignerPage() {
         templateName={templateName}
         remoteId={remoteId}
         publishedAt={publishedAt}
-        templateUpdatedAt={templateUpdatedAt}
         readOnly={isReadOnly({ origin })}
         pending={pending}
         onPublish={() => void handlePublish()}
         onUnpublish={handleUnpublish}
-        onSyncNow={() => void handleSyncNow()}
+        onCacheNow={() => void handleCacheNow()}
       />
 
       {isDesktop ? (
@@ -1541,7 +1569,6 @@ export function DesignerPage() {
                       req: { name: datasetName, data_json: datasetJson },
                     });
                     await loadDatasets();
-                    notifyLocalEdit();
                     setShowDatasetDialog(false);
                     toast.success(`Dataset "${datasetName}" added`);
                   } catch (e) {
@@ -1608,7 +1635,6 @@ export function DesignerPage() {
                       },
                     });
                     await loadDatasets();
-                    notifyLocalEdit();
                     setShowEditDataset(false);
                     toast.success("Dataset updated");
                   } catch (e) {
@@ -1650,6 +1676,44 @@ export function DesignerPage() {
               Cancel
             </Button>
             <Button onClick={createNewTemplate}>Create</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Save conflict: the server copy moved since this PC last synced
+          it. Two ways out, both explicit — nothing is chosen for the
+          user, and nothing is queued to resolve later. */}
+      <Dialog
+        open={conflict !== null}
+        onOpenChange={(open) => {
+          if (!open) setConflict(null);
+        }}
+      >
+        <DialogContent data-testid="save-conflict-dialog">
+          <DialogHeader>
+            <DialogTitle>This template changed on the server</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Someone else saved it after the copy on this computer was made. Take
+            the server copy and lose your unsaved edits here, or overwrite the
+            server with what’s in the editor.
+          </p>
+          <DialogFooter className="flex-col gap-2 sm:flex-col">
+            <Button
+              data-testid="save-conflict-overwrite"
+              onClick={() => void resolveOverwrite()}
+              disabled={pending !== null}
+            >
+              {pending === "save" ? "Overwriting…" : "Overwrite with mine"}
+            </Button>
+            <Button
+              data-testid="save-conflict-take-server"
+              variant="outline"
+              onClick={() => void resolveTakeServer()}
+              disabled={pending !== null}
+            >
+              {pending === "save" ? "Loading…" : "Take server copy"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

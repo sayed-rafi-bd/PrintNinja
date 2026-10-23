@@ -8,16 +8,21 @@ interface Props {
   onSave: () => void;
   onImportFile: (file: File) => void | Promise<void>;
   onExport: () => void;
+  /** Offline: the server owns the copies, so there is nowhere to save. */
+  saveDisabled?: boolean;
+  saveTitle?: string;
 }
 
-/** New, Save, Import, and Export for the template being edited. Save
- * writes a version locally and the engine pushes it; nothing here
- * talks to the server directly. */
+/** New, Save, Import, and Export for the template being edited. Save is
+ * the one manual push to the server; offline it is disabled because
+ * viewing and printing are all the cache can do. */
 export function DesignerToolbar({
   onNew,
   onSave,
   onImportFile,
   onExport,
+  saveDisabled = false,
+  saveTitle,
 }: Props) {
   const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -31,6 +36,8 @@ export function DesignerToolbar({
         variant="outline"
         size="sm"
         onClick={onSave}
+        disabled={saveDisabled}
+        title={saveTitle}
         data-testid="designer-save"
       >
         <Save className="h-4 w-4" aria-hidden="true" />

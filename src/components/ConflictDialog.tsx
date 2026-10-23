@@ -10,7 +10,6 @@ import {
 } from "@/components/ui/dialog";
 import { agent } from "@/lib/agent/commands";
 import * as share from "@/lib/share/client";
-import { notifyLocalEdit } from "@/lib/sync/useSyncStatus";
 
 export interface ConflictedRow {
   id: number;
@@ -19,10 +18,12 @@ export interface ConflictedRow {
 }
 
 /**
- * The three-way conflict dialog (REFACTORING.md section 6): another PC
- * pushed first and the server refused this PC's push with 409.
- * - Keep mine: local content goes back to dirty; the next push retries
- *   against the server's revision (which stays in version history).
+ * Resolve a row left in the conflict state (for example by the old
+ * background engine): another PC changed it on the server and this PC's
+ * push was refused with 409.
+ * - Keep mine: the local content becomes a draft again; the next Save
+ *   sends it against the server's current revision (which stays in
+ *   version history).
  * - Take server: the local edits are discarded for the server copy.
  * - Keep both: the local content becomes a new template, then the
  *   original takes the server copy.
@@ -62,7 +63,7 @@ export function ConflictDialog({
   const keepMine = () =>
     run("mine", async () => {
       if (!serverId) throw new Error("This template was never on the server");
-      // Rebase onto the server's current revision so the next push
+      // Rebase onto the server's current revision so the next Save
       // overwrites cleanly; the other PC's edit stays in version history.
       const remote = await share.fetchRemoteTemplate(serverId);
       await agent("cache_resolve_conflict", {
@@ -70,7 +71,6 @@ export function ConflictDialog({
         resolution: "mine",
         rebase_to: remote.revision,
       });
-      notifyLocalEdit();
     });
 
   const takeServer = () =>
@@ -117,7 +117,6 @@ export function ConflictDialog({
           summary: local.summary,
         },
       });
-      notifyLocalEdit();
       const remote = await share.fetchRemoteTemplate(serverId);
       await agent("cache_resolve_conflict", {
         server_id: serverId,

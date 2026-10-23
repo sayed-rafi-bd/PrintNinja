@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowUpFromLine } from "lucide-react";
+import { ArrowDownToLine } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -8,41 +8,34 @@ interface Props {
   templateName: string;
   remoteId: string | null;
   publishedAt: string | null;
-  templateUpdatedAt: string | null;
   /** Saved (community) copies are read-only: actions are hidden. */
   readOnly?: boolean;
   /** The action running right now, so only its button says so. */
   pending: "save" | "publish" | "unpublish" | "sync" | null;
   onPublish: () => void;
   onUnpublish: () => void | Promise<void>;
-  onSyncNow: () => void;
+  onCacheNow: () => void;
 }
 
 /**
- * Where the local copy stands with the server: the state, and the three
- * actions that move it — Publish, Unpublish and Sync now. Saving happens
- * locally (the Save button writes a version) and the engine pushes
- * dirty rows in the background, so there is no Save-to-server or
- * Refresh here.
+ * Where the local copy stands with the server. Saving happens in the
+ * Designer toolbar (a manual, blocking push); this bar holds the
+ * one-time Publish/Unpublish switch and a cache refresh. Nothing here
+ * sends automatically.
  */
 export function TemplateSyncBar({
   templateName,
   remoteId,
   publishedAt,
-  templateUpdatedAt,
   readOnly = false,
   pending,
   onPublish,
   onUnpublish,
-  onSyncNow,
+  onCacheNow,
 }: Props) {
   const [unpublishOpen, setUnpublishOpen] = useState(false);
   const busy = pending != null;
   const published = !!remoteId && !!publishedAt;
-  const changedLocally =
-    published &&
-    !!templateUpdatedAt &&
-    new Date(templateUpdatedAt) > new Date(publishedAt);
 
   const state = readOnly ? (
     <StatusBadge status="saved" label="Read-only copy" />
@@ -97,11 +90,11 @@ export function TemplateSyncBar({
               data-testid="template-sync-now"
               variant="outline"
               size="sm"
-              onClick={onSyncNow}
+              onClick={onCacheNow}
               disabled={busy}
             >
-              <ArrowUpFromLine className="h-4 w-4" aria-hidden="true" />
-              {pending === "sync" ? "Syncing…" : "Sync now"}
+              <ArrowDownToLine className="h-4 w-4" aria-hidden="true" />
+              {pending === "sync" ? "Refreshing…" : "Refresh cache"}
             </Button>
           </div>
         )}
@@ -113,20 +106,15 @@ export function TemplateSyncBar({
           change it.
         </p>
       )}
-      {!readOnly && changedLocally && publishedAt && (
-        <p
-          role="status"
-          className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning"
-        >
-          These changes are not on the server yet. Other people still see the
-          version from {new Date(publishedAt).toLocaleDateString()}. They send
-          automatically.
-        </p>
-      )}
       {!readOnly && remoteId && !published && (
         <p role="status" className="text-xs text-muted-foreground">
           Saved on the server as a private copy. Publish to show it in
           Community.
+        </p>
+      )}
+      {!readOnly && published && (
+        <p role="status" className="text-xs text-muted-foreground">
+          Published — Save updates the live copy, no need to publish again.
         </p>
       )}
 
