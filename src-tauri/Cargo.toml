@@ -54,6 +54,12 @@ futures-util = { version = "0.3", default-features = false, features = ["std", "
 # it but the call site lives behind the Windows cfg.
 png = "0.17"
 
+[dev-dependencies]
+# Exposes `tauri::test` (mock app + IPC dispatch) for the Start-Server
+# regression test. The `test` feature is empty — it only gates the test
+# helpers, no runtime behavior changes.
+tauri = { version = "2", features = ["test"] }
+
 [features]
 # Optional hardware backends gated in the Windows transports — declared so
 # `cfg(feature = ...)` is a known cfg (check-cfg); neither crate is bundled.

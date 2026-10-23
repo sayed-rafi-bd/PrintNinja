@@ -74,3 +74,32 @@ fn status_reports_settings_and_the_running_flag() {
     assert!(live.lan_access);
     assert!(live.running);
 }
+
+/// Regression test for the Start-Server crash: `start_api_server` used to
+/// be a *synchronous* Tauri command while `bind_addr` needs a Tokio
+/// reactor (`TcpListener::from_std`), so clicking Start Server panicked
+/// with "there is no reactor running" — and on Windows the panic fired
+/// inside a WebView2 COM callback, aborting the whole app.
+///
+/// Tauri runs `async` commands on the Tokio runtime, which is exactly
+/// what the bind needs. Referencing the command through this bound fails
+/// compilation the moment someone makes it synchronous again.
+#[test]
+fn start_api_server_runs_on_the_tokio_reactor() {
+    // Referencing the command through this bound fails compilation the
+    // moment someone makes it synchronous again (a sync command has no
+    // reactor, and `bind_addr` panics with "there is no reactor running").
+    fn require_async<F, Fut>(_: F)
+    where
+        F: FnOnce(
+            tauri::AppHandle,
+            tauri::State<'static, printninja_lib::db::DbState>,
+            tauri::State<'static, printninja_lib::queue::PrintQueue>,
+            Option<u16>,
+            Option<bool>,
+        ) -> Fut,
+        Fut: std::future::Future<Output = printninja_lib::AppResult<String>>,
+    {
+    }
+    require_async(printninja_lib::commands::api::start_api_server);
+}
