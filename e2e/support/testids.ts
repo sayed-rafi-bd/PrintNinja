@@ -77,4 +77,16 @@ export const testids = {
   settingsChangePasswordNew: "settings-change-password-new",
   settingsChangePasswordConfirm: "settings-change-password-confirm",
   settingsChangePasswordSubmit: "settings-change-password-submit",
+  /** API Explorer: live-spec version badge. */
+  apiExplorerSpecVersion: "api-explorer-spec-version",
+  /** API Explorer: job-id field for per-job endpoints. */
+  apiExplorerJobId: "api-explorer-job-id",
+  /** API Explorer: JSON body field for POST /v1/print. */
+  apiExplorerBody: "api-explorer-body",
+  /** API Explorer: optional Idempotency-Key field. */
+  apiExplorerIdempotency: "api-explorer-idempotency",
+  /** API Explorer: send the built request. */
+  apiExplorerSend: "api-explorer-send",
+  /** API Explorer: pretty-printed response. */
+  apiExplorerResponse: "api-explorer-response",
 } as const;

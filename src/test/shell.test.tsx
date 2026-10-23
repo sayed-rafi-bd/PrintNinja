@@ -60,6 +60,7 @@ describe("navigation model", () => {
     expect(NAV_GROUPS[1].items.map((i) => i.path)).toEqual(["/", "/templates"]);
     expect(NAV_GROUPS[2].items.map((i) => i.path)).toEqual([
       "/printers",
+      "/api-explorer",
       "/settings",
     ]);
   });

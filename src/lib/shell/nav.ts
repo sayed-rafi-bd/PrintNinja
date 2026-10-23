@@ -1,4 +1,5 @@
 import {
+  FlaskConical,
   History,
   Library,
   PencilRuler,
@@ -59,6 +60,12 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: Printer,
         labelKey: "nav.printers",
         shortcut: "r",
+      },
+      {
+        path: "/api-explorer",
+        icon: FlaskConical,
+        labelKey: "nav.api_explorer",
+        shortcut: "e",
       },
       {
         path: "/settings",

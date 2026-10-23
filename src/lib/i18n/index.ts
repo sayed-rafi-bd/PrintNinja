@@ -41,6 +41,7 @@ const resources = {
         history: "History",
         settings: "Settings",
         templates: "Templates",
+        api_explorer: "API Explorer",
         group_work: "Work",
         group_build: "Build",
         group_admin: "Admin",
@@ -220,6 +221,7 @@ const resources = {
         print: "Send a template to a printer.",
         printers: "Connect and test printers.",
         history: "Review, reprint, and export print jobs.",
+        api_explorer: "Browse and try the local REST API.",
         settings: "Configure the app, sharing, and automation.",
       },
       settings_page: {

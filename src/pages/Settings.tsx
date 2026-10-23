@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, Link } from "react-router-dom";
 import { AppearanceSettings } from "@/components/AppearanceSettings";
 import { SyncStatusCard } from "@/components/SyncStatusCard";
 import { PageHeader } from "@/components/PageHeader";
@@ -913,6 +913,10 @@ export function SettingsPage() {
   -H "Content-Type: application/json" \\
   -d '{"template":"Receipt","printer":"Front Desk","data":{"order":1042}}'`}</pre>
                 </div>
+
+                <Button variant="outline" asChild>
+                  <Link to="/api-explorer">Open API Explorer</Link>
+                </Button>
               </CardContent>
             </Card>
 

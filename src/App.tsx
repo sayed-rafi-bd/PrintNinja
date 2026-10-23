@@ -8,6 +8,7 @@ import { DesignerPage } from "./pages/Designer";
 import { PrintPage } from "./pages/Print";
 import { PrinterSetupPage } from "./pages/PrinterSetup";
 import { HistoryPage } from "./pages/History";
+import { ApiExplorerPage } from "./pages/ApiExplorer";
 import { SettingsPage } from "./pages/Settings";
 import { TemplatesPage } from "./pages/Templates";
 import { diagnostics } from "./lib/diagnostics";
@@ -167,6 +168,7 @@ function AppContent() {
           <Route path="/print" element={<PrintPage />} />
           <Route path="/printers" element={<PrinterSetupPage />} />
           <Route path="/history" element={<HistoryPage />} />
+          <Route path="/api-explorer" element={<ApiExplorerPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           {UiKitPage && (
             <Route
