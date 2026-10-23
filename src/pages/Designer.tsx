@@ -395,20 +395,51 @@ export function DesignerPage() {
 
   /**
    * Publish is visibility-only: the switch calls publish/unpublish
-   * immediately and updates the badge. Content still goes through Save.
+   * immediately and updates the badge. Content still goes through Save,
+   * except a never-pushed row is saved first so the server has a copy
+   * to show or hide.
    */
   const handleVisibilityChange = async (makePublic: boolean) => {
-    if (!currentTemplateDbId || !remoteId || offline) return;
+    if (!currentTemplateDbId || offline) return;
+    const row = await getLocalTemplate(currentTemplateDbId);
+    if (isReadOnly(row)) return;
+    const serverId = row.server_id ?? row.remote_id;
+    if (!serverId) return;
     setPending("visibility");
     try {
+      let id = serverId;
+      if (row.base_revision == null) {
+        const content = await buildContent();
+        const saved = await saveTemplateToServer(row, content);
+        id = saved.remoteId;
+        setRemoteId(saved.remoteId);
+        setPublishedAt(saved.published ? saved.updatedAt : null);
+        setTemplates((prev) =>
+          prev.map((t) =>
+            t.id === currentTemplateDbId
+              ? {
+                  ...t,
+                  name: content.name,
+                  html: content.html,
+                  css: content.css,
+                  page_w_mm: content.page_w_mm,
+                  page_h_mm: content.page_h_mm,
+                  orientation:
+                    content.page_w_mm > content.page_h_mm
+                      ? "landscape"
+                      : "portrait",
+                }
+              : t,
+          ),
+        );
+      }
       if (makePublic) {
-        const remote = await share.publishRemoteTemplate(remoteId);
+        const remote = await share.publishRemoteTemplate(id);
         setPublishedAt(remote.published_at ?? remote.updated_at ?? null);
         toast.success("Template is now public");
       } else {
-        const remote = await share.unpublishRemoteTemplate(remoteId);
+        await share.unpublishRemoteTemplate(id);
         setPublishedAt(null);
-        void remote;
         toast.success("Template is now private");
       }
       window.dispatchEvent(new Event("sync:pulled"));
