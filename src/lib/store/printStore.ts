@@ -20,7 +20,7 @@ export interface Batch {
   total: number;
   done: number;
   failed: number;
-  mode: "single_job" | "per_record";
+  mode: "per_record";
   status: "queued" | "printing" | "success" | "failed" | "cancelled";
 }
 
@@ -43,7 +43,6 @@ interface PrintState {
   error: string;
   durationMs: number;
   timings: StageTimings | null;
-  batchMode2: "single_job" | "per_record";
 
   setPrinterId: (v: string) => void;
   setTemplateId: (v: string) => void;
@@ -65,7 +64,6 @@ interface PrintState {
   setError: (v: string) => void;
   setDurationMs: (v: number) => void;
   setTimings: (v: StageTimings | null) => void;
-  setBatchMode2: (v: "single_job" | "per_record") => void;
 }
 
 export const usePrintStore = create<PrintState>((set) => ({
@@ -87,7 +85,6 @@ export const usePrintStore = create<PrintState>((set) => ({
   error: "",
   durationMs: 0,
   timings: null,
-  batchMode2: "per_record",
 
   setPrinterId: (printerId) => set({ printerId }),
   setTemplateId: (templateId) => set({ templateId }),
@@ -108,5 +105,4 @@ export const usePrintStore = create<PrintState>((set) => ({
   setError: (error) => set({ error }),
   setDurationMs: (durationMs) => set({ durationMs }),
   setTimings: (timings) => set({ timings }),
-  setBatchMode2: (batchMode2) => set({ batchMode2 }),
 }));

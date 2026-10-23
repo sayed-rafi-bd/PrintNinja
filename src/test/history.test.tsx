@@ -22,7 +22,6 @@ const job = (over: Partial<HistoryJob>): HistoryJob => ({
   batch_id: null,
   record_index: null,
   template_id: 3,
-  template_version_id: 1,
   printer_id: 1,
   source: "ui",
   source_url: null,

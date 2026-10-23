@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ChevronRight, CircleHelp, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -13,8 +13,7 @@ import type { HistoryJob } from "@/lib/store/historyStore";
 import { NAV_GROUPS, NAV_ITEMS, isActivePath } from "@/lib/shell/nav";
 import { useGlobalShortcuts } from "@/lib/shell/useGlobalShortcuts";
 import { useShareStatus } from "@/lib/shell/useShareStatus";
-import { useSyncStatus } from "@/lib/sync/useSyncStatus";
-import { useAdoption } from "@/lib/sync/useAdoption";
+import { cacheNow, useSyncStatus } from "@/lib/sync/useSyncStatus";
 import { usePrefs } from "@/lib/prefs/PrefsProvider";
 import { agent } from "@/lib/agent/commands";
 import { cn } from "@/lib/utils";
@@ -23,50 +22,8 @@ function ShareIndicator() {
   const { t } = useTranslation();
   const status = useShareStatus();
   const sync = useSyncStatus();
+  const [busy, setBusy] = useState(false);
   if (status.state === "unconfigured") return null;
-  if (status.state === "online") {
-    // One wrapper carries the test id (registry: exactly once in src/);
-    // the badge inside reflects the sync state.
-    let title: string;
-    let badge: ReactNode;
-    let to: string | null = null;
-    if (sync.state === "conflict") {
-      title = t("shell.sync_conflict");
-      badge = <StatusBadge status="conflict" />;
-      to = "/templates";
-    } else if (sync.state === "syncing") {
-      title = t("shell.sync_syncing");
-      badge = <StatusBadge status="syncing" />;
-    } else if (sync.state === "pending" || sync.pending > 0) {
-      title = t("shell.sync_pending", { count: sync.pending });
-      badge = (
-        <StatusBadge
-          status="pending"
-          label={t("shell.sync_pending", { count: sync.pending })}
-        />
-      );
-    } else if (sync.state === "offline") {
-      title = t("shell.share_offline");
-      badge = <StatusBadge status="offline" />;
-      to = "/settings";
-    } else {
-      title = sync.lastPullAt
-        ? t("shell.sync_synced", { time: sync.lastPullAt })
-        : t("shell.share_online", { handle: status.handle });
-      badge = (
-        <StatusBadge
-          status="synced"
-          label={status.handle || t("status.online")}
-        />
-      );
-    }
-    const inner = <span title={title}>{badge}</span>;
-    return (
-      <span data-testid="sync-chip">
-        {to ? <Link to={to}>{inner}</Link> : inner}
-      </span>
-    );
-  }
   if (status.state === "offline") {
     return (
       <Link to="/settings" title={t("shell.share_offline")}>
@@ -74,13 +31,61 @@ function ShareIndicator() {
       </Link>
     );
   }
+  if (status.state !== "online") {
+    return (
+      <Link
+        to="/settings"
+        className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+      >
+        {t("shell.share_signed_out")}
+      </Link>
+    );
+  }
+  // Online: the connection badge always shows, and the cache gets its
+  // own button. Clicking it refreshes the cache from the server (pull
+  // only — saving is a manual action, so there is nothing to push).
+  const syncing = busy || sync.state === "syncing";
+  const detail = sync.lastError
+    ? t("shell.sync_failed", { error: sync.lastError })
+    : sync.drafts > 0
+      ? t("shell.sync_drafts", { count: sync.drafts })
+      : sync.lastPulledAt
+        ? t("shell.sync_synced", { time: sync.lastPulledAt })
+        : t("shell.share_online", { handle: status.handle });
+  const syncBadge = syncing ? (
+    <StatusBadge status="syncing" />
+  ) : (
+    <StatusBadge status="synced" />
+  );
+  const onCacheNow = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await cacheNow();
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <Link
-      to="/settings"
-      className="text-xs text-muted-foreground underline-offset-2 hover:underline"
-    >
-      {t("shell.share_signed_out")}
-    </Link>
+    <span className="inline-flex items-center gap-2">
+      <span title={t("shell.share_online", { handle: status.handle })}>
+        <StatusBadge
+          status="online"
+          label={status.handle || t("status.online")}
+        />
+      </span>
+      <button
+        type="button"
+        data-testid="sync-chip"
+        title={`${t("shell.sync_now")} — ${detail}`}
+        aria-label={`${t("shell.sync_now")}: ${detail}`}
+        onClick={() => void onCacheNow()}
+        disabled={syncing}
+        className="rounded-md hover:opacity-80 disabled:cursor-wait disabled:hover:opacity-100"
+      >
+        {syncBadge}
+      </button>
+    </span>
   );
 }
 
@@ -97,59 +102,6 @@ function OfflineBanner() {
     >
       {t("shell.offline_banner")}
     </p>
-  );
-}
-
-/**
- * First sync on a migrated install (question 18): local-only templates
- * wait for one decision instead of uploading silently. Confirming pushes
- * them private; declining leaves them for the normal schedule.
- */
-function AdoptionDialog() {
-  const { pending, rows, busy, confirm, decline } = useAdoption();
-  const [open, setOpen] = useState(pending);
-  useEffect(() => {
-    if (pending) setOpen(true);
-  }, [pending]);
-  if (!pending) return null;
-  const names = rows.map((r) => r.name);
-  return (
-    <ConfirmDialog
-      open={open}
-      onOpenChange={(o) => {
-        if (!o) {
-          void decline();
-        }
-        setOpen(o);
-      }}
-      title={`Back up ${rows.length === 1 ? "1 template" : `${rows.length} templates`} to the server?`}
-      description={
-        <>
-          <p>
-            These templates live only on this PC. Backing them up stores a
-            private copy on the server.
-          </p>
-          <ul className="mt-2 list-disc pl-5">
-            {names.slice(0, 8).map((n) => (
-              <li key={n}>{n}</li>
-            ))}
-          </ul>
-          {names.length > 8 && <p>…and {names.length - 8} more.</p>}
-        </>
-      }
-      confirmLabel={busy ? "Backing up…" : "Back up"}
-      cancelLabel="Not now"
-      busy={busy}
-      onConfirm={async () => {
-        // On success the hook clears pending and the dialog unmounts;
-        // on failure it stays open with a toast.
-        try {
-          await confirm();
-        } catch (e) {
-          toast.error(e instanceof Error ? e.message : String(e));
-        }
-      }}
-    />
   );
 }
 
@@ -294,7 +246,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </header>
 
       <OfflineBanner />
-      <AdoptionDialog />
 
       <div className="flex min-h-0 flex-1">
         {/* Sidebar: grouped by job */}

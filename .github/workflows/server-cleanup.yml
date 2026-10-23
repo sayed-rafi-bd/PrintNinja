@@ -1,0 +1,39 @@
+name: Server cleanup
+
+# Scheduled maintenance for the serverless deployment, which has no
+# in-process timer (see server/src/server.ts vs server/api/index.ts).
+# Calls GET /v2/internal/cleanup with the shared secret: expired
+# sessions go, tombstones older than the retention window go. Skips
+# quietly when the secrets are not configured (e.g. forks).
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Run scheduled cleanup
+        env:
+          SERVICE_URL: ${{ secrets.SERVICE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$SERVICE_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "SERVICE_URL or CRON_SECRET is not set; skipping."
+            exit 0
+          fi
+          code=$(curl -sS -o /tmp/cleanup.json -w "%{http_code}" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$SERVICE_URL/v2/internal/cleanup")
+          cat /tmp/cleanup.json
+          echo
+          if [ "$code" != "200" ]; then
+            echo "::error::cleanup answered $code"
+            exit 1
+          fi

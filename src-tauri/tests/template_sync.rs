@@ -28,6 +28,10 @@ fn meta(name: &str, w: i64, h: i64, summary: &str) -> UpdateTemplateMetaRequest 
         page_w_mm: w,
         page_h_mm: h,
         summary: Some(summary.into()),
+        html: None,
+        css: None,
+        compiled_css: None,
+        compiled_key: None,
     }
 }
 
@@ -83,15 +87,8 @@ fn update_template_meta_derives_landscape_from_the_page() {
 fn update_template_meta_trims_the_name_and_leaves_content_alone() {
     let conn = seeded_db();
     conn.execute(
-        "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-         VALUES (1, 1, '<p>local</p>', '.local {}', 'manual')",
+        "UPDATE templates SET html = '<p>local</p>', css = '.local {}' WHERE id = 1",
         [],
-    )
-    .unwrap();
-    let version_id = conn.last_insert_rowid();
-    conn.execute(
-        "UPDATE templates SET current_version_id = ?1 WHERE id = 1",
-        [version_id],
     )
     .unwrap();
 
@@ -99,8 +96,7 @@ fn update_template_meta_trims_the_name_and_leaves_content_alone() {
 
     let (html, css, readme): (String, String, String) = conn
         .query_row(
-            "SELECT v.html, v.css, t.readme FROM template_versions v
-             JOIN templates t ON t.current_version_id = v.id WHERE t.id = 1",
+            "SELECT html, css, readme FROM templates WHERE id = 1",
             [],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
@@ -109,6 +105,10 @@ fn update_template_meta_trims_the_name_and_leaves_content_alone() {
         (html.as_str(), css.as_str(), readme.as_str()),
         ("<p>local</p>", ".local {}", "# Invoice")
     );
+    let name: String = conn
+        .query_row("SELECT name FROM templates WHERE id = 1", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(name, "Padded");
 }
 
 #[test]

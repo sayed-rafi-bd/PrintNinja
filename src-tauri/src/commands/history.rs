@@ -11,7 +11,6 @@ pub struct PrintJob {
     pub batch_id: Option<i64>,
     pub record_index: Option<i64>,
     pub template_id: Option<i64>,
-    pub template_version_id: Option<i64>,
     pub printer_id: Option<i64>,
     pub source: String,
     pub source_url: Option<String>,
@@ -187,10 +186,10 @@ pub fn reprint_job_conn(conn: &Connection, id: i64) -> AppResult<PrintJob> {
     // (P3). The fresh row is `queued`; nothing but the worker prints it.
     conn.execute(
         "INSERT INTO print_jobs
-            (batch_id, record_index, template_id, template_version_id, printer_id,
+            (batch_id, record_index, template_id, printer_id,
              source, source_url, status, error, copies, settings_json, rendered_html,
              idempotency_key, is_test, data_json)
-         SELECT NULL, NULL, template_id, template_version_id, printer_id,
+         SELECT NULL, NULL, template_id, printer_id,
                 source, source_url, 'queued', NULL, copies, settings_json, rendered_html,
                 NULL, is_test, data_json
          FROM print_jobs WHERE id = ?1",
@@ -241,7 +240,7 @@ pub fn delete_job_conn(conn: &Connection, id: i64) -> AppResult<()> {
 }
 
 const SELECT_JOB_COLUMNS: &str = "SELECT id, batch_id, record_index, template_id,
-            template_version_id, printer_id, source, source_url, status, error,
+            printer_id, source, source_url, status, error,
             copies, settings_json, rendered_html, idempotency_key, is_test,
             started_at, finished_at, duration_ms, timings_json
      FROM print_jobs";
@@ -252,20 +251,19 @@ fn map_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrintJob> {
         batch_id: row.get(1)?,
         record_index: row.get(2)?,
         template_id: row.get(3)?,
-        template_version_id: row.get(4)?,
-        printer_id: row.get(5)?,
-        source: row.get(6)?,
-        source_url: row.get(7)?,
-        status: row.get(8)?,
-        error: row.get(9)?,
-        copies: row.get(10)?,
-        settings_json: row.get(11)?,
-        rendered_html: row.get(12)?,
-        idempotency_key: row.get(13)?,
-        is_test: row.get(14)?,
-        started_at: row.get(15)?,
-        finished_at: row.get(16)?,
-        duration_ms: row.get(17)?,
-        timings_json: row.get(18)?,
+        printer_id: row.get(4)?,
+        source: row.get(5)?,
+        source_url: row.get(6)?,
+        status: row.get(7)?,
+        error: row.get(8)?,
+        copies: row.get(9)?,
+        settings_json: row.get(10)?,
+        rendered_html: row.get(11)?,
+        idempotency_key: row.get(12)?,
+        is_test: row.get(13)?,
+        started_at: row.get(14)?,
+        finished_at: row.get(15)?,
+        duration_ms: row.get(16)?,
+        timings_json: row.get(17)?,
     })
 }

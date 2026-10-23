@@ -1,5 +1,5 @@
 import {
-  Clock,
+  Blocks,
   FileText,
   PanelLeftOpen,
   Ruler,
@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 /** The accordion section ids, in the order the accordion lists them. */
-export type ControlsSection = "templates" | "page" | "versions" | "helpers";
+export type ControlsSection = "templates" | "page" | "helpers" | "custom";
 
 interface Props {
   /** Open the controls column, with this section open. */
@@ -28,8 +28,8 @@ export function ControlsRail({ onOpenSection, onExpand }: Props) {
   const sections: { id: ControlsSection; label: string; Icon: LucideIcon }[] = [
     { id: "templates", label: "Templates", Icon: FileText },
     { id: "page", label: t("designer.pageSetup"), Icon: Ruler },
-    { id: "versions", label: t("designer.versions"), Icon: Clock },
     { id: "helpers", label: "Helpers", Icon: Wand2 },
+    { id: "custom", label: "Custom input", Icon: Blocks },
   ];
   const button =
     "flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11";

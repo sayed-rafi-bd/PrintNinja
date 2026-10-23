@@ -16,9 +16,8 @@ const client = vi.hoisted(() => {
     putRemoteTemplate: vi.fn(),
     publishRemoteTemplate: vi.fn(),
     unpublishRemoteTemplate: vi.fn(),
+    unpublishTemplate: vi.fn(),
     fetchRemoteTemplate: vi.fn(),
-    fetchMyRemoteTemplates: vi.fn(),
-    fetchSavedRemoteTemplates: vi.fn(),
     RemoteTemplateNotFoundError: NotFound,
   };
 });
@@ -27,12 +26,13 @@ vi.mock("@/lib/share/client", () => client);
 import { ApiError } from "@/lib/api/errors";
 
 import {
-  downloadToLocal,
-  isReadOnly,
-  listAvailableRemoteTemplates,
-  refreshFromServer,
-  saveToServer,
-} from "@/lib/share/sync";
+  createTemplateOnServer,
+  deleteTemplateEverywhere,
+  overwriteWithMine,
+  saveTemplateToServer,
+  takeServerCopy,
+  TemplateConflictError,
+} from "@/lib/share/save";
 import type { TemplateRow } from "@/lib/agent/types";
 
 const REMOTE = {
@@ -61,13 +61,18 @@ const local = (over: Partial<TemplateRow> = {}): TemplateRow => ({
   summary: "A4 invoice",
   page_w_mm: 210,
   page_h_mm: 297,
-  current_version_id: null,
+  html: "<p>local</p>",
+  css: ".local {}",
+  compiled_css: "",
+  compiled_key: "",
   orientation: "portrait",
   created_at: "2026-03-01T00:00:00Z",
   readme: "# Invoice",
   withdrawn: false,
   remote_id: null,
   server_id: "11111111-1111-4111-8111-111111111111",
+  base_revision: 4,
+  sync_state: "dirty",
   published_at: null,
   origin: "own",
   origin_owner: null,
@@ -75,43 +80,41 @@ const local = (over: Partial<TemplateRow> = {}): TemplateRow => ({
   ...over,
 });
 
+const CONTENT = {
+  name: "Invoice",
+  summary: "A4 invoice",
+  page_w_mm: 210,
+  page_h_mm: 297,
+  html: "<p>local</p>",
+  css: ".local {}",
+  readme: "# Invoice",
+};
+
 const calls = (cmd: string) => invoke.mock.calls.filter((c) => c[0] === cmd);
-const argOf = (cmd: string, index = 1) =>
-  invoke.mock.calls.find((c) => c[0] === cmd)?.[index];
 
 beforeEach(() => {
   invoke.mockReset();
   client.putRemoteTemplate.mockReset();
   client.publishRemoteTemplate.mockReset();
   client.unpublishRemoteTemplate.mockReset();
+  client.unpublishTemplate.mockReset();
   client.fetchRemoteTemplate.mockReset();
-  client.fetchMyRemoteTemplates.mockReset();
-  client.fetchSavedRemoteTemplates.mockReset();
-  invoke.mockImplementation(async (cmd: string) => {
-    if (cmd === "list_versions")
-      return [{ id: 3, html: "<p>local</p>", css: ".local {}" }];
-    if (cmd === "list_templates") return [];
-    return null;
-  });
+  invoke.mockImplementation(async () => null);
 });
 
-describe("saved copies", () => {
-  it("are read-only, own templates are not", () => {
-    expect(isReadOnly({ origin: "saved" })).toBe(true);
-    expect(isReadOnly({ origin: "own" })).toBe(false);
-  });
-});
-
-describe("saveToServer", () => {
-  it("creates private with the current HTML and CSS and stores the returned id", async () => {
+describe("saveTemplateToServer", () => {
+  it("creates private with the editor content and caches the accepted copy", async () => {
     client.putRemoteTemplate.mockResolvedValue({
       ...REMOTE,
       published_at: null,
     });
-    const result = await saveToServer(local({ server_id: null }));
+    const result = await saveTemplateToServer(
+      local({ server_id: null, base_revision: null }),
+      CONTENT,
+    );
 
     const payload = client.putRemoteTemplate.mock.calls[0][0];
-    expect(typeof payload.id).toBe("string"); // fresh identity for a never-pushed row
+    expect(typeof payload.id).toBe("string"); // fresh identity for a never-saved row
     expect(payload.body).toBe("<p>local</p>");
     expect(payload.css).toBe(".local {}"); // CSS must not be left behind
     expect(payload.readme).toBe("# Invoice");
@@ -129,20 +132,19 @@ describe("saveToServer", () => {
     });
   });
 
-  it("fetches the revision first and leaves visibility alone when unasked", async () => {
-    // server_id alone drives updates (remote_id is legacy).
-    client.fetchRemoteTemplate.mockResolvedValue({
-      ...REMOTE,
-      published_at: null,
-      revision: 4,
-    });
+  it("guards the update with the row's own revision and leaves visibility alone when unasked", async () => {
     client.putRemoteTemplate.mockResolvedValue({
       ...REMOTE,
       published_at: null,
       revision: 5,
     });
-    const result = await saveToServer(local({ remote_id: null }));
+    const result = await saveTemplateToServer(
+      local({ remote_id: null }),
+      CONTENT,
+    );
 
+    // No fetch first: the row already knows the revision it was synced at.
+    expect(client.fetchRemoteTemplate).not.toHaveBeenCalled();
     expect(client.putRemoteTemplate.mock.calls[0][0]).toMatchObject({
       if_revision: 4,
     });
@@ -156,101 +158,8 @@ describe("saveToServer", () => {
     expect(result.remoteId).toBe(REMOTE.id);
   });
 
-  it("publishes when asked to", async () => {
-    client.fetchRemoteTemplate.mockResolvedValue({
-      ...REMOTE,
-      published_at: null,
-      revision: 2,
-    });
-    client.putRemoteTemplate.mockResolvedValue({
-      ...REMOTE,
-      published_at: null,
-      revision: 3,
-    });
-    client.publishRemoteTemplate.mockResolvedValue({
-      ...REMOTE,
-      published_at: "2026-03-03T00:00:00Z",
-      revision: 3,
-    });
-    const result = await saveToServer(local({ remote_id: REMOTE.id }), {
-      publish: true,
-    });
-
-    expect(client.publishRemoteTemplate).toHaveBeenCalledWith(REMOTE.id);
-    expect(result.published).toBe(true);
-    expect(invoke).toHaveBeenCalledWith("set_publish_info", {
-      req: { id: 7, remote_id: REMOTE.id, published_at: REMOTE.updated_at },
-    });
-  });
-
-  it("unpublishes when asked to", async () => {
-    client.fetchRemoteTemplate.mockResolvedValue({
-      ...REMOTE,
-      published_at: "2026-03-01T00:00:00Z",
-      revision: 2,
-    });
-    client.putRemoteTemplate.mockResolvedValue({
-      ...REMOTE,
-      published_at: "2026-03-01T00:00:00Z",
-      revision: 3,
-    });
-    await saveToServer(local({ remote_id: REMOTE.id }), { publish: false });
-
-    expect(client.unpublishRemoteTemplate).toHaveBeenCalledWith(REMOTE.id);
-    expect(invoke).toHaveBeenCalledWith("set_publish_info", {
-      req: { id: 7, remote_id: REMOTE.id, published_at: null },
-    });
-  });
-
-  it("records a labelled version through the server", async () => {
-    client.fetchRemoteTemplate.mockResolvedValue({
-      ...REMOTE,
-      published_at: null,
-      revision: 2,
-    });
-    client.putRemoteTemplate.mockResolvedValue({
-      ...REMOTE,
-      published_at: null,
-      revision: 3,
-    });
-    await saveToServer(local({ remote_id: REMOTE.id }), {
-      version: { label: "Added logo", note: null },
-    });
-
-    expect(client.putRemoteTemplate.mock.calls[0][0]).toMatchObject({
-      if_revision: 2,
-      version: { label: "Added logo" },
-    });
-    expect(invoke).toHaveBeenCalledWith("cache_mark_pushed", {
-      server_id: REMOTE.id,
-      revision: 3,
-    });
-  });
-
-  it("falls back to create when the server never saw the row", async () => {
-    client.fetchRemoteTemplate.mockRejectedValue(
-      new client.RemoteTemplateNotFoundError("ghost"),
-    );
-    client.putRemoteTemplate.mockResolvedValue({
-      ...REMOTE,
-      published_at: null,
-      revision: 1,
-    });
-    const result = await saveToServer(local({ remote_id: null }));
-    expect(client.putRemoteTemplate.mock.calls[0][0]).not.toHaveProperty(
-      "if_revision",
-    );
-    expect(result.remoteId).toBe(REMOTE.id);
-    expect(invoke).toHaveBeenCalledWith("cache_mark_pushed", {
-      server_id: REMOTE.id,
-      revision: 1,
-    });
-  });
-
   it("retries a raced create as an update instead of failing", async () => {
-    client.fetchRemoteTemplate
-      .mockRejectedValueOnce(new client.RemoteTemplateNotFoundError("ghost"))
-      .mockResolvedValue({ ...REMOTE, revision: 1 });
+    client.fetchRemoteTemplate.mockResolvedValue({ ...REMOTE, revision: 1 });
     client.putRemoteTemplate
       .mockRejectedValueOnce(
         new ApiError({
@@ -261,25 +170,49 @@ describe("saveToServer", () => {
         }),
       )
       .mockResolvedValue({ ...REMOTE, published_at: null, revision: 2 });
-    client.publishRemoteTemplate.mockResolvedValue({
-      ...REMOTE,
-      published_at: "2026-03-03T00:00:00Z",
-      revision: 2,
-    });
-    const result = await saveToServer(local({ remote_id: null }), {
-      publish: true,
-    });
+    const result = await saveTemplateToServer(
+      local({ server_id: null, base_revision: null }),
+      { ...CONTENT },
+    );
     expect(client.putRemoteTemplate.mock.calls[0][0]).not.toHaveProperty(
       "if_revision",
     );
     expect(client.putRemoteTemplate.mock.calls[1][0]).toMatchObject({
       if_revision: 1,
     });
-    expect(result.published).toBe(true);
+    expect(result.published).toBe(false);
+  });
+
+  it("creates when the guard names a server copy that never existed", async () => {
+    // A seeded row can carry a fictional base for an id the server
+    // never saw: 428, then 404 on the fetch, then a guard-less create.
+    client.putRemoteTemplate
+      .mockRejectedValueOnce(
+        new ApiError({
+          code: "revision_required",
+          message: "Update needs if_revision",
+          requestId: "r",
+          status: 428,
+        }),
+      )
+      .mockResolvedValue({ ...REMOTE, published_at: null, revision: 1 });
+    client.fetchRemoteTemplate.mockRejectedValue(
+      new client.RemoteTemplateNotFoundError("ghost"),
+    );
+    const result = await saveTemplateToServer(
+      local({ server_id: REMOTE.id, base_revision: 7 }),
+      CONTENT,
+    );
+    expect(client.putRemoteTemplate.mock.calls[0][0]).toMatchObject({
+      if_revision: 7,
+    });
+    expect(client.putRemoteTemplate.mock.calls[1][0]).not.toHaveProperty(
+      "if_revision",
+    );
+    expect(result.revision).toBe(1);
   });
 
   it("reports a concurrent edit as a conflict instead of overwriting it", async () => {
-    client.fetchRemoteTemplate.mockResolvedValue({ ...REMOTE, revision: 2 });
     client.putRemoteTemplate.mockRejectedValue(
       new ApiError({
         code: "revision_conflict",
@@ -288,40 +221,48 @@ describe("saveToServer", () => {
         status: 409,
       }),
     );
-    await expect(saveToServer(local({ remote_id: REMOTE.id }))).rejects.toThrow(
-      /another PC/i,
-    );
+    const err = await saveTemplateToServer(
+      local({ remote_id: REMOTE.id }),
+      CONTENT,
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(TemplateConflictError);
+    expect((err as TemplateConflictError).serverId).toBe(REMOTE.id);
     expect(calls("set_publish_info")).toHaveLength(0);
     expect(calls("cache_mark_pushed")).toHaveLength(0);
   });
 });
 
-describe("refreshFromServer", () => {
+describe("takeServerCopy", () => {
   const PUBLISHED = { ...REMOTE, published_at: "2026-03-01T00:00:00Z" };
 
-  it("overwrites the local copy with the server one", async () => {
+  it("overwrites the local copy with the server one and marks it synced", async () => {
     client.fetchRemoteTemplate.mockResolvedValue(PUBLISHED);
-    const result = await refreshFromServer(local({ remote_id: REMOTE.id }));
+    const result = await takeServerCopy(local({ remote_id: REMOTE.id }));
 
-    expect(calls("create_version")[0][1]).toMatchObject({
-      req: {
-        template_id: 7,
+    expect(calls("update_template_meta")[0][1]).toMatchObject({
+      req: expect.objectContaining({
+        id: 7,
+        name: "Invoice",
         html: REMOTE.body,
         css: REMOTE.css,
-        created_by: "sync",
-      },
+      }),
     });
     expect(calls("update_readme")[0][1]).toEqual({
       req: { id: 7, readme: REMOTE.readme },
     });
-    expect(calls("update_template_meta")[0][1]).toEqual({
-      req: {
+    expect(calls("update_template_meta")[0][1]).toMatchObject({
+      req: expect.objectContaining({
         id: 7,
         name: "Invoice",
         page_w_mm: 210,
         page_h_mm: 297,
-        summary: "A4 invoice",
-      },
+        html: REMOTE.body,
+        css: REMOTE.css,
+      }),
+    });
+    expect(calls("cache_mark_pushed")[0][1]).toEqual({
+      server_id: REMOTE.id,
+      revision: REMOTE.revision,
     });
     expect(result.page_w_mm).toBe(210);
     expect(invoke).toHaveBeenCalledWith("set_publish_info", {
@@ -334,9 +275,7 @@ describe("refreshFromServer", () => {
       ...REMOTE,
       published_at: "",
     });
-    await refreshFromServer(
-      local({ remote_id: REMOTE.id, published_at: null }),
-    );
+    await takeServerCopy(local({ remote_id: REMOTE.id, published_at: null }));
     expect(calls("set_publish_info")[0][1]).toEqual({
       req: { id: 7, remote_id: REMOTE.id, published_at: null },
     });
@@ -347,140 +286,90 @@ describe("refreshFromServer", () => {
       new Error("Template not found"),
     );
     await expect(
-      refreshFromServer(local({ remote_id: REMOTE.id })),
+      takeServerCopy(local({ remote_id: REMOTE.id })),
     ).rejects.toThrow("Template not found");
     expect(invoke).not.toHaveBeenCalled();
   });
 
   it("refuses a template that was never saved", async () => {
-    await expect(refreshFromServer(local({ server_id: null }))).rejects.toThrow(
+    await expect(takeServerCopy(local({ server_id: null }))).rejects.toThrow(
       /not on the server/,
     );
     expect(client.fetchRemoteTemplate).not.toHaveBeenCalled();
   });
 });
 
-describe("adoptLocalTemplates", () => {
-  it("pushes each row private and marks it pushed", async () => {
-    client.putRemoteTemplate
-      .mockResolvedValueOnce({
-        ...REMOTE,
-        id: "s1",
-        published_at: null,
-        revision: 1,
-      })
-      .mockResolvedValueOnce({
-        ...REMOTE,
-        id: "s2",
-        published_at: null,
-        revision: 1,
-      });
-    const { adoptLocalTemplates } = await import("@/lib/share/sync");
-    const res = await adoptLocalTemplates([
-      {
-        id: 1,
-        name: "A",
-        summary: "",
-        page_w_mm: 210,
-        page_h_mm: 297,
-        readme: "",
-        server_id: "s1",
-        html: "<p>a</p>",
-        css: "",
-      },
-      {
-        id: 2,
-        name: "B",
-        summary: "",
-        page_w_mm: 210,
-        page_h_mm: 297,
-        readme: "",
-        server_id: null,
-        html: "<p>b</p>",
-        css: "",
-      },
-    ]);
-    expect(res).toEqual({ pushed: 2 });
-    expect(client.putRemoteTemplate).toHaveBeenCalledTimes(2);
+describe("overwriteWithMine", () => {
+  it("rebases onto the server revision so the overwrite is explicit", async () => {
+    client.fetchRemoteTemplate.mockResolvedValue({ ...REMOTE, revision: 9 });
+    client.putRemoteTemplate.mockResolvedValue({
+      ...REMOTE,
+      revision: 10,
+    });
+    const result = await overwriteWithMine(
+      local({ remote_id: REMOTE.id }),
+      CONTENT,
+    );
     expect(client.putRemoteTemplate.mock.calls[0][0]).toMatchObject({
-      id: "s1",
-      body: "<p>a</p>",
+      if_revision: 9,
     });
-    expect(client.putRemoteTemplate.mock.calls[1][0]).toMatchObject({
-      body: "<p>b</p>",
-    });
-    expect(calls("cache_mark_pushed")).toHaveLength(2);
+    expect(result.revision).toBe(10);
+  });
+
+  it("refuses a template that was never saved", async () => {
+    await expect(
+      overwriteWithMine(local({ server_id: null, remote_id: null }), CONTENT),
+    ).rejects.toThrow(/not on the server/);
   });
 });
 
-describe("downloadToLocal", () => {
-  it("adds the template with its CSS, README and server link", async () => {
-    client.fetchRemoteTemplate.mockResolvedValue(REMOTE);
+describe("createTemplateOnServer", () => {
+  it("PUTs the starter copy, then caches the row synced at that revision", async () => {
+    client.putRemoteTemplate.mockResolvedValue({ ...REMOTE, revision: 1 });
     invoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "list_versions") return [];
-      if (cmd === "list_templates") return [];
       if (cmd === "create_template") return { id: 12 };
       return null;
     });
-
-    const result = await downloadToLocal(REMOTE.id, "saved", "ana");
-    expect(result).toEqual({ id: 12, created: true });
+    const created = await createTemplateOnServer({
+      name: "Label",
+      page_w_mm: 80,
+      page_h_mm: 200,
+      orientation: "portrait",
+      html: "<p>x</p>",
+      css: "",
+    });
+    expect(client.putRemoteTemplate.mock.calls[0][0]).toMatchObject({
+      name: "Label",
+      body: "<p>x</p>",
+    });
+    expect(typeof client.putRemoteTemplate.mock.calls[0][0].id).toBe("string");
     expect(calls("create_template")[0][1]).toMatchObject({
       req: {
         name: "Invoice",
-        html: REMOTE.body,
-        css: REMOTE.css,
-        readme: REMOTE.readme,
-        summary: REMOTE.summary,
-        orientation: "portrait",
         server_id: REMOTE.id,
         sync_state: "synced",
-        server_revision: REMOTE.revision,
-        base_revision: REMOTE.revision,
-        kind: "saved",
-        owner_handle: "ana",
+        server_revision: 1,
+        base_revision: 1,
       },
     });
-    expect(calls("update_template_origin")[0][1]).toEqual({
-      req: { id: 12, origin: "saved", origin_owner: "ana" },
-    });
-  });
-
-  it("derives landscape from a page that is wider than it is tall", async () => {
-    client.fetchRemoteTemplate.mockResolvedValue({
-      ...REMOTE,
-      page_w_mm: 297,
-      page_h_mm: 210,
-    });
-    invoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "list_templates") return [];
-      if (cmd === "create_template") return { id: 13 };
-      return null;
-    });
-    await downloadToLocal(REMOTE.id);
-    expect(argOf("create_template") as any).toMatchObject({
-      req: { orientation: "landscape" },
-    });
-  });
-
-  it("does not add the same template twice", async () => {
-    client.fetchRemoteTemplate.mockResolvedValue(REMOTE);
-    invoke.mockImplementation(async (cmd: string) =>
-      cmd === "list_templates" ? [{ id: 4, remote_id: REMOTE.id }] : null,
-    );
-    const result = await downloadToLocal(REMOTE.id);
-    expect(result).toEqual({ id: 4, created: false });
-    expect(calls("create_template")).toHaveLength(0);
+    expect(created).toEqual({ id: 12 });
   });
 });
 
-describe("listAvailableRemoteTemplates", () => {
-  it("returns the account's own templates and its saved ones", async () => {
-    client.fetchMyRemoteTemplates.mockResolvedValue([{ id: "m1" }]);
-    client.fetchSavedRemoteTemplates.mockResolvedValue([{ id: "s1" }]);
-    await expect(listAvailableRemoteTemplates()).resolves.toEqual({
-      mine: [{ id: "m1" }],
-      saved: [{ id: "s1" }],
+describe("deleteTemplateEverywhere", () => {
+  it("deletes the server copy first, then forgets the local row", async () => {
+    await deleteTemplateEverywhere(
+      local({ server_id: REMOTE.id, remote_id: REMOTE.id }),
+    );
+    expect(client.unpublishTemplate).toHaveBeenCalledWith(REMOTE.id);
+    expect(invoke).toHaveBeenCalledWith("cache_forget_template", {
+      server_id: REMOTE.id,
     });
+  });
+
+  it("removes a never-saved row locally without touching the server", async () => {
+    await deleteTemplateEverywhere(local({ server_id: null, remote_id: null }));
+    expect(client.unpublishTemplate).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith("delete_template", { id: 7 });
   });
 });

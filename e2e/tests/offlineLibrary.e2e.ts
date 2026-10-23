@@ -37,11 +37,12 @@ const tinyTtf = () =>
     0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xaa, 0xbb, 0xcc, 0xdd,
   ]);
 
-// Offline queue + replay for the library entities, mirroring F12's
-// template flow: with the share down, dataset/profile/font/setting
-// writes wait dirty in the cache; when the share returns, a reload
-// pushes them and the server stream shows every upsert.
-test("offline library edits queue dirty and replay on recovery", async ({
+// The server owns the library, and sending local edits there is an
+// explicit action per entity — so with the share down, dataset, profile,
+// font and setting writes land in the local cache and stay there. When
+// the share returns, a reload pulls; nothing the user did offline
+// uploads on its own. (The template half of this guarantee is F12.)
+test("offline library edits stay local and never upload on recovery", async ({
   browser,
 }) => {
   test.setTimeout(240_000);
@@ -94,7 +95,10 @@ test("offline library edits queue dirty and replay on recovery", async ({
   expect(printerId).toBeGreaterThan(0);
 
   await run("save_dataset", {
-    req: { name: "Offline Orders", data_json: '{"rows":[]}' },
+    req: {
+      name: "Offline Orders",
+      data_json: '{"rows":[{"id":"offline-1","total":42}]}',
+    },
   });
   await run("save_profile", {
     req: {
@@ -109,22 +113,18 @@ test("offline library edits queue dirty and replay on recovery", async ({
   });
   await run("set_setting", { key: "brand_name", value: "Offline Brand" });
 
+  // Everything the user wrote is in the local cache and usable there.
   await expect(async () => {
-    const dirty = await page.evaluate(() => {
-      const pick = (key: string) =>
-        JSON.parse(localStorage.getItem(key) ?? "[]") as Array<{
-          sync_state?: string;
-        }>;
-      return [
-        ...pick("fake-agent:datasets").map((r) => r.sync_state),
-        ...pick("fake-agent:profiles").map((r) => r.sync_state),
-        ...pick("fake-agent:fonts").map((r) => r.sync_state),
-      ];
-    });
-    expect(dirty).toContain("dirty");
-    expect(dirty).not.toContain("synced");
+    const datasets = (await run("list_datasets", {})) as Array<{
+      name: string;
+    }>;
+    expect(datasets.map((d) => d.name)).toContain("Offline Orders");
+    const brand = await run("get_setting", { key: "brand_name" });
+    expect(brand).toBe("Offline Brand");
   }).toPass({ timeout: 10_000 });
 
+  // Recovery pulls; nothing offline uploads — the server stream stays
+  // empty of these rows.
   await seeded.context.unroute("**/*");
   await page.reload();
   await expect(page.getByTestId(testids.shellApp)).toBeVisible({
@@ -135,13 +135,16 @@ test("offline library edits queue dirty and replay on recovery", async ({
       auth.token,
       "dataset,profile,font,setting",
     );
-    const names = sync.changes.map(
-      (c) =>
-        `${c.entity}:${c.op}:${(c.data as { name?: string; key?: string } | undefined)?.name ?? (c.data as { key?: string } | undefined)?.key ?? (c.data as { printer_name?: string } | undefined)?.printer_name}`,
-    );
-    expect(names).toContain("dataset:upsert:Offline Orders");
-    expect(names).toContain("font:upsert:body");
-    expect(names).toContain("setting:upsert:brand_name");
-    expect(names).toContain("profile:upsert:e2e offline printer");
-  }).toPass({ timeout: 60_000 });
+    expect(sync.changes).toEqual([]);
+  }).toPass({ timeout: 30_000 });
+
+  // And the local copies survive the reload.
+  await expect(async () => {
+    const datasets = (await run("list_datasets", {})) as Array<{
+      name: string;
+      data_json: string;
+    }>;
+    const found = datasets.find((d) => d.name === "Offline Orders");
+    expect(found?.data_json).toContain("offline-1");
+  }).toPass({ timeout: 15_000 });
 });

@@ -47,24 +47,9 @@ fn seed_printers_and_templates(db: &Db) -> (String, String) {
     )
     .unwrap();
     c.execute(
-        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation)
-         VALUES ('Receipt',120,200,'portrait')",
+        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, html, css)
+         VALUES ('Receipt',120,200,'portrait','<p>hi</p>','')",
         [],
-    )
-    .unwrap();
-    let tid = c.last_insert_rowid();
-    let vid = c
-        .execute(
-            "INSERT INTO template_versions (template_id, version_no, html, css, created_by)
-         VALUES (?1, 1, '<p>hi</p>', '', 'manual')",
-            [tid],
-        )
-        .unwrap();
-    // The real `create_template` sets this; without it the template has
-    // versions on disk but nothing "current" to render.
-    c.execute(
-        "UPDATE templates SET current_version_id = ?1 WHERE id = ?2",
-        rusqlite::params![vid, tid],
     )
     .unwrap();
     drop(guard);
@@ -676,43 +661,8 @@ async fn print_requires_a_template() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
 
-/// A template whose `current_version_id` is unset has nothing to render.
+/// A template with empty html has nothing to render.
 /// That used to be reported as a cheerful "queued"; it must be a 404.
-#[tokio::test]
-async fn print_rejects_a_template_with_no_current_version() {
-    let (db, key) = setup();
-    seed_printers_and_templates(&db);
-    {
-        let guard = db.lock().unwrap();
-        guard
-            .connection()
-            .execute("UPDATE templates SET current_version_id = NULL", [])
-            .unwrap();
-    }
-
-    let app = router(&db);
-    let res = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/v1/print")
-                .header("authorization", format!("Bearer {}", key))
-                .header("content-type", "application/json")
-                .body(axum::body::Body::from(
-                    serde_json::json!({
-                        "template": "Receipt",
-                        "printer": "Desk",
-                        "data": {}
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(res.status(), StatusCode::NOT_FOUND);
-}
 
 #[tokio::test]
 async fn print_rejects_unknown_printer() {

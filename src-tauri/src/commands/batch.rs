@@ -18,7 +18,7 @@ pub struct Batch {
     pub created_at: String,
 }
 
-const VALID_MODES: &[&str] = &["single_job", "per_record"];
+const VALID_MODES: &[&str] = &["per_record"];
 /// Same cap the REST `POST /v1/print/batch` applies to `data` (P3).
 pub const DEFAULT_MAX_RECORDS: usize = 5000;
 
@@ -109,16 +109,6 @@ pub fn create_batch_conn(conn: &Connection, req: CreateBatchRequest) -> AppResul
     )?;
     let batch_id = tx.last_insert_rowid();
 
-    // Resolve the template version once for the whole batch.
-    let version_id: Option<i64> = tx
-        .query_row(
-            "SELECT current_version_id FROM templates WHERE id = ?1",
-            [req.template_id],
-            |r| r.get(0),
-        )
-        .ok()
-        .flatten();
-
     match req.mode.as_str() {
         "per_record" => {
             // One queued job per record (PLANNING.md 7.8: best for thermal).
@@ -127,14 +117,13 @@ pub fn create_batch_conn(conn: &Connection, req: CreateBatchRequest) -> AppResul
             for (idx, record) in records.iter().enumerate() {
                 tx.execute(
                     "INSERT INTO print_jobs
-                       (batch_id, record_index, template_id, template_version_id,
+                       (batch_id, record_index, template_id,
                         printer_id, source, status, copies, settings_json, is_test, data_json)
-                     VALUES (?1, ?2, ?3, ?4, ?5, 'batch', 'queued', 1, ?6, 0, ?7)",
+                     VALUES (?1, ?2, ?3, ?4, 'batch', 'queued', 1, ?5, 0, ?6)",
                     rusqlite::params![
                         batch_id,
                         idx as i64,
                         req.template_id,
-                        version_id,
                         req.printer_id,
                         settings,
                         record.to_string(),
@@ -143,22 +132,9 @@ pub fn create_batch_conn(conn: &Connection, req: CreateBatchRequest) -> AppResul
             }
         }
         _ => {
-            // Single job: the whole array is one row's payload, rendered
-            // once by the template as an array context.
-            tx.execute(
-                "INSERT INTO print_jobs
-                   (batch_id, record_index, template_id, template_version_id,
-                    printer_id, source, status, copies, settings_json, is_test, data_json)
-                 VALUES (?1, 0, ?2, ?3, ?4, 'batch', 'queued', 1, ?5, 0, ?6)",
-                rusqlite::params![
-                    batch_id,
-                    req.template_id,
-                    version_id,
-                    req.printer_id,
-                    settings,
-                    serde_json::to_string(records).unwrap_or_else(|_| "[]".into()),
-                ],
-            )?;
+            return Err(AppError::Validation(
+                "unsupported batch mode: only 'per_record' is supported".into(),
+            ));
         }
     }
 

@@ -111,7 +111,7 @@ To use Turso Cloud instead of the bundled file, set `DATABASE_URL`
 (`libsql://…`) and `DATABASE_AUTH_TOKEN` in `server/.env` — see
 `docs/RELEASE.md` ("Production database: Turso Cloud").
 
-Configuration is environment-only (nothing auto-loads; development passes `--env-file`). All variables are listed in `env.example`: `DATABASE_URL` (`file:` or Turso `libsql://`), `DATABASE_AUTH_TOKEN`, `CORS_ORIGINS`, `HOST` (`127.0.0.1` local, `0.0.0.0` in containers), `PORT`, `SESSION_TTL_DAYS`, `SESSION_CLEANUP_MINUTES`, `RATE_LIMIT_MAX`, `RATE_LIMIT_AUTH_MAX`, `RATE_LIMIT_AUTH_WINDOW_SECONDS`, `ARGON2_MEMORY_KIB`, `ARGON2_TIME_COST`, `ARGON2_PARALLELISM`, `DOCS_ENABLED`, `LOG_LEVEL`. The service fails fast naming the offending variable; the Dockerfile and CI generate the Prisma client with a dummy `DATABASE_URL` because generation never connects.
+Configuration is environment-only (the service itself loads no file; the `pnpm dev` and `db:*` scripts load `server/.env`). All variables are listed in `server/env.example`: `DATABASE_URL` (`file:` or Turso `libsql://`), `DATABASE_AUTH_TOKEN`, `CORS_ORIGINS`, `HOST` (`127.0.0.1` local, `0.0.0.0` in containers), `PORT`, `SESSION_TTL_DAYS`, `SESSION_CLEANUP_MINUTES`, `RATE_LIMIT_MAX`, `RATE_LIMIT_AUTH_MAX`, `RATE_LIMIT_AUTH_WINDOW_SECONDS`, `ARGON2_MEMORY_KIB`, `ARGON2_TIME_COST`, `ARGON2_PARALLELISM`, `DOCS_ENABLED`, `LOG_LEVEL`. The service fails fast naming the offending variable; the Dockerfile and CI generate the Prisma client with a dummy `DATABASE_URL` because generation never connects.
 
 ## Building
 

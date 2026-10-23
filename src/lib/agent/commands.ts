@@ -27,9 +27,7 @@ import type {
   SyncedDatasetRow,
   SystemPrinterRow,
   TemplateRow,
-  TemplateVersionRow,
   UploadFontReq,
-  VersionDiff,
 } from "./types";
 
 /**
@@ -58,17 +56,6 @@ export interface CreateTemplateReq {
   base_revision?: number;
 }
 
-export interface CreateVersionReq {
-  template_id: number;
-  html: string;
-  css: string;
-  label?: string | null;
-  note?: string | null;
-  created_by?: string;
-  compiled_css?: string;
-  compiled_key?: string;
-}
-
 /** Command name → [args, result]. Args are what goes after the name. */
 export interface AgentCommands {
   // Templates
@@ -83,6 +70,10 @@ export interface AgentCommands {
         page_w_mm: number;
         page_h_mm: number;
         summary?: string;
+        html?: string;
+        css?: string;
+        compiled_css?: string;
+        compiled_key?: string;
       };
     },
     TemplateRow,
@@ -98,17 +89,6 @@ export interface AgentCommands {
     TemplateRow,
   ];
   clear_publish_info: [{ req: { id: number } }, TemplateRow];
-  // Versions
-  list_versions: [{ template_id: number }, TemplateVersionRow[]];
-  list_latest_versions: [{ template_ids: number[] }, TemplateVersionRow[]];
-  create_version: [{ req: CreateVersionReq }, TemplateVersionRow];
-  set_version_compiled: [
-    { id: number; compiled_css: string; compiled_key: string },
-    TemplateVersionRow,
-  ];
-  restore_version: [{ id: number }, TemplateVersionRow];
-  delete_version: [{ id: number }, null];
-  diff_versions: [{ from_id: number; to_id: number }, VersionDiff];
   // Sync cache
   cache_apply_changes: [
     { changes: unknown[]; new_cursor: string },

@@ -25,7 +25,6 @@ import {
   stepZoom,
 } from "@/components/designer/CanvasWorkspace";
 import { SampleDataPanel } from "@/components/designer/SampleDataPanel";
-import { TemplateSyncBar } from "@/components/designer/TemplateSyncBar";
 import { ControlsRail } from "@/components/designer/ControlsRail";
 import {
   HelpersPanel,
@@ -61,182 +60,127 @@ beforeAll(() => {
 beforeEach(() => window.localStorage.clear());
 
 describe("DesignerToolbar", () => {
-  it("fires New, Save and Export, and passes a chosen file to Import", async () => {
+  const base = {
+    templateName: "Label",
+    remoteId: null as string | null,
+    publishedAt: null as string | null,
+    readOnly: false as boolean,
+    pending: null as "save" | "visibility" | null,
+    onVisibilityChange: (() => {}) as any,
+  };
+
+  it("fires New and Save", () => {
     const onNew = vi.fn();
     const onSave = vi.fn();
-    const onExport = vi.fn();
-    const onImportFile = vi.fn();
     render(
       <DesignerToolbar
+        {...base}
         onNew={onNew}
         onSave={onSave}
-        onImportFile={onImportFile}
-        onExport={onExport}
+        onVisibilityChange={vi.fn()}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /New/ }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    fireEvent.click(screen.getByRole("button", { name: "Export" }));
     expect(onNew).toHaveBeenCalled();
     expect(onSave).toHaveBeenCalled();
-    expect(onExport).toHaveBeenCalled();
-    const file = new File(["{}"], "t.json", { type: "application/json" });
-    fireEvent.change(screen.getByTestId("template-import"), {
-      target: { files: [file] },
-    });
-    await waitFor(() => expect(onImportFile).toHaveBeenCalledWith(file));
   });
-});
 
-describe("TemplateSyncBar", () => {
-  const base = {
-    templateName: "Label",
-    pending: null,
-    onPublish: vi.fn(),
-    onUnpublish: vi.fn(),
-    onSyncNow: vi.fn(),
-  };
-
-  it("marks a template that is only on this computer, and offers Publish and Sync now", () => {
+  it("has no Import or Export actions", () => {
     render(
-      <TemplateSyncBar
+      <DesignerToolbar
         {...base}
+        onNew={vi.fn()}
+        onSave={vi.fn()}
+        onVisibilityChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Import" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Export" })).toBeNull();
+    expect(screen.queryByTestId("template-import")).toBeNull();
+  });
+
+  it("marks a template that is only on this computer", () => {
+    render(
+      <DesignerToolbar
+        {...base}
+        onNew={vi.fn()}
+        onSave={vi.fn()}
         remoteId={null}
         publishedAt={null}
-        templateUpdatedAt={null}
       />,
     );
-    expect(screen.getByText("Draft")).toBeInTheDocument();
+    expect(screen.queryByText("Draft")).not.toBeInTheDocument();
     expect(screen.getByText("Only on this computer")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /Refresh/ }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /Save to server/ }),
-    ).not.toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Publish to Community" }),
-    );
-    expect(base.onPublish).toHaveBeenCalled();
-    fireEvent.click(screen.getByTestId("template-sync-now"));
-    expect(base.onSyncNow).toHaveBeenCalled();
   });
 
-  it("offers Unpublish and Sync now once a template is published", () => {
+  it("shows a Public switch once a template is published", () => {
+    const onVisibilityChange = vi.fn();
     render(
-      <TemplateSyncBar
+      <DesignerToolbar
         {...base}
+        onNew={vi.fn()}
+        onSave={vi.fn()}
+        onVisibilityChange={onVisibilityChange}
         remoteId="r1"
         publishedAt="2026-02-01T00:00:00Z"
-        templateUpdatedAt="2026-01-01T00:00:00Z"
       />,
     );
-    expect(screen.getByText("Published")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /Sync now/ }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Unpublish" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /Publish/ }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Published")).not.toBeInTheDocument();
+    expect(screen.getByTestId("template-visibility")).toBeInTheDocument();
+    expect(screen.getByText("Public")).toBeInTheDocument();
   });
 
-  it("says when a private template is saved but not published", () => {
+  it("shows a Private switch for an unpublished server copy", () => {
     render(
-      <TemplateSyncBar
+      <DesignerToolbar
         {...base}
+        onNew={vi.fn()}
+        onSave={vi.fn()}
         remoteId="r1"
         publishedAt={null}
-        templateUpdatedAt="2026-02-01T00:00:00Z"
+        onVisibilityChange={vi.fn()}
       />,
     );
-    expect(screen.getByText(/private copy/)).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Publish to Community" }),
-    ).toBeInTheDocument();
+    expect(screen.queryByText("Draft")).not.toBeInTheDocument();
+    expect(screen.getByText("Private")).toBeInTheDocument();
   });
 
-  it("warns once when local changes are not on the server yet", () => {
+  it("calls onVisibilityChange when the switch flips", () => {
+    const onVisibilityChange = vi.fn();
     render(
-      <TemplateSyncBar
+      <DesignerToolbar
         {...base}
+        onNew={vi.fn()}
+        onSave={vi.fn()}
+        onVisibilityChange={onVisibilityChange}
         remoteId="r1"
-        publishedAt="2026-01-01T00:00:00Z"
-        templateUpdatedAt="2026-02-01T00:00:00Z"
+        publishedAt={null}
       />,
     );
-    expect(screen.getAllByText(/not on the server yet/)).toHaveLength(1);
+    fireEvent.click(screen.getByTestId("template-visibility"));
+    expect(onVisibilityChange).toHaveBeenCalled();
   });
 
-  it("asks before unpublishing, naming the template", async () => {
-    const onUnpublish = vi.fn();
+  it("hides Save and the switch on a saved copy from Community", () => {
     render(
-      <TemplateSyncBar
+      <DesignerToolbar
         {...base}
-        onUnpublish={onUnpublish}
-        remoteId="r1"
-        publishedAt="2026-02-01T00:00:00Z"
-        templateUpdatedAt="2026-01-01T00:00:00Z"
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Unpublish" }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText("Unpublish “Label”?")).toBeInTheDocument();
-    expect(onUnpublish).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Unpublish" }));
-    await waitFor(() => expect(onUnpublish).toHaveBeenCalled());
-  });
-
-  it("hides Save and Publish on a saved copy from Community", () => {
-    render(
-      <TemplateSyncBar
-        {...base}
+        onNew={vi.fn()}
+        onSave={vi.fn()}
         readOnly
         remoteId="x1"
         publishedAt="2026-02-01T00:00:00Z"
-        templateUpdatedAt="2026-02-01T00:00:00Z"
+        onVisibilityChange={vi.fn()}
       />,
     );
-    expect(screen.getByText("Read-only copy")).toBeInTheDocument();
-    expect(
-      screen.getByText(/can print it, but not change it/),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Save to server" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /Publish/ }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText("Read-only")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.queryByTestId("template-visibility")).toBeNull();
   });
 });
 
 describe("ControlsAccordion", () => {
-  const versions = [
-    {
-      key: "local-2",
-      versionNo: 2,
-      label: "second",
-      note: "",
-      createdAt: "2026-02-01T10:00:00Z",
-      createdBy: "manual",
-      html: "<p>2</p>",
-      css: "",
-      localId: 2,
-    },
-    {
-      key: "local-1",
-      versionNo: 1,
-      label: "first",
-      note: "",
-      createdAt: "2026-01-01T10:00:00Z",
-      createdBy: "manual",
-      html: "<p>1</p>",
-      css: "",
-      localId: 1,
-    },
-  ];
   const props = () => ({
     templates: [
       { id: 1, name: "Receipt" },
@@ -253,20 +197,15 @@ describe("ControlsAccordion", () => {
     presets: [{ label: "A4", width: 210, height: 297 }],
     orientation: "portrait" as const,
     setOrientation: vi.fn(),
-    versions,
-    onNewVersion: vi.fn(),
-    openDiff: vi.fn(),
-    handleRestoreVersion: vi.fn(),
-    handleDeleteVersion: vi.fn(),
   });
 
-  const ALL_OPEN = ["templates", "page", "versions", "helpers"];
+  const ALL_OPEN = ["templates", "page", "helpers"];
 
   it("opens only Page Setup at first, and opens and closes sections on click", () => {
     render(<ControlsAccordion {...props()} />);
     const trigger = (name: string) => screen.getByRole("button", { name });
     expect(trigger("Page Setup")).toHaveAttribute("aria-expanded", "true");
-    for (const name of ["Templates", "Versions", "Helpers"]) {
+    for (const name of ["Templates", "Helpers"]) {
       expect(trigger(name)).toHaveAttribute("aria-expanded", "false");
     }
     expect(screen.getByLabelText("Width (mm)")).toBeInTheDocument();
@@ -285,7 +224,7 @@ describe("ControlsAccordion", () => {
     render(
       <ControlsAccordion {...props()} defaultOpen={[]} showHelpers={false} />,
     );
-    for (const name of ["Templates", "Page Setup", "Versions"]) {
+    for (const name of ["Templates", "Page Setup"]) {
       expect(screen.getByRole("button", { name })).toHaveAttribute(
         "aria-expanded",
         "false",
@@ -324,45 +263,16 @@ describe("ControlsAccordion", () => {
     expect(screen.getByLabelText("Width (mm)")).toHaveValue(80);
   });
 
-  it("restores and diffs versions, but not the current one", () => {
-    const p = props();
-    render(<ControlsAccordion {...p} defaultOpen={ALL_OPEN} />);
-    expect(
-      screen.getByRole("button", { name: "Restore version 2" }),
-    ).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Restore version 1" }));
-    expect(p.handleRestoreVersion).toHaveBeenCalledWith(versions[1]);
-    fireEvent.click(screen.getByRole("button", { name: "Diff v1 to v2" }));
-    expect(p.openDiff).toHaveBeenCalledWith(versions[1], versions[0]);
-  });
-
-  it("deletes only non-current versions", () => {
-    const p = props();
-    render(<ControlsAccordion {...p} defaultOpen={ALL_OPEN} />);
-    expect(
-      screen.getByRole("button", { name: "Delete version 2" }),
-    ).toBeDisabled();
-    const del = screen.getByRole("button", { name: "Delete version 1" });
-    expect(del).not.toBeDisabled();
-    fireEvent.click(del);
-    expect(p.handleDeleteVersion).toHaveBeenCalledWith(versions[1]);
-  });
-
   it("renders each section header as an h2, so heading order stays under the page h1", () => {
     render(<ControlsAccordion {...props()} defaultOpen={ALL_OPEN} />);
     const headings = screen
       .getAllByRole("heading", { level: 2 })
       .map((h) => h.textContent);
-    expect(headings).toEqual([
-      "Templates",
-      "Page Setup",
-      "Versions",
-      "Helpers",
-    ]);
+    expect(headings).toEqual(["Templates", "Page Setup", "Helpers"]);
     expect(
       screen.queryByRole("heading", {
         level: 3,
-        name: /Templates|Page Setup|Versions|Helpers/,
+        name: /Templates|Page Setup|Helpers/,
       }),
     ).not.toBeInTheDocument();
   });
@@ -394,9 +304,32 @@ describe("ControlsAccordion", () => {
   it("keeps a closed section's contents out of the page", () => {
     render(<ControlsAccordion {...props()} defaultOpen={[]} />);
     expect(screen.queryByLabelText("Width (mm)")).not.toBeInTheDocument();
+  });
+
+  it("shows Barcode and Font in a Custom input section when onBarcode is given", () => {
+    render(
+      <ControlsAccordion {...props()} defaultOpen={[]} onBarcode={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Custom input" }));
+    expect(screen.getByRole("button", { name: "Barcode" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Font" })).toBeInTheDocument();
+  });
+
+  it("hides the Custom input section without onBarcode", () => {
+    render(<ControlsAccordion {...props()} defaultOpen={[]} />);
     expect(
-      screen.queryByRole("button", { name: "Restore version 1" }),
+      screen.queryByRole("button", { name: "Custom input" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("calls onBarcode from the Custom input section", () => {
+    const onBarcode = vi.fn();
+    render(
+      <ControlsAccordion {...props()} defaultOpen={[]} onBarcode={onBarcode} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Custom input" }));
+    fireEvent.click(screen.getByRole("button", { name: "Barcode" }));
+    expect(onBarcode).toHaveBeenCalled();
   });
 });
 
@@ -862,11 +795,11 @@ describe("usePersistentState", () => {
       usePersistentState("k", ["page"], isStrings),
     );
     expect(first.result.current[0]).toEqual(["page"]);
-    act(() => first.result.current[1](["page", "versions"]));
+    act(() => first.result.current[1](["page", "helpers"]));
     const second = renderHook(() =>
       usePersistentState("k", ["page"], isStrings),
     );
-    expect(second.result.current[0]).toEqual(["page", "versions"]);
+    expect(second.result.current[0]).toEqual(["page", "helpers"]);
   });
 
   it("ignores a stored value that is invalid or not JSON", () => {
@@ -897,7 +830,6 @@ describe("ControlsAccordion, controlled", () => {
     presets: [],
     orientation: "portrait" as const,
     setOrientation: vi.fn(),
-    versions: [],
     onNewVersion: vi.fn(),
     openDiff: vi.fn(),
     handleRestoreVersion: vi.fn(),
@@ -909,11 +841,11 @@ describe("ControlsAccordion, controlled", () => {
     render(
       <ControlsAccordion
         {...props()}
-        openSections={["versions"]}
+        openSections={["helpers"]}
         onOpenSectionsChange={onChange}
       />,
     );
-    expect(screen.getByRole("button", { name: "Versions" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Helpers" })).toHaveAttribute(
       "aria-expanded",
       "true",
     );
@@ -922,7 +854,7 @@ describe("ControlsAccordion, controlled", () => {
       "false",
     );
     fireEvent.click(screen.getByRole("button", { name: "Page Setup" }));
-    expect(onChange).toHaveBeenCalledWith(["versions", "page"]);
+    expect(onChange).toHaveBeenCalledWith(["helpers", "page"]);
   });
 });
 
@@ -931,10 +863,12 @@ describe("ControlsRail", () => {
     const onOpenSection = vi.fn();
     const onExpand = vi.fn();
     render(<ControlsRail onOpenSection={onOpenSection} onExpand={onExpand} />);
-    fireEvent.click(screen.getByRole("button", { name: "Open Versions" }));
-    expect(onOpenSection).toHaveBeenCalledWith("versions");
     fireEvent.click(screen.getByRole("button", { name: "Open Helpers" }));
     expect(onOpenSection).toHaveBeenCalledWith("helpers");
+    fireEvent.click(screen.getByRole("button", { name: "Open Helpers" }));
+    expect(onOpenSection).toHaveBeenCalledWith("helpers");
+    fireEvent.click(screen.getByRole("button", { name: "Open Custom input" }));
+    expect(onOpenSection).toHaveBeenCalledWith("custom");
     fireEvent.click(screen.getByRole("button", { name: "Expand controls" }));
     expect(onExpand).toHaveBeenCalled();
     expect(screen.getAllByRole("button")).toHaveLength(5);

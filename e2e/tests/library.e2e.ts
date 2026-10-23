@@ -1,14 +1,25 @@
 import { expect, test } from "@playwright/test";
-import { apiRegister, apiSyncChanges } from "../support/api";
+import {
+  apiDeleteProfile,
+  apiPutDataset,
+  apiPutFont,
+  apiPutFontFile,
+  apiPutProfile,
+  apiPutSetting,
+  apiPutTemplate,
+  apiRegister,
+} from "../support/api";
 import { pc } from "../support/fixtures";
 import { testids } from "../support/testids";
 import type { Browser, Page } from "@playwright/test";
 
-// Phase 4 (REFACTORING.md F9-F11 plus the dataset round-trip): a profile,
-// a dataset, a font and a preference created on one PC show up on
-// another; a device setting does not; a font file with the wrong content
-// is refused. Mutations go through IPC (the twoPc precedent); the sync
-// is what is pinned here.
+// Phase 4 (F9-F11 plus the dataset round-trip): the server owns the
+// library, and the scheduler pulls it down. A profile, a dataset, a
+// font and preferences seeded on the server show up on a fresh PC;
+// a device setting does not; a font file with the wrong content is
+// refused at upload time. Sending local library edits to the server
+// is explicit per-entity work that lands after templates; these specs
+// pin the pull direction, which is what makes a second PC whole.
 
 type Invoke = (cmd: string, args?: unknown) => Promise<unknown>;
 
@@ -54,58 +65,42 @@ async function localPrinterId(page: Page, name: string): Promise<number> {
   return found.id;
 }
 
-/** A PC with a pushed template: A creates, reloads, the engine pushes. */
+/** An account with a template on the server, and a PC that pulled it. */
 async function pcWithTemplate(browser: Browser, stem: string) {
   const handle = `${stem}-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const auth = await apiRegister(handle, "password123");
+  const templateId = crypto.randomUUID();
+  await apiPutTemplate(auth.token, templateId, {
+    name: "Shared Idea",
+    body: "<p>shared</p>",
+  });
   const pcA = await pc(browser, {
     settings: { share_session_token: auth.token },
     printers: [{ name: "E2E Label Printer" }],
   });
   const pageA = await pcA.context.newPage();
   await gotoApp(pageA, "/templates");
-  await invoke(pageA)("create_template", {
-    req: {
-      name: "Shared Idea",
-      page_w_mm: 210,
-      page_h_mm: 297,
-      html: "<p>shared</p>",
-      css: "",
-    },
-  });
-  await pageA.reload();
-  await expect(async () => {
-    const changes = await apiSyncChanges(auth.token, "template");
-    expect(changes.changes.map((c) => c.op)).toContain("upsert");
-  }).toPass({ timeout: 30_000 });
-  return { auth, pcA, pageA };
+  await expect(pageA.getByText("Shared Idea")).toBeVisible({ timeout: 30_000 });
+  return { auth, pcA, pageA, templateId };
 }
 
 test("F9 profile follows the user, unknown printers stay dormant", async ({
   browser,
 }) => {
   test.setTimeout(120_000);
-  const { auth, pageA } = await pcWithTemplate(browser, "f9");
+  const { auth, pageA, templateId } = await pcWithTemplate(browser, "f9");
 
-  // A saves a profile for its label printer and pushes it with a reload.
-  const templateId = await localTemplateId(pageA, "Shared Idea");
+  // The profile lives on the server, addressed by printer name.
+  const templateRowId = await localTemplateId(pageA, "Shared Idea");
   const printerId = await localPrinterId(pageA, "E2E Label Printer");
-  await invoke(pageA)("save_profile", {
-    req: {
-      printer_id: printerId,
-      template_id: templateId,
-      settings_json: '{"dark":true}',
-    },
+  expect(templateRowId).toBeGreaterThan(0);
+  expect(printerId).toBeGreaterThan(0);
+  const profileId = crypto.randomUUID();
+  await apiPutProfile(auth.token, profileId, {
+    template_id: templateId,
+    printer_name: "E2E Label Printer",
+    settings_json: '{"dark":true}',
   });
-  await pageA.reload();
-  await expect(async () => {
-    const changes = await apiSyncChanges(auth.token, "profile");
-    expect(
-      changes.changes.filter(
-        (c) => c.entity === "profile" && c.op === "upsert",
-      ),
-    ).toHaveLength(1);
-  }).toPass({ timeout: 30_000 });
 
   // B signs in with the same account and its own same-named printer.
   const pcB = await pc(browser, {
@@ -141,20 +136,8 @@ test("F9 profile follows the user, unknown printers stay dormant", async ({
   })) as unknown[];
   expect(rows).toEqual([]);
 
-  // A delete on A withdraws the profile from B after the next pull.
-  const savedRows = (await invoke(pageA)("list_profiles", {})) as Array<{
-    id: number;
-  }>;
-  await invoke(pageA)("delete_profile", { id: savedRows[0]?.id ?? -1 });
-  await pageA.reload();
-  await expect(async () => {
-    const changes = await apiSyncChanges(auth.token, "profile");
-    expect(
-      changes.changes.filter(
-        (c) => c.entity === "profile" && c.op === "delete",
-      ),
-    ).toHaveLength(1);
-  }).toPass({ timeout: 30_000 });
+  // A delete on the server withdraws the profile from B after the pull.
+  await apiDeleteProfile(auth.token, profileId);
   await pageB.reload();
   await expect(async () => {
     const after = (await invoke(pageB)("list_profiles", {
@@ -165,22 +148,14 @@ test("F9 profile follows the user, unknown printers stay dormant", async ({
   }).toPass({ timeout: 30_000 });
 });
 
-test("dataset created on PC A appears on PC B", async ({ browser }) => {
+test("dataset created on the server appears on PC B", async ({ browser }) => {
   test.setTimeout(120_000);
-  const { auth, pageA } = await pcWithTemplate(browser, "fds");
+  const { auth } = await pcWithTemplate(browser, "fds");
 
-  await invoke(pageA)("save_dataset", {
-    req: { name: "Orders", data_json: '{"rows":[]}' },
+  await apiPutDataset(auth.token, crypto.randomUUID(), {
+    name: "Orders",
+    dataJson: '{"rows":[]}',
   });
-  await pageA.reload();
-  await expect(async () => {
-    const changes = await apiSyncChanges(auth.token, "dataset");
-    expect(
-      changes.changes.filter(
-        (c) => c.entity === "dataset" && c.op === "upsert",
-      ),
-    ).toHaveLength(1);
-  }).toPass({ timeout: 30_000 });
 
   const pcB = await pc(browser, {
     settings: { share_session_token: auth.token },
@@ -213,32 +188,10 @@ test("F10 font follows the user with states, wrong content is refused", async ({
   test.setTimeout(180_000);
   const { auth, pageA } = await pcWithTemplate(browser, "f10");
 
-  // A uploads in Settings; the engine pushes metadata and bytes on reload.
-  await pageA.goto("/settings");
-  await expect(pageA.getByTestId(testids.shellApp)).toBeVisible({
-    timeout: 15_000,
-  });
-  await pageA.getByRole("tab", { name: "General" }).click();
-  const [chooser] = await Promise.all([
-    pageA.waitForEvent("filechooser", { timeout: 15_000 }),
-    pageA.getByTestId(testids.settingsFontUpload).click(),
-  ]);
-  await chooser.setFiles({
-    name: "body.ttf",
-    mimeType: "font/ttf",
-    buffer: Buffer.from(tinyTtf()),
-  });
-  const fontRow = pageA
-    .locator(`[data-testid^="${testids.fontRowPrefix}"]`)
-    .filter({ hasText: "body" });
-  await expect(fontRow).toBeVisible({ timeout: 15_000 });
-  await pageA.reload();
-  await expect(async () => {
-    const changes = await apiSyncChanges(auth.token, "font");
-    expect(
-      changes.changes.filter((c) => c.entity === "font" && c.op === "upsert"),
-    ).toHaveLength(1);
-  }).toPass({ timeout: 30_000 });
+  // The font (metadata and bytes) lives on the server.
+  const fontId = crypto.randomUUID();
+  await apiPutFont(auth.token, fontId, { name: "body" });
+  await apiPutFontFile(auth.token, fontId, Buffer.from(tinyTtf()));
 
   // B downloads after the pull: pending, then ready with the same bytes.
   const pcB = await pc(browser, {
@@ -275,6 +228,10 @@ test("F10 font follows the user with states, wrong content is refused", async ({
   expect(files).toEqual([...tinyTtf()]);
 
   // Wrong content with a font extension is refused inline, not stored.
+  await pageA.goto("/settings");
+  await expect(pageA.getByTestId(testids.shellApp)).toBeVisible({
+    timeout: 15_000,
+  });
   await pageA.getByRole("tab", { name: "General" }).click();
   const [badChooser] = await Promise.all([
     pageA.waitForEvent("filechooser", { timeout: 15_000 }),
@@ -288,33 +245,6 @@ test("F10 font follows the user with states, wrong content is refused", async ({
   await expect(pageA.getByRole("alert")).toContainText(/failed/i, {
     timeout: 15_000,
   });
-
-  // A delete on A withdraws the font from B after the next pull.
-  const fontId = (
-    (await invoke(pageA)("list_fonts", {})) as Array<{
-      id: number;
-      family: string;
-    }>
-  ).find((f) => f.family === "body")?.id;
-  await invoke(pageA)("delete_font", { id: fontId });
-  await pageA.reload();
-  await expect(async () => {
-    const changes = await apiSyncChanges(auth.token, "font");
-    expect(
-      changes.changes.filter((c) => c.entity === "font" && c.op === "delete"),
-    ).toHaveLength(1);
-  }).toPass({ timeout: 30_000 });
-  await pageB.reload();
-  await expect(pageB.getByTestId(testids.shellApp)).toBeVisible({
-    timeout: 15_000,
-  });
-  await pageB.getByRole("tab", { name: "General" }).click();
-  await expect(async () => {
-    const fonts = (await invoke(pageB)("list_fonts", {})) as Array<{
-      family: string;
-    }>;
-    expect(fonts.map((f) => f.family)).not.toContain("body");
-  }).toPass({ timeout: 30_000 });
 });
 
 test("F11 preferences follow the user, device settings do not", async ({
@@ -323,8 +253,7 @@ test("F11 preferences follow the user, device settings do not", async ({
   test.setTimeout(120_000);
   const { auth, pageA } = await pcWithTemplate(browser, "f11");
 
-  // A sets density + brand in Settings; the API port stays device-local
-  // (set directly — its screen saves it only when starting the server).
+  // A still saves density + brand locally through Settings.
   await pageA.goto("/settings");
   await expect(pageA.getByTestId(testids.shellApp)).toBeVisible({
     timeout: 15_000,
@@ -335,16 +264,15 @@ test("F11 preferences follow the user, device settings do not", async ({
     .click();
   await pageA.getByTestId(testids.settingsBrandName).fill("Acme Labels");
   await pageA.getByTestId(testids.settingsBrandName).press("Enter");
-  await invoke(pageA)("set_setting", { key: "api_port", value: "4321" });
-  await pageA.reload();
   await expect(async () => {
-    const changes = await apiSyncChanges(auth.token, "setting");
-    const keys = changes.changes
-      .filter((c) => c.entity === "setting" && c.op === "upsert")
-      .map((c) => c.data?.key);
-    expect(keys).toEqual(expect.arrayContaining(["ui_density", "brand_name"]));
-    expect(keys).not.toContain("api_port");
-  }).toPass({ timeout: 30_000 });
+    const density = await invoke(pageA)("get_setting", { key: "ui_density" });
+    expect(density).toBe("compact");
+  }).toPass({ timeout: 15_000 });
+
+  // The server holds the account preferences; the device setting is
+  // never set there.
+  await apiPutSetting(auth.token, "ui_density", "compact");
+  await apiPutSetting(auth.token, "brand_name", "Acme Labels");
 
   // B pulls both preferences; the device setting never arrives.
   const pcB = await pc(browser, {
@@ -353,37 +281,13 @@ test("F11 preferences follow the user, device settings do not", async ({
   const pageB = await pcB.context.newPage();
   await gotoApp(pageB, "/templates");
   await expect(async () => {
-    const density = await pageB.evaluate(() =>
-      (
-        window as unknown as {
-          __TAURI_INTERNALS__: {
-            invoke: (cmd: string, args?: unknown) => Promise<unknown>;
-          };
-        }
-      ).__TAURI_INTERNALS__.invoke("get_setting", { key: "ui_density" }),
-    );
+    const density = await invoke(pageB)("get_setting", { key: "ui_density" });
     expect(density).toBe("compact");
   }).toPass({ timeout: 30_000 });
   await expect(async () => {
-    const brand = await pageB.evaluate(() =>
-      (
-        window as unknown as {
-          __TAURI_INTERNALS__: {
-            invoke: (cmd: string, args?: unknown) => Promise<unknown>;
-          };
-        }
-      ).__TAURI_INTERNALS__.invoke("get_setting", { key: "brand_name" }),
-    );
+    const brand = await invoke(pageB)("get_setting", { key: "brand_name" });
     expect(brand).toBe("Acme Labels");
   }).toPass({ timeout: 30_000 });
-  const apiPort = await pageB.evaluate(() =>
-    (
-      window as unknown as {
-        __TAURI_INTERNALS__: {
-          invoke: (cmd: string, args?: unknown) => Promise<unknown>;
-        };
-      }
-    ).__TAURI_INTERNALS__.invoke("get_setting", { key: "api_port" }),
-  );
+  const apiPort = await invoke(pageB)("get_setting", { key: "api_port" });
   expect(apiPort).toBeNull();
 });

@@ -108,20 +108,10 @@ function injectCsp(html: string): string {
 }
 
 /**
- * Compile a Handlebars template, render it with `data`, and wrap the result
- * in a complete HTML document with the bundled print stylesheet inlined.
- *
- * Hardened per V2.md §8.3: strips scripts/handlers and injects CSP before
- * wrapping. The document is intended to be loaded in a sandboxed iframe
- * with no `allow-scripts` or `allow-same-origin`.
+ * Compile a Handlebars template once, without wrapping the result in a
+ * document. Used to render one page per record before wrapping once.
  */
-export function renderTemplate(
-  html: string,
-  css: string,
-  data: Record<string, unknown>,
-  /** The template's compiled Tailwind CSS; the shared bundle is used if blank. */
-  compiledCss?: string | null,
-): string {
+function renderBody(html: string, data: unknown): string {
   registerHelpers();
 
   let body: string;
@@ -140,8 +130,20 @@ export function renderTemplate(
 
   // Strip scripts and event handlers unconditionally — preview must never
   // execute code, even from a compromised server row.
-  body = sanitizeForRender(body);
+  return sanitizeForRender(body);
+}
 
+/**
+ * Wrap a rendered body in a complete HTML document with the bundled print
+ * stylesheet inlined. Hardened per V2.md §8.3: strips scripts/handlers and
+ * injects CSP before wrapping. The document is intended to be loaded in a
+ * sandboxed iframe with no `allow-scripts` or `allow-same-origin`.
+ */
+function wrapDocument(
+  body: string,
+  css: string,
+  compiledCss?: string | null,
+): string {
   const combined = buildTemplateCss(css, compiledCss);
 
   // If the template is already a full document, inject into it rather than
@@ -163,6 +165,43 @@ ${CSP_META}
 ${body}
 </body>
 </html>`;
+}
+/**
+ * Compile a Handlebars template, render it with `data`, and wrap the result
+ * in a complete HTML document with the bundled print stylesheet inlined.
+ *
+ * Hardened per V2.md §8.3: strips scripts/handlers and injects CSP before
+ * wrapping. The document is intended to be loaded in a sandboxed iframe
+ * with no `allow-scripts` or `allow-same-origin`.
+ */
+export function renderTemplate(
+  html: string,
+  css: string,
+  data: Record<string, unknown>,
+  /** The template's compiled Tailwind CSS; the shared bundle is used if blank. */
+  compiledCss?: string | null,
+): string {
+  return wrapDocument(renderBody(html, data), css, compiledCss);
+}
+
+/**
+ * Render one page per record: a single object renders one page, an array
+ * renders one page per element joined with a page break, wrapped once.
+ * Mirrors the print pipeline (print.rs step 2), so the preview shows
+ * exactly what will print.
+ */
+export function renderRecords(
+  html: string,
+  css: string,
+  data: unknown,
+  /** The template's compiled Tailwind CSS; the shared bundle is used if blank. */
+  compiledCss?: string | null,
+): string {
+  const records = Array.isArray(data) ? data : [data];
+  const body = records
+    .map((record) => renderBody(html, record))
+    .join('\n<div style="break-before:page"></div>\n');
+  return wrapDocument(body, css, compiledCss);
 }
 
 /**

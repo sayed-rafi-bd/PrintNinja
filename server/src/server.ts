@@ -5,6 +5,7 @@ import { purgeExpiredSessions } from "./domain/auth/index.js";
 import { purgeOldTombstones } from "./domain/sync/index.js";
 import type { AppDeps } from "./domain/ports.js";
 import { createDbClient } from "./infra/db/client.js";
+import { describeDatabaseUrl } from "./infra/db/describe-url.js";
 import { createDatasetRepository } from "./infra/db/datasets.js";
 import { createSettingRepository } from "./infra/db/settings.js";
 import { createFontRepository } from "./infra/db/fonts.js";
@@ -47,6 +48,10 @@ const deps: AppDeps = {
 };
 
 const app = await buildApp({ config, deps });
+app.log.info(
+  { databaseUrl: describeDatabaseUrl(config.databaseUrl) },
+  "database",
+);
 app.addHook("onClose", async () => {
   await db.$disconnect();
 });
@@ -55,7 +60,9 @@ app.addHook("onClose", async () => {
 // tombstones older than the retention window go (their absence is what
 // lets a stale cursor answer reset instead of silently missing deletes).
 // No job queue — a timer in the process entry is the whole mechanism.
-// buildApp stays schedule-free so tests never inherit timers.
+// buildApp stays schedule-free so tests never inherit timers. Serverless
+// deployments run this from a scheduled job against /v2/internal/cleanup
+// instead (see docs/RELEASE.md).
 const purgedSessionsAtStartup = await purgeExpiredSessions(deps);
 const purgedTombstonesAtStartup = await purgeOldTombstones(
   deps,
