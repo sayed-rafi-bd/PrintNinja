@@ -42,8 +42,6 @@ import {
   Key,
   Shield,
   Download,
-  Eye,
-  EyeOff,
   Trash2,
   Upload,
   Plus,
@@ -55,8 +53,6 @@ import { toast } from "sonner";
 import { diagnostics } from "@/lib/diagnostics";
 import * as share from "@/lib/share/client";
 import { normalizeServiceUrl } from "@/lib/share/session";
-
-const DEFAULT_KEY = "— not generated —";
 
 export function SettingsPage() {
   const { t } = useTranslation();
@@ -72,8 +68,6 @@ export function SettingsPage() {
 
   const [apiPort, setApiPort] = useState("17717");
   const [lanAccess, setLanAccess] = useState(false);
-  const [apiKey, setApiKey] = useState(DEFAULT_KEY);
-  const [showKey, setShowKey] = useState(false);
   const [apiStatus, setApiStatus] = useState<ApiStatus | null>(null);
   const [starting, setStarting] = useState(false);
 
@@ -126,12 +120,11 @@ export function SettingsPage() {
   const loadApiStatus = useCallback(async () => {
     if (isWebMode()) {
       const port = await readSetting("api_port");
-      const lan = await readSetting("api_lan_access");
       setApiStatus({
         running: false,
-        address: lan === "true" ? "0.0.0.0" : "127.0.0.1",
+        address: "127.0.0.1",
         port: Number(port) || 17717,
-        lan_access: lan === "true",
+        lan_access: false,
       });
       return;
     }
@@ -286,29 +279,6 @@ export function SettingsPage() {
       await loadApiStatus();
     } catch (e) {
       toast.error(`Failed to stop: ${e}`);
-    }
-  };
-
-  const regenerateKey = async () => {
-    try {
-      const key = await agent("regenerate_api_key", {});
-      setApiKey(key);
-      setShowKey(true);
-      toast.success(
-        "New API key generated — copy it now, it is not shown again",
-      );
-    } catch (e) {
-      toast.error(`Failed: ${e}`);
-    }
-  };
-
-  const copyKey = async () => {
-    if (apiKey === DEFAULT_KEY) return;
-    try {
-      await navigator.clipboard.writeText(apiKey);
-      toast.success("API key copied");
-    } catch {
-      toast.error("Clipboard unavailable — reveal and copy manually");
     }
   };
 
@@ -932,48 +902,14 @@ export function SettingsPage() {
 
                 {lanAccess && (
                   <p className="text-xs text-warning">
-                    LAN access is enabled: anyone on your network who has an API
-                    key can trigger prints.
+                    LAN access is enabled: anyone on your network can trigger
+                    prints and read templates, jobs and metrics.
                   </p>
                 )}
-
-                <div className="space-y-1">
-                  <Label>API Key</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      readOnly
-                      type={showKey ? "text" : "password"}
-                      value={apiKey}
-                      aria-label="API key"
-                    />
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      aria-label={showKey ? "Hide key" : "Reveal key"}
-                      onClick={() => setShowKey((s) => !s)}
-                    >
-                      {showKey ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
-                    </Button>
-                    <Button variant="outline" onClick={copyKey}>
-                      Copy
-                    </Button>
-                    <Button variant="outline" onClick={regenerateKey}>
-                      Regenerate
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Only a hash is stored. Regenerating invalidates the old key.
-                  </p>
-                </div>
 
                 <div className="rounded-md bg-muted p-3">
                   <p className="text-xs font-medium mb-1">curl example</p>
                   <pre className="text-[11px] overflow-x-auto">{`curl -X POST http://127.0.0.1:${apiPort}/v1/print \\
-  -H "Authorization: Bearer ${apiKey === DEFAULT_KEY ? "<your-key>" : apiKey}" \\
   -H "Content-Type: application/json" \\
   -d '{"template":"Receipt","printer":"Front Desk","data":{"order":1042}}'`}</pre>
                 </div>

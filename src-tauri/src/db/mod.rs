@@ -229,19 +229,16 @@ pub fn ensure_v2_schema(conn: &Connection) -> rusqlite::Result<()> {
         [],
     )?;
 
-    // `regenerate_api_key` upserts with ON CONFLICT(name), which SQLite only
-    // accepts when `name` has a UNIQUE constraint/index.
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_api_clients_name ON api_clients(name)",
-        [],
-    )?;
-
     // Section 3 dead code: `sample_datasets` and `presets` were created
     // by the schema but no Rust code ever read or wrote them, so they
     // were always empty. New databases no longer create them; existing
     // ones are tidied here.
     conn.execute("DROP TABLE IF EXISTS sample_datasets", [])?;
     conn.execute("DROP TABLE IF EXISTS presets", [])?;
+    // Local API keys are gone (keyless serving); drop the key table.
+    // LAN access stays as an opt-in setting, so its keys are kept.
+    conn.execute("DROP TABLE IF EXISTS api_clients", [])?;
+    conn.execute("DROP INDEX IF EXISTS idx_api_clients_name", [])?;
 
     ensure_created_by_allows_sync(conn)?;
 
@@ -737,10 +734,7 @@ fn ensure_p2_checks(conn: &Connection) -> rusqlite::Result<()> {
              WHERE duration_ms IS NOT NULL AND duration_ms < 0;
          UPDATE print_jobs SET record_index = NULL
              WHERE record_index IS NOT NULL AND record_index < 0;
-         DELETE FROM settings WHERE key = '';
-         DELETE FROM api_clients WHERE key_hash = '';
-         UPDATE api_clients SET name = '(unnamed ' || id || ')'
-             WHERE trim(name) = '';",
+         DELETE FROM settings WHERE key = '';",
     )?;
 
     rebuild_p2(
@@ -892,22 +886,6 @@ fn ensure_p2_checks(conn: &Connection) -> rusqlite::Result<()> {
         );",
         "key, value, sync_state, synced_at",
         &[],
-    )?;
-    rebuild_p2(
-        conn,
-        "api_clients",
-        "length(key_hash) > 0",
-        "CREATE TABLE api_clients_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL CHECK(length(name) > 0),
-            key_hash TEXT NOT NULL CHECK(length(key_hash) > 0),
-            scopes TEXT NOT NULL DEFAULT 'print',
-            allowed_ips TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            last_used_at TEXT
-        );",
-        "id, name, key_hash, scopes, allowed_ips, created_at, last_used_at",
-        &["CREATE UNIQUE INDEX IF NOT EXISTS idx_api_clients_name ON api_clients(name);"],
     )?;
     Ok(())
 }

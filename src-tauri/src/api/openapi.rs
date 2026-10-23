@@ -48,20 +48,14 @@ impl Default for OpenApiSpec {
                     "get": {
                         "summary": "List printers",
                         "responses": {
-                            "200": { "description": "Printers, with a `count`" },
-                            "401": { "description": "Missing or invalid API key" },
-                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
-                        }
+                            "200": { "description": "Printers, with a `count`" },                        }
                     }
                 },
                 "/v1/templates": {
                     "get": {
                         "summary": "List templates",
                         "responses": {
-                            "200": { "description": "Templates, with a `count`" },
-                            "401": { "description": "Missing or invalid API key" },
-                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
-                        }
+                            "200": { "description": "Templates, with a `count`" },                        }
                     }
                 },
                 "/v1/metrics": {
@@ -69,10 +63,7 @@ impl Default for OpenApiSpec {
                         "summary": "Operational counters",
                         "description": "Jobs by status, active batches, queue-tracked printers, and completed totals since boot. Same shape every call; poll it.",
                         "responses": {
-                            "200": { "description": "Counters" },
-                            "401": { "description": "Missing or invalid API key" },
-                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
-                        }
+                            "200": { "description": "Counters" },                        }
                     }
                 },
                 "/v1/metrics/prometheus": {
@@ -80,10 +71,7 @@ impl Default for OpenApiSpec {
                         "summary": "Prometheus exposition",
                         "description": "Same counters as /v1/metrics in text format 0.0.4.",
                         "responses": {
-                            "200": { "description": "Metrics in Prometheus text format" },
-                            "401": { "description": "Missing or invalid API key" },
-                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
-                        }
+                            "200": { "description": "Metrics in Prometheus text format" },                        }
                     }
                 },
                 "/v1/print": {
@@ -91,9 +79,6 @@ impl Default for OpenApiSpec {
                         "summary": "Render a template and print it",
                         "description": "## Renders, then prints.\n\n`template` is required — the API has no inline HTML body, so there is\nnothing to render without one. `data` is optional. The response reports\nthe real outcome:\n\n* `200` — printed, with the job id and duration.\n* `400` — missing `template`, or a `callback_url` was sent (callbacks are not implemented; poll `GET /v1/jobs/{id}` for the outcome).\n* `404` — printer or template not found, or the template has no current version.\n* `500` — the transport failed (printer offline, unsupported platform, …).\n\nSend `Idempotency-Key` on a retryable request. A replayed key returns\n`200` without printing a second copy.\n\nThis runs the same pipeline as the desktop UI and serialises on the\ntarget printer, so an API job and a UI job cannot interleave on one head.",
                         "parameters": [
-                            { "name": "Authorization", "in": "header", "required": true,
-                              "schema": { "type": "string" },
-                              "description": "`Bearer <api-key>`" },
                             { "name": "Idempotency-Key", "in": "header", "required": false,
                               "schema": { "type": "string" },
                               "description": "Optional de-duplication key." }
@@ -128,10 +113,7 @@ impl Default for OpenApiSpec {
                         },
                         "responses": {
                             "200": { "description": "Printed: `{ job_id, status, duration_ms }`; also the `duplicate` body for a replayed `Idempotency-Key`" },
-                            "400": { "description": "`template` is required, or `callback_url` was sent (not supported)" },
-                            "401": { "description": "Missing or invalid API key" },
-                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" },
-                            "404": { "description": "Printer, template, or current version not found" },
+                            "400": { "description": "`template` is required, or `callback_url` was sent (not supported)" },                            "404": { "description": "Printer, template, or current version not found" },
                             "415": { "description": "Wrong or missing `Content-Type`" },
                             "422": { "description": "Malformed JSON, or `printer` missing" },
                             "500": { "description": "The transport failed" }
@@ -142,10 +124,7 @@ impl Default for OpenApiSpec {
                     "get": {
                         "summary": "List jobs",
                         "responses": {
-                            "200": { "description": "Jobs, with a `count`" },
-                            "401": { "description": "Missing or invalid API key" },
-                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
-                        }
+                            "200": { "description": "Jobs, with a `count`" },                        }
                     }
                 },
                 "/v1/jobs/{id}": {
@@ -153,10 +132,7 @@ impl Default for OpenApiSpec {
                         "summary": "Get job status",
                         "responses": {
                             "200": { "description": "Job record" },
-                            "400": { "description": "`id` is not an integer" },
-                            "401": { "description": "Missing or invalid API key" },
-                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" },
-                            "404": { "description": "No such job" }
+                            "400": { "description": "`id` is not an integer" },                            "404": { "description": "No such job" }
                         }
                     },
                     "delete": {
@@ -164,10 +140,7 @@ impl Default for OpenApiSpec {
                         "description": "Only a `queued` job can be cancelled; the row ends `cancelled`.",
                         "responses": {
                             "204": { "description": "Cancelled (no body)" },
-                            "400": { "description": "`id` is not an integer, or the job is missing or not cancellable (already started or finished)" },
-                            "401": { "description": "Missing or invalid API key" },
-                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
-                        }
+                            "400": { "description": "`id` is not an integer, or the job is missing or not cancellable (already started or finished)" },                        }
                     }
                 },
                 "/v1/jobs/{id}/retry": {
@@ -176,10 +149,7 @@ impl Default for OpenApiSpec {
                         "description": "Only a terminal row (`failed`, `cancelled`) is re-queued — a running or queued row is refused, so the worker can never print twice. The worker prints the re-queued row.",
                         "responses": {
                             "200": { "description": "Re-queued: `{ job_id, status }`" },
-                            "400": { "description": "`id` is not an integer, or the job is not failed/cancelled" },
-                            "401": { "description": "Missing or invalid API key" },
-                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" },
-                            "404": { "description": "No such job" }
+                            "400": { "description": "`id` is not an integer, or the job is not failed/cancelled" },                            "404": { "description": "No such job" }
                         }
                     }
                 },
@@ -187,10 +157,7 @@ impl Default for OpenApiSpec {
                     "get": {
                         "summary": "This document",
                         "responses": {
-                            "200": { "description": "The OpenAPI description of this API" },
-                            "401": { "description": "Missing or invalid API key" },
-                            "403": { "description": "Key lacks the required scope (GET needs `read`, every other method `print`), or its IP allowlist refused the caller" }
-                        }
+                            "200": { "description": "The OpenAPI description of this API" },                        }
                     }
                 }
             }),

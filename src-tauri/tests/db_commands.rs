@@ -716,11 +716,6 @@ fn reset_database_recreates_the_file_fresh() {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO api_clients (name, key_hash) VALUES ('c', 'h')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
             "INSERT INTO queued_uses (server_template_id, count) VALUES ('t-1', 2)",
             [],
         )
@@ -757,7 +752,6 @@ fn reset_database_recreates_the_file_fresh() {
             "synced_profiles",
             "batches",
             "printers",
-            "api_clients",
             "queued_uses",
             "sync_state",
             "settings",

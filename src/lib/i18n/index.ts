@@ -117,6 +117,9 @@ const resources = {
         sync_syncing: "Refreshing…",
         sync_now: "Refresh cache",
         sync_failed: "Last refresh failed: {{error}}",
+        lan_on: "LAN access is on",
+        lan_on_detail:
+          "Anyone on your network can reach the local API. Select to turn it off in Settings.",
       },
       designer: {
         title: "Designer",
@@ -209,6 +212,7 @@ const resources = {
         withdrawn: "Withdrawn",
         online: "Online",
         offline: "Offline",
+        lan: "LAN",
       },
       pages: {
         designer: "Build and edit print templates.",

@@ -89,6 +89,43 @@ function ShareIndicator() {
   );
 }
 
+/** Red topbar alert while the local API is exposed to the LAN.
+ * Loopback serving stays silent; LAN mode links straight to the toggle
+ * that turns it off (Settings → API and automation). */
+function LanIndicator() {
+  const { t } = useTranslation();
+  const location = useLocation();
+  const [lanOn, setLanOn] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const status = await agent("get_api_status", {});
+        if (!cancelled) setLanOn(!!status?.running && !!status?.lan_access);
+      } catch {
+        if (!cancelled) setLanOn(false);
+      }
+    };
+    void check();
+    window.addEventListener("focus", check);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", check);
+    };
+  }, [location.pathname]);
+  if (!lanOn) return null;
+  return (
+    <Link
+      to="/settings?section=api"
+      title={`${t("shell.lan_on")} — ${t("shell.lan_on_detail")}`}
+      aria-label={`${t("shell.lan_on")}: ${t("shell.lan_on_detail")}`}
+      data-testid="lan-indicator"
+    >
+      <StatusBadge status="lan" label={t("shell.lan_on")} />
+    </Link>
+  );
+}
+
 /** Banner over the content while the gate is open but the server is down. */
 function OfflineBanner() {
   const { t } = useTranslation();
@@ -221,6 +258,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </kbd>
         </button>
         <div className="ml-auto flex items-center gap-2">
+          <LanIndicator />
           <div className="hidden sm:block">
             <ShareIndicator />
           </div>

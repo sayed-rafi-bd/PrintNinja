@@ -155,7 +155,7 @@ Priorities: **P0** = correctness/security/data-loss, **P1** = UX/perf/tech-debt 
 - `worker.rs:157-202` hot-spins `claim_next`, `recover_interrupted` marks clean-shutdown mid-print as `failed` with no resume; batch counters not recomputed after `delete_job` (`history.rs`), `delete_printer` (`printer.rs:141-152`) leaves `print_jobs.printer_id` dangling.
 - Non-Windows `html_to_pdf/html_to_raster` always `Err` (`render/mod.rs:58-66,191-199`) — Linux CI/dev can never print. Gate print-path E2E behind the virtual printer or a PDF-stub feature.
 - `transport/`: `windows_spooler.rs:119,137,199` raw `unsafe`; `WindowsUsbPrinter::new(name,0,0)` vid/pid zero (`mod.rs:199-201`); off-Windows `system/usb/bt` returns `None` with no CI. `status.rs:316-354` NAT-shared-IP silence map + 1h `Silent` cooldown undocumented.
-- REST authZ (`api/routes.rs:74-150,172-237`): `allowed_ips` exact-string (no CIDR, IPv6 zone-id mismatch), idempotency fast-path returns before `last_used_at` audit, `list_jobs` caps 200 with no pagination, `batch_print` builds ≤5000 rows inside one `unchecked_transaction` (UI stall).
+- REST hardening (`api/routes.rs`): no auth on loopback — CORS allows only Tauri/loopback origins so random web pages can't drive printing; idempotency relies on the unique index (no middleware fast-path), `list_jobs` caps 200 with no pagination, `deeplink.rs:26-69` accepts any post-`printninja://` path, unbounded `callback` (exfiltration); `error.rs:1-17` serializes internal `Database/Internal` strings to IPC/REST.
 - `redact_with_secrets` (`commands/print.rs:907-955`) naive substring replace (4-char minimum still hits common words); `data/fetcher.rs:135-214` documents a DNS-rebinding gap; `deeplink.rs:26-69` accepts any post-`printninja://` path, unbounded `callback` (exfiltration), `copies` overflow silently defaults; `error.rs:1-17` serializes internal `Database/Internal` strings to IPC/REST.
 
 ## 4. E2E testing to add — DONE (2026-10-21, `feat/improvements-backlog`)
@@ -170,14 +170,11 @@ as the pre-existing suite. What each item became:
   `src-tauri/tests/virtual_printer.rs`. Deliberately no "success row
   in History" browser spec: browsers cannot do raw TCP, and the fake
   agent has no worker by design.
-- batch: UI create/cancel/retry + validation (`batch.e2e.ts`) over a
-  fake store mirroring Rust's validation and cancel/retry rules;
-  worker drain + counters stay in Rust worker tests.
+- batch: removed (single print covers data-URL arrays as multi-page documents; worker batch-progress rows remain readable for old history).
 - local-api: covered at the Rust integration level instead of
-  Playwright (`api_routes.rs`: scopes, allowlist incl. fail-closed,
-  idempotency incl. parallel same-key, callback 400, print/batch
-  pipelines; `api_server_lifecycle.rs`: busy-port message, key
-  rotation invalidates, status from settings). The desktop
+  Playwright (`api_routes.rs`: idempotency incl. parallel same-key,
+  callback 400, print pipelines; `api_server_lifecycle.rs`: busy-port
+  message, loopback-only status from settings). The desktop
   start/stop wiring needs a Tauri runtime and stays manual.
 - printers / deeplink / designer-validation / offline-library /
   settings-admin / negative-community / a11y-i18n: all present

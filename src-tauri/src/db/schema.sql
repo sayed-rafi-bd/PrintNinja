@@ -82,16 +82,6 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     timings_json TEXT
 );
 
-CREATE TABLE IF NOT EXISTS api_clients (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL CHECK(length(name) > 0),
-    key_hash TEXT NOT NULL CHECK(length(key_hash) > 0),
-    scopes TEXT NOT NULL DEFAULT 'print',
-    allowed_ips TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    last_used_at TEXT
-);
-
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY CHECK(length(key) > 0),
     value TEXT NOT NULL

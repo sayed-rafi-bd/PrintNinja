@@ -401,7 +401,6 @@ const acknowledgedStubs: string[] = [
   "start_api_server",
   "stop_api_server",
   "get_api_status",
-  "regenerate_api_key",
   "refresh_background",
 ];
 

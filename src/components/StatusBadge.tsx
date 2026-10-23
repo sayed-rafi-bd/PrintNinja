@@ -37,6 +37,8 @@ export const STATUS = {
   // Printers
   online: { tone: "success", icon: Wifi, label: "Online" },
   offline: { tone: "danger", icon: WifiOff, label: "Offline" },
+  // Local API exposure: loopback is silent, LAN shows a red alert.
+  lan: { tone: "danger", icon: Wifi, label: "LAN" },
   // Sync cache (section 6.9)
   synced: { tone: "success", icon: CheckCircle2, label: "Synced" },
   syncing: { tone: "info", icon: Loader2, label: "Syncing", spin: true },

@@ -1,7 +1,6 @@
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
-    middleware::{self, Next},
     response::Response,
     routing::{get, post},
     Json, Router,
@@ -35,9 +34,6 @@ pub struct ApiState {
 /// Registering the same path twice makes axum shadow the first method,
 /// silently dropping GET or DELETE.
 pub fn router_with_state(state: ApiState, lan_access: bool) -> Router {
-    let auth_ctx = AuthCtx {
-        db: state.db.clone(),
-    };
     let mut cors = tower_http::cors::CorsLayer::new()
         .allow_methods(tower_http::cors::Any)
         .allow_headers(tower_http::cors::Any);
@@ -58,192 +54,11 @@ pub fn router_with_state(state: ApiState, lan_access: bool) -> Router {
         .route("/v1/metrics", get(metrics))
         .route("/v1/metrics/prometheus", get(metrics_prometheus))
         .route("/v1/openapi.json", get(openapi))
-        .with_state(state.clone())
+        .with_state(state)
         // Per-request spans (method, path, status, latency): the only way
         // to join a slow print across middleware and handler in the logs.
         .layer(tower_http::trace::TraceLayer::new_for_http())
-        .layer(middleware::from_fn(
-            move |req: axum::extract::Request, next: Next| {
-                let auth = auth_ctx.clone();
-                async move { auth_middleware_inner(auth, req, next).await }
-            },
-        ))
         .layer(cors)
-}
-
-/// Reject unauthenticated requests before they reach a handler.
-///
-/// The DB state is passed in explicitly (via a closure) because `State` is
-/// not available inside middleware request extensions.
-async fn auth_middleware_inner(
-    auth: AuthCtx,
-    request: axum::extract::Request,
-    next: Next,
-) -> Response {
-    let headers = request.headers().clone();
-    // Health is intentionally open so probes work without a key.
-    if request.uri().path() == "/v1/health" {
-        return next.run(request).await;
-    }
-
-    let token = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
-        .map(|s| s.trim().to_string());
-
-    let Some(token) = token else {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "missing Authorization: Bearer <key>" })),
-        )
-            .into_response();
-    };
-
-    // All DB access happens in a sync helper so the MutexGuard is never
-    // held across an await point.
-
-    // GET reads; every other method changes what gets printed — a print,
-    // a re-queue or a cancel — so it needs the `print` scope.
-    let required_scope = if request.method() == axum::http::Method::GET {
-        "read"
-    } else {
-        "print"
-    };
-    // The peer address is inserted by the serve call's
-    // `into_make_service_with_connect_info`. Absent means the listener
-    // lost it — the allowlist treats that as a refusal, never a pass.
-    let peer = request
-        .extensions()
-        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-        .map(|c| c.0);
-
-    let decision = check_auth(
-        &auth,
-        &token,
-        required_scope,
-        peer,
-        headers.get("idempotency-key"),
-    );
-
-    match decision {
-        AuthDecision::Allow => next.run(request).await,
-        AuthDecision::Duplicate(job_id) => (
-            StatusCode::OK,
-            Json(json!({
-                "status": "duplicate",
-                "message": "idempotency key already used; job not created",
-                "job_id": job_id.to_string()
-            })),
-        )
-            .into_response(),
-        AuthDecision::Forbidden(reason) => {
-            (StatusCode::FORBIDDEN, Json(json!({ "error": reason }))).into_response()
-        }
-        AuthDecision::Unauthorized => (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "invalid API key" })),
-        )
-            .into_response(),
-        AuthDecision::Unavailable => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": "database unavailable" })),
-        )
-            .into_response(),
-    }
-}
-
-/// Outcome of the auth check.
-enum AuthDecision {
-    Allow,
-    /// Key already taken; carries the job that owns it.
-    Duplicate(i64),
-    /// The key verified but is refused here: wrong scope for this route,
-    /// or its IP allowlist does not include the peer.
-    Forbidden(String),
-    Unauthorized,
-    Unavailable,
-}
-
-/// Synchronous auth + enforcement. Keeping this non-async guarantees
-/// the DB mutex is released before the handler future is awaited.
-///
-/// The order is the security: the key verifies first, then its IP
-/// allowlist, then the scope for this route, and only then the idempotency
-/// replay fast path — an unauthenticated or under-scoped request must
-/// never be answered with the duplicate's 200, which would leak that a
-/// key exists and is in use.
-fn check_auth(
-    auth: &AuthCtx,
-    token: &str,
-    required_scope: &str,
-    peer: Option<std::net::SocketAddr>,
-    idempotency: Option<&axum::http::HeaderValue>,
-) -> AuthDecision {
-    let Ok(guard) = auth.db.lock() else {
-        return AuthDecision::Unavailable;
-    };
-    let conn = guard.connection();
-
-    let Some(key) = crate::commands::api::verify_stored_key(conn, token) else {
-        return AuthDecision::Unauthorized;
-    };
-
-    // `allowed_ips` is an allowlist when configured (comma list or JSON
-    // array of exact peer-IP strings, e.g. `203.0.113.9`). Empty — which
-    // is every key the app creates — means no restriction.
-    if !key.allowed_ips.is_empty() {
-        match peer {
-            Some(addr)
-                if key
-                    .allowed_ips
-                    .iter()
-                    .any(|ip| ip == &addr.ip().to_string()) => {}
-            Some(addr) => {
-                return AuthDecision::Forbidden(format!("key is not allowed from {}", addr.ip()))
-            }
-            None => {
-                return AuthDecision::Forbidden(
-                    "peer address unknown; this key's IP allowlist applies".into(),
-                )
-            }
-        }
-    }
-
-    // The default key holds `print,read`; a hand-set key may hold either.
-    if !key.check_scope(required_scope) {
-        return AuthDecision::Forbidden(format!("key lacks scope '{required_scope}'"));
-    }
-
-    // Idempotency replay must not print twice (PLANNING.md 7.1). A fast
-    // path only — the atomic reservation is the unique index on
-    // `idempotency_key` hit at begin_job (P12).
-    if let Some(key) = idempotency.and_then(|v| v.to_str().ok()) {
-        let existing: Option<i64> = conn
-            .query_row(
-                "SELECT id FROM print_jobs WHERE idempotency_key = ?1",
-                [key],
-                |r| r.get(0),
-            )
-            .ok();
-        if let Some(id) = existing {
-            return AuthDecision::Duplicate(id);
-        }
-    }
-
-    // The key authenticated an allowed request: record the use (P12).
-    let _ = conn.execute(
-        "UPDATE api_clients SET last_used_at = datetime('now') WHERE id = ?1",
-        [key.id],
-    );
-
-    AuthDecision::Allow
-}
-
-/// State threaded into the auth middleware.
-#[derive(Clone)]
-pub struct AuthCtx {
-    pub db: DbState,
 }
 
 use axum::response::IntoResponse;
@@ -457,8 +272,7 @@ async fn print_job(
         data_url: req.data_url.clone(),
         test: req.test,
         source: Some("api".into()),
-        // Recorded by the begin_job INSERT under a unique index; `check_auth`
-        // only fast-paths an existing row with this key.
+        // Recorded by the begin_job INSERT under a unique index.
         idempotency_key,
     };
 
@@ -481,8 +295,7 @@ async fn print_job(
         }
         // Lost the insert race for this key: the unique index recorded the
         // winner's row before either request printed, so report that job
-        // instead of printing again (P12). Same body as the middleware's
-        // fast-path replay above.
+        // instead of printing again (P12).
         Err(crate::error::AppError::DuplicateJob(id)) => Ok((
             StatusCode::OK,
             Json(json!({

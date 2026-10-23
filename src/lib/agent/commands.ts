@@ -174,11 +174,11 @@ export interface AgentCommands {
   reprint_job: [{ id: number }, HistoryJob];
   retry_job: [{ id: number }, HistoryJob];
   delete_job: [{ id: number }, null];
-  // Local API server
+  // Local API server (loopback by default, LAN only when enabled;
+  // there is no key — binding is the entire security boundary)
   start_api_server: [{ port: number; lan_access: boolean }, string];
   stop_api_server: [{}, null];
   get_api_status: [{}, ApiStatus];
-  regenerate_api_key: [{}, string];
   // Misc
   ping: [{}, null];
   parse_deeplink: [{ url: string }, DeeplinkResult];

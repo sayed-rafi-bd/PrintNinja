@@ -16,8 +16,6 @@ use tauri::Manager;
 
 pub use db::DbState;
 pub use error::{AppError, AppResult};
-// Re-exported so integration tests can assert API-key verification.
-pub use commands::api::verify_api_key;
 
 /// Wraps the generated command handler so every IPC call is logged.
 /// A generic fn (rather than a `let`) lets the compiler infer the closure's
@@ -321,7 +319,6 @@ pub fn run() {
             commands::api::start_api_server,
             commands::api::stop_api_server,
             commands::api::get_api_status,
-            commands::api::regenerate_api_key,
             commands::deeplink_cmd::parse_deeplink,
         ]))
         .build(tauri::generate_context!())

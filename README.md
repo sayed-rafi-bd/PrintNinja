@@ -11,7 +11,7 @@ Silent print for Windows and Android — design HTML templates, fetch JSON data,
 - **Templates** — Mine and Saved as tables (status, page size, updated); Community stays a gallery with search and sort. Print and Edit straight from a row. Save, download as a read-only copy, and print offline.
 - **Printers** — grouped Network, USB, Bluetooth and System; test print per row; setup in a side panel (IPP / raw TCP 9100, language, paper, DPI). Status shows only when known.
 - **History** — sticky filter bar (status, source, printer, search, dates), saved filter sets, bulk reprint and retry (each confirmed), CSV export, retention.
-- **Automation** — local REST API (`axum`, `127.0.0.1:17717`, Bearer + idempotency, CORS scoped, LAN off by default) and `printninja://` deep links with trust list and confirmation sheet
+- **Automation** — local REST API (`axum`, `127.0.0.1:17717`, keyless loopback-only with opt-in LAN, idempotency keys) and `printninja://` deep links with trust list and confirmation sheet
 - **Share** — hosted `server/` (TypeScript Fastify + Turso/libSQL via Prisma, `argon2id` with scrypt fallback) at `share_service_url` + `share_session_token` (Settings → Share: Register/Login/Logout, handle `alphanumeric+_-` 1–32, password ≥8), `/v2` API: auth, templates (client UUID, revisions with `428`/`409`, publish/unpublish), Community, Saved, delta sync, sample datasets, printer profiles, fonts and account preferences; every failure uses the `{ error: { code, message, details?, request_id } }` envelope (`server/openapi/openapi.json` is the contract)
 - **Corporate UI** — one light theme in a restrained slate teal; IBM Plex bundled for identical rendering on every workstation, offline. One status vocabulary (colour + icon + word) on every screen. `Ctrl/Cmd+K` palette, `G` then `P/H/D/T/R/S` navigation, full keyboard path, WCAG 2.1 AA as the internal bar. **Comfortable/Compact density** and optional **name and logo** in Settings → General; **Settings → Setup** checklist for admins. See [`docs/UI_GUIDE.md`](docs/UI_GUIDE.md).
 - **Queue** — per-printer `Semaphore` (no byte interleaving), bounded admission, `POST /v1/print` runs the same pipeline as the UI
@@ -27,7 +27,7 @@ Silent print for Windows and Android — design HTML templates, fetch JSON data,
 | Barcodes | `bwip-js` `toSVG()` (inline SVG, no canvas data-URI) |
 | Markdown | `react-markdown` + `remark-gfm` (no `rehype-raw` → XSS as text, links `http/https/mailto` only) |
 | Sanitize | `sanitize.ts` + `handlebars.rs` strip `<script>`/`on*`, `find_remote_refs` → `data: URIs`, CSP `default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:`, `sandbox=""` iframes |
-| API | `axum` + `tower-http` (local `127.0.0.1:17717` — API-key scopes and, when set, an IP allowlist are enforced) |
+| API | `axum` + `tower-http` (local `127.0.0.1:17717`, keyless loopback-only with opt-in LAN) |
 | Share service | `server/` (TypeScript, Fastify 5 + Zod 4, Turso/libSQL via Prisma 7, `argon2id` + scrypt fallback) — auth, templates, Community, Saved, delta sync, datasets, profiles, fonts, preferences over `/v2`; every failure uses the `{ error: { code, message, details?, request_id } }` envelope (`server/openapi/openapi.json` is the contract) |
 | Secrets | No keyring: the share-session token is plain text in the local `settings` table (moving it to an OS key store is a follow-up). `rendered_html` is secret-redacted before it is stored in `print_jobs` |
 | Android | Kotlin plugins: WebView → PDF, `UsbManager`, RFCOMM |

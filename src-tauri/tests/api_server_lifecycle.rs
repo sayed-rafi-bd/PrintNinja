@@ -1,11 +1,9 @@
 //! Lifecycle coverage for the local REST API server commands that the
-//! HTTP-level suite (api_routes.rs) cannot reach: port binding,
-//! key rotation and status reporting live in Tauri commands, so these
-//! tests drive the extracted helpers against a real database.
+//! HTTP-level suite (api_routes.rs) cannot reach: port binding and
+//! status reporting live in Tauri commands, so these tests drive the
+//! extracted helpers against a real database.
 
-use printninja_lib::commands::api::{
-    api_status_from_db, bind_addr, rotate_api_key, verify_api_key,
-};
+use printninja_lib::commands::api::{api_status_from_db, bind_addr};
 use printninja_lib::db::Database;
 use std::sync::{Arc, Mutex};
 
@@ -44,31 +42,16 @@ async fn a_busy_port_fails_with_the_address_in_the_message() {
     let _listener = bind_addr(&addr).expect("free port binds");
 }
 
-/// Rotating the key replaces the row: the new plaintext verifies and
-/// the old one stops immediately — a leaked key dies on regenerate.
-#[test]
-fn key_rotation_invalidates_the_previous_key() {
-    let db = test_db();
-    let first = with_conn(&db, rotate_api_key).expect("first key");
-    assert!(with_conn(&db, |c| verify_api_key(c, &first)));
-    let second = with_conn(&db, rotate_api_key).expect("second key");
-    assert_ne!(first, second, "rotation mints a fresh secret");
-    assert!(with_conn(&db, |c| verify_api_key(c, &second)));
-    assert!(
-        !with_conn(&db, |c| verify_api_key(c, &first)),
-        "the old key stops verifying at once"
-    );
-}
-
 /// Status reports settings defaults until the user changes them, and
 /// the running flag passed in — the UI polls this to show Stop/Start.
+/// LAN is opt-in and off by default; enabling it binds 0.0.0.0.
 #[test]
 fn status_reports_settings_and_the_running_flag() {
     let db = test_db();
     let idle = with_conn(&db, |c| api_status_from_db(c, false));
     assert_eq!(idle.port, 17717);
     assert_eq!(idle.address, "127.0.0.1");
-    assert!(!idle.lan_access);
+    assert!(!idle.lan_access, "LAN is off by default");
     assert!(!idle.running);
 
     with_conn(&db, |c| {
@@ -90,12 +73,4 @@ fn status_reports_settings_and_the_running_flag() {
     assert_eq!(live.address, "0.0.0.0");
     assert!(live.lan_access);
     assert!(live.running);
-
-    // LAN on but never started: the default bind follows the LAN flag.
-    with_conn(&db, |c| {
-        c.execute("DELETE FROM settings WHERE key = 'api_bind'", [])
-            .unwrap()
-    });
-    let lan_default = with_conn(&db, |c| api_status_from_db(c, false));
-    assert_eq!(lan_default.address, "0.0.0.0");
 }

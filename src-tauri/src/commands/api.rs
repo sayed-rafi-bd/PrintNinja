@@ -1,4 +1,3 @@
-use crate::api::auth::ApiKey;
 use crate::db::DbState;
 use crate::error::{AppError, AppResult};
 use serde::{Deserialize, Serialize};
@@ -100,6 +99,12 @@ pub struct ApiServerHandle {
     pub port: u16,
 }
 
+impl ApiServerHandle {
+    fn reset(&self) {
+        // Values stay so the UI can still show the last bound address.
+    }
+}
+
 #[tauri::command(rename_all = "snake_case")]
 pub fn start_api_server(
     app: AppHandle,
@@ -182,8 +187,7 @@ pub fn start_api_server(
         RUNNING.store(true, Ordering::Relaxed);
         tracing::info!("API server listening on {}", log_addr);
 
-        // ConnectInfo feeds the auth middleware's IP allowlist: without it
-        // a non-empty `allowed_ips` has no peer to compare against (P12).
+        // Keep the peer address available to handlers via ConnectInfo.
         let server = axum::serve(
             listener,
             router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
@@ -235,107 +239,6 @@ pub fn bind_addr(addr: &str) -> AppResult<tokio::net::TcpListener> {
         .map_err(|e| AppError::Internal(format!("Listener setup failed: {e}")))
 }
 
-/// Issue a fresh API key, storing only the SHA-256 hash (PLANNING.md §11).
-/// The plaintext is returned exactly once so the user can copy it.
-#[tauri::command]
-pub fn regenerate_api_key(db: State<DbState>) -> AppResult<String> {
-    let guard = db
-        .lock()
-        .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
-    rotate_api_key(guard.connection())
-}
-
-/// Rotate the default API key, returning the plaintext exactly once.
-/// The old key stops verifying the moment the row is replaced.
-pub fn rotate_api_key(conn: &rusqlite::Connection) -> AppResult<String> {
-    let (plaintext, hash) = ApiKey::generate();
-
-    conn.execute(
-        "INSERT INTO api_clients (name, key_hash, scopes) VALUES ('default', ?1, 'print,read')
-         ON CONFLICT(name) DO UPDATE SET key_hash = excluded.key_hash",
-        [&hash],
-    )?;
-
-    Ok(plaintext)
-}
-
-/// Verify an inbound key against the stored hash (constant-time compare)
-/// and return the matched row — the middleware needs its scopes and IP
-/// allowlist to enforce them, and its id to stamp `last_used_at`.
-pub fn verify_stored_key(conn: &rusqlite::Connection, presented: &str) -> Option<ApiKey> {
-    let hash = crate::api::auth::hash_key(presented);
-
-    let mut stmt =
-        match conn.prepare("SELECT id, name, key_hash, scopes, allowed_ips FROM api_clients") {
-            Ok(s) => s,
-            Err(_) => return None,
-        };
-
-    let rows = match stmt.query_map([], |r| {
-        Ok(ApiKey {
-            id: r.get(0)?,
-            name: r.get(1)?,
-            key_hash: r.get(2)?,
-            scopes: parse_list(r.get::<_, Option<String>>(3)?.as_deref()),
-            allowed_ips: parse_list(r.get::<_, Option<String>>(4)?.as_deref()),
-        })
-    }) {
-        Ok(r) => r,
-        Err(_) => return None,
-    };
-
-    let matched = rows
-        .flatten()
-        .find(|stored| constant_time_eq(stored.key_hash.as_bytes(), hash.as_bytes()));
-    matched
-}
-
-/// `scopes` and `allowed_ips` are TEXT columns: a comma list (`print,read`)
-/// or a JSON array — both accepted, since only `print,read` has ever been
-/// written. NULL and empty become an empty list.
-fn parse_list(raw: Option<&str>) -> Vec<String> {
-    let Some(raw) = raw else {
-        return Vec::new();
-    };
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return Vec::new();
-    }
-    if raw.starts_with('[') {
-        if let Ok(list) = serde_json::from_str::<Vec<String>>(raw) {
-            return list;
-        }
-    }
-    raw.split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
-
-/// Length-independent byte comparison to avoid leaking hash prefixes.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
-}
-
-impl ApiServerHandle {
-    fn reset(&self) {
-        // Values stay so the UI can still show the last bound address.
-    }
-}
-
-/// Re-exported for integration tests so they can assert key verification
-/// without reaching into private modules.
-pub fn verify_api_key(conn: &rusqlite::Connection, presented: &str) -> bool {
-    verify_stored_key(conn, presented).is_some()
-}
-
 /// Spawn helper kept public so tests can start an ephemeral server.
 pub fn spawn_test_server(port: u16) -> std::io::Result<(tokio::net::TcpListener, String)> {
     let addr = format!("127.0.0.1:{}", port);
@@ -344,37 +247,4 @@ pub fn spawn_test_server(port: u16) -> std::io::Result<(tokio::net::TcpListener,
     let listener = tokio::net::TcpListener::from_std(listener)
         .map_err(|e| std::io::Error::other(e.to_string()))?;
     Ok((listener, addr))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn constant_time_eq_matches_equal() {
-        assert!(constant_time_eq(b"abc", b"abc"));
-    }
-
-    #[test]
-    fn constant_time_eq_rejects_different() {
-        assert!(!constant_time_eq(b"abc", b"abd"));
-        assert!(!constant_time_eq(b"abc", b"abcd"));
-    }
-
-    #[test]
-    fn generate_api_key_is_prefixed_and_long() {
-        let (plain, hash) = ApiKey::generate();
-        assert!(plain.starts_with("pn_live_"));
-        // 8-char prefix + 32 random alphanumerics
-        assert_eq!(plain.len(), 40, "key must be pn_live_ + 32 chars");
-        assert_eq!(hash.len(), 64, "sha256 hex is 64 chars");
-    }
-
-    #[test]
-    fn key_roundtrip_verifies() {
-        let (plain, hash) = ApiKey::generate();
-        assert_eq!(crate::api::auth::hash_key(&plain), hash);
-        assert!(crate::api::auth::verify_key(&plain, &hash));
-        assert!(!crate::api::auth::verify_key("pn_live_wrong", &hash));
-    }
 }

@@ -116,16 +116,6 @@ fn p2_checks_sanitize_then_rebuild() {
     .unwrap();
     conn.execute("INSERT INTO settings (key, value) VALUES ('', 'x')", [])
         .unwrap();
-    conn.execute(
-        "INSERT INTO api_clients (name, key_hash) VALUES ('Dead', '')",
-        [],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO api_clients (name, key_hash) VALUES ('', 'h1')",
-        [],
-    )
-    .unwrap();
 
     init(&conn).expect("upgrade with sanitize + rebuild works");
 
@@ -195,17 +185,16 @@ fn p2_checks_sanitize_then_rebuild() {
         0,
         "empty setting keys are dropped"
     );
-    let names: Vec<String> = conn
-        .prepare("SELECT name FROM api_clients ORDER BY id")
-        .unwrap()
-        .query_map([], |r| r.get(0))
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
+    let clients_table: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'api_clients'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(
-        names,
-        vec!["(unnamed 2)"],
-        "empty-hash clients are dropped; empty names stay unique"
+        clients_table, 0,
+        "api_clients is dropped: local API keys no longer exist"
     );
 
     // And the CHECKs are live now.

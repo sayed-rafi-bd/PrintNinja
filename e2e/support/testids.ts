@@ -20,6 +20,8 @@ export const testids = {
   shellApp: "shell-app",
   /** The sync-state chip in the shell (one wrapper, badge inside varies). */
   syncChip: "sync-chip",
+  /** Red topbar alert while the local API is exposed to the LAN. */
+  lanIndicator: "lan-indicator",
   /** Banner over the content while open but offline. */
   offlineBanner: "offline-banner",
   /** Banner on Templates when rows are conflicted. */
