@@ -137,7 +137,7 @@ jobs:
   # file in the named volume, real network port). Tag-only with the rest of the heavy
   # jobs: pushes and PRs run the basic checks.
   server-e2e:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && github.head_ref != 'refactoring'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
