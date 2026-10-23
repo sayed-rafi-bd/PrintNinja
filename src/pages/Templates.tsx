@@ -10,6 +10,7 @@ import {
   Pencil,
   Printer,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/PageHeader";
@@ -48,11 +49,12 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import * as share from "@/lib/share/client";
+import { downloadToLocal } from "@/lib/share/sync";
 import {
-  downloadToLocal,
-  refreshFromServer,
-  saveToServer,
-} from "@/lib/share/sync";
+  deleteTemplateEverywhere,
+  saveRowToServer,
+  takeServerCopy,
+} from "@/lib/share/save";
 import { cn } from "@/lib/utils";
 
 type ServerSummary = share.CommunitySummary;
@@ -64,6 +66,7 @@ export function TemplatesPage() {
   const [configured, setConfigured] = useState(true);
   const [removeTarget, setRemoveTarget] = useState<TemplateRow | null>(null);
   const [refreshTarget, setRefreshTarget] = useState<TemplateRow | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<TemplateRow | null>(null);
   const [getOpen, setGetOpen] = useState(false);
   const [previewTpl, setPreviewTpl] = useState<ServerSummary | null>(null);
   const [previewHtml, setPreviewHtml] = useState("");
@@ -207,8 +210,24 @@ export function TemplatesPage() {
     if (syncing != null) return;
     setSyncing(tpl.id);
     try {
-      await saveToServer(tpl);
+      await saveRowToServer(tpl);
       toast.success(`Saved “${tpl.name}” to the server`);
+      await loadMine();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(null);
+    }
+  };
+
+  const handleDelete = async (tpl: TemplateRow) => {
+    if (syncing != null) return;
+    setSyncing(tpl.id);
+    try {
+      // Server first, then the cache: offline the button that opens this
+      // dialog is disabled, so there is no queue to drain later.
+      await deleteTemplateEverywhere(tpl);
+      toast.success(`Deleted “${tpl.name}” everywhere`);
       await loadMine();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -221,7 +240,7 @@ export function TemplatesPage() {
     if (syncing != null) return;
     setSyncing(tpl.id);
     try {
-      const result = await refreshFromServer(tpl);
+      const result = await takeServerCopy(tpl);
       toast.success(`Refreshed “${result.name}” from the server`);
       await loadMine();
     } catch (e) {
@@ -361,7 +380,10 @@ export function TemplatesPage() {
         header: "Status",
         cell: (c) => {
           const tpl = c.row.original;
-          if (!tpl.remote_id)
+          // Every local row carries a server id (minted at creation), so
+          // "on the server" means the server has actually seen it: the
+          // row records the revision it was last synced at.
+          if (tpl.base_revision == null)
             return <StatusBadge status="draft" label="Not on the server" />;
           if (!tpl.published_at)
             return <StatusBadge status="draft" label="Private" />;
@@ -424,6 +446,17 @@ export function TemplatesPage() {
                   )}
                   aria-hidden="true"
                 />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                aria-label={`Delete ${tpl.name} everywhere`}
+                title="Delete from the server and this computer"
+                disabled={syncing != null}
+                onClick={() => setDeleteTarget(tpl)}
+                className="text-danger hover:text-danger"
+              >
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
               </Button>
               <Button
                 size="sm"
@@ -729,6 +762,21 @@ export function TemplatesPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      <ConfirmDialog
+        open={deleteTarget != null}
+        onOpenChange={(o) => {
+          if (!o) setDeleteTarget(null);
+        }}
+        title={`Delete “${deleteTarget?.name ?? ""}” everywhere?`}
+        description="The server copy and the copy on this computer are both deleted. This cannot be undone."
+        confirmLabel="Delete template"
+        destructive
+        onConfirm={async () => {
+          if (deleteTarget) await handleDelete(deleteTarget);
+          setDeleteTarget(null);
+        }}
+      />
 
       <ConfirmDialog
         open={refreshTarget != null}

@@ -21,7 +21,6 @@ describe("printStore", () => {
       status: "idle",
       error: "",
       durationMs: 0,
-      batchMode2: "per_record",
     });
   });
 

@@ -98,12 +98,6 @@ fn p2_checks_sanitize_then_rebuild() {
     .unwrap();
     let tid: i64 = conn.last_insert_rowid();
     conn.execute(
-        "INSERT INTO template_versions (template_id, version_no, html, created_by)
-         VALUES (?1, 0, '<p>x</p>', 'manual')",
-        [tid],
-    )
-    .unwrap();
-    conn.execute(
         "INSERT INTO fonts (family, file_path, format, size_bytes)
          VALUES ('', 'f.ttf', 'exe', -5)",
         [],
@@ -155,10 +149,20 @@ fn p2_checks_sanitize_then_rebuild() {
         )
         .unwrap();
     assert_eq!((tname.as_str(), w, h), ("(unnamed)", 210, 297));
-    let version_no: i64 = conn
-        .query_row("SELECT version_no FROM template_versions", [], |r| r.get(0))
+    let versions_table: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='template_versions'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
-    assert_eq!(version_no, 1);
+    assert_eq!(versions_table, 0, "versions table is removed");
+    let html: String = conn
+        .query_row("SELECT html FROM templates WHERE id = ?1", [tid], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(html, "");
     let (family, format, size): (String, String, i64) = conn
         .query_row("SELECT family, format, size_bytes FROM fonts", [], |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?))

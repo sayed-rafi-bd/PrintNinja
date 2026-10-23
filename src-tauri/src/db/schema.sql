@@ -16,24 +16,15 @@ CREATE TABLE IF NOT EXISTS printers (
 CREATE TABLE IF NOT EXISTS templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL CHECK(length(name) > 0),
-    current_version_id INTEGER,
     page_w_mm INTEGER NOT NULL DEFAULT 210 CHECK(page_w_mm > 0),
     page_h_mm INTEGER NOT NULL DEFAULT 297 CHECK(page_h_mm > 0),
     orientation TEXT NOT NULL DEFAULT 'portrait' CHECK(orientation IN ('portrait', 'landscape')),
+    html TEXT NOT NULL DEFAULT '',
+    css TEXT NOT NULL DEFAULT '',
+    compiled_css TEXT NOT NULL DEFAULT '',
+    compiled_key TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS template_versions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    template_id INTEGER NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
-    version_no INTEGER NOT NULL CHECK(version_no >= 1),
-    html TEXT NOT NULL,
-    css TEXT NOT NULL DEFAULT '',
-    label TEXT,
-    note TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    created_by TEXT NOT NULL DEFAULT 'manual' CHECK(created_by IN ('manual', 'autosave', 'restore', 'sync'))
 );
 
 CREATE TABLE IF NOT EXISTS fonts (
@@ -66,7 +57,6 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     batch_id INTEGER REFERENCES batches(id) ON DELETE SET NULL,
     record_index INTEGER CHECK(record_index IS NULL OR record_index >= 0),
     template_id INTEGER REFERENCES templates(id) ON DELETE SET NULL,
-    template_version_id INTEGER REFERENCES template_versions(id) ON DELETE SET NULL,
     printer_id INTEGER REFERENCES printers(id) ON DELETE SET NULL,
     source TEXT NOT NULL DEFAULT 'ui' CHECK(source IN ('ui', 'api', 'deeplink', 'batch', 'test')),
     source_url TEXT,
@@ -117,4 +107,3 @@ CREATE INDEX IF NOT EXISTS idx_jobs_created ON print_jobs(created_at);
 -- makes two simultaneous POST /v1/print requests with one key print once
 -- (P12). Multiple NULL keys are fine — SQLite unique indexes allow NULLs.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_print_jobs_idempotency ON print_jobs(idempotency_key);
-CREATE INDEX IF NOT EXISTS idx_versions_template ON template_versions(template_id);

@@ -94,7 +94,8 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
     ensure_v2_schema(conn)?;
     ensure_sync_schema(conn)?;
     ensure_library_schema(conn)?;
-    ensure_p2_checks(conn)
+    ensure_p2_checks(conn)?;
+    ensure_template_content_schema(conn)
 }
 
 /// Check whether a column exists via `PRAGMA table_info` (V2.md §5.1).
@@ -153,17 +154,28 @@ pub fn ensure_v2_schema(conn: &Connection) -> rusqlite::Result<()> {
 
     // Per-template compiled Tailwind CSS. Empty means "not compiled yet", and
     // printing falls back to the shared bundle, so old rows keep working.
-    if !column_exists(conn, "template_versions", "compiled_css")? {
-        conn.execute(
-            "ALTER TABLE template_versions ADD COLUMN compiled_css TEXT NOT NULL DEFAULT ''",
-            [],
-        )?;
-    }
-    if !column_exists(conn, "template_versions", "compiled_key")? {
-        conn.execute(
-            "ALTER TABLE template_versions ADD COLUMN compiled_key TEXT NOT NULL DEFAULT ''",
-            [],
-        )?;
+    // Content now lives on `templates` (versions removed).
+    for (col, ddl) in [
+        (
+            "html",
+            "ALTER TABLE templates ADD COLUMN html TEXT NOT NULL DEFAULT ''",
+        ),
+        (
+            "css",
+            "ALTER TABLE templates ADD COLUMN css TEXT NOT NULL DEFAULT ''",
+        ),
+        (
+            "compiled_css",
+            "ALTER TABLE templates ADD COLUMN compiled_css TEXT NOT NULL DEFAULT ''",
+        ),
+        (
+            "compiled_key",
+            "ALTER TABLE templates ADD COLUMN compiled_key TEXT NOT NULL DEFAULT ''",
+        ),
+    ] {
+        if !column_exists(conn, "templates", col)? {
+            conn.execute(ddl, [])?;
+        }
     }
 
     // The queued-print worker replays a row's input payload (Phase 0, P3):
@@ -236,62 +248,13 @@ pub fn ensure_v2_schema(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-/// `template_versions.created_by` originally had a CHECK without 'sync', and
-/// SQLite cannot ALTER a CHECK constraint — only rebuild the table. A fresh
-/// database gets the current DDL from `schema.sql`; an existing one is
-/// rebuilt here, keeping every row (Phase 0, P2).
+/// Versions are removed: any leftover `template_versions` table from an old
+/// database is dropped here (content was backfilled onto `templates` by
+/// `ensure_template_content_schema`). Tolerant of fresh databases that
+/// never had the table.
 fn ensure_created_by_allows_sync(conn: &Connection) -> rusqlite::Result<()> {
-    let sql: Option<String> = conn.query_row(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'template_versions'",
-        [],
-        |r| r.get(0),
-    )?;
-    // Already current: the new CHECK lists 'sync'.
-    if sql.is_some_and(|s| s.contains("'sync'")) {
-        return Ok(());
-    }
-
-    // Foreign keys off for the rebuild: `print_jobs.template_version_id`
-    // references this table, and renaming a table with FKs on rewrites the
-    // child's REFERENCES clause. `foreign_keys` is off by default in rusqlite,
-    // but restore whatever it was so the pragma choice is not ours to change.
-    let fk_before: i64 = conn.query_row("PRAGMA foreign_keys", [], |r| r.get(0))?;
-    conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
-
-    let rebuild = "
-        BEGIN;
-        CREATE TABLE template_versions_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            template_id INTEGER NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
-            version_no INTEGER NOT NULL,
-            html TEXT NOT NULL,
-            css TEXT NOT NULL DEFAULT '',
-            label TEXT,
-            note TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            created_by TEXT NOT NULL DEFAULT 'manual'
-                CHECK(created_by IN ('manual', 'autosave', 'restore', 'sync')),
-            compiled_css TEXT NOT NULL DEFAULT '',
-            compiled_key TEXT NOT NULL DEFAULT ''
-        );
-        INSERT INTO template_versions_new
-            (id, template_id, version_no, html, css, label, note,
-             created_at, created_by, compiled_css, compiled_key)
-        SELECT id, template_id, version_no, html, css, label, note,
-               created_at, created_by,
-               COALESCE(compiled_css, ''), COALESCE(compiled_key, '')
-        FROM template_versions;
-        DROP TABLE template_versions;
-        ALTER TABLE template_versions_new RENAME TO template_versions;
-        CREATE INDEX IF NOT EXISTS idx_versions_template ON template_versions(template_id);
-        COMMIT;";
-    let result = conn.execute_batch(rebuild);
-    if fk_before != 0 {
-        // Put back what we found; best effort — a failure here would mean the
-        // pragma did not take originally either.
-        let _ = conn.execute_batch("PRAGMA foreign_keys = ON;");
-    }
-    result?;
+    conn.execute("DROP TABLE IF EXISTS template_versions", [])?;
+    conn.execute("DROP INDEX IF EXISTS idx_versions_template", [])?;
     Ok(())
 }
 
@@ -556,6 +519,180 @@ pub fn ensure_library_schema(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// Templates now carry their content directly (`html/css/compiled_*`);
+/// versions are gone. Migrates old databases: adds the columns, backfills
+/// from `current_version_id`, then drops `template_versions`,
+/// `templates.current_version_id` and `print_jobs.template_version_id`.
+/// Idempotent; fresh databases already match and do nothing.
+pub fn ensure_template_content_schema(conn: &Connection) -> rusqlite::Result<()> {
+    for (col, ddl) in [
+        (
+            "html",
+            "ALTER TABLE templates ADD COLUMN html TEXT NOT NULL DEFAULT ''",
+        ),
+        (
+            "css",
+            "ALTER TABLE templates ADD COLUMN css TEXT NOT NULL DEFAULT ''",
+        ),
+        (
+            "compiled_css",
+            "ALTER TABLE templates ADD COLUMN compiled_css TEXT NOT NULL DEFAULT ''",
+        ),
+        (
+            "compiled_key",
+            "ALTER TABLE templates ADD COLUMN compiled_key TEXT NOT NULL DEFAULT ''",
+        ),
+    ] {
+        if !column_exists(conn, "templates", col)? {
+            conn.execute(ddl, [])?;
+        }
+    }
+
+    let has_current = column_exists(conn, "templates", "current_version_id")?;
+    let has_versions_table: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'template_versions'",
+        [],
+        |r| r.get(0),
+    )?;
+    if has_current && has_versions_table > 0 {
+        // Backfill content from the pinned version; rows without a version keep defaults.
+        let _ = conn.execute(
+            "UPDATE templates SET
+                html = COALESCE((SELECT html FROM template_versions WHERE id = templates.current_version_id), html),
+                css = COALESCE((SELECT css FROM template_versions WHERE id = templates.current_version_id), css),
+                compiled_css = COALESCE((SELECT compiled_css FROM template_versions WHERE id = templates.current_version_id), compiled_css),
+                compiled_key = COALESCE((SELECT compiled_key FROM template_versions WHERE id = templates.current_version_id), compiled_key)
+             WHERE current_version_id IS NOT NULL",
+            [],
+        );
+    }
+
+    let needs_templates_rebuild = has_current;
+    let has_job_version_col = column_exists(conn, "print_jobs", "template_version_id")?;
+    let fk_before: i64 = conn.query_row("PRAGMA foreign_keys", [], |r| r.get(0))?;
+    if fk_before != 0 {
+        conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+    }
+    let rebuild_result: rusqlite::Result<()> = (|| {
+        if needs_templates_rebuild {
+            conn.execute_batch(
+                "CREATE TABLE templates_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL CHECK(length(name) > 0),
+                    page_w_mm INTEGER NOT NULL DEFAULT 210 CHECK(page_w_mm > 0),
+                    page_h_mm INTEGER NOT NULL DEFAULT 297 CHECK(page_h_mm > 0),
+                    orientation TEXT NOT NULL DEFAULT 'portrait' CHECK(orientation IN ('portrait', 'landscape')),
+                    html TEXT NOT NULL DEFAULT '',
+                    css TEXT NOT NULL DEFAULT '',
+                    compiled_css TEXT NOT NULL DEFAULT '',
+                    compiled_key TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    readme TEXT NOT NULL DEFAULT '',
+                    summary TEXT NOT NULL DEFAULT '',
+                    remote_id TEXT,
+                    published_at TEXT,
+                    origin TEXT NOT NULL DEFAULT 'own' CHECK(origin IN ('own','saved')),
+                    origin_owner TEXT,
+                    withdrawn INTEGER NOT NULL DEFAULT 0,
+                    server_id TEXT,
+                    server_revision INTEGER,
+                    base_revision INTEGER,
+                    sync_state TEXT NOT NULL DEFAULT 'synced' CHECK(sync_state IN ('synced', 'dirty', 'deleted_pending', 'conflict')),
+                    kind TEXT NOT NULL DEFAULT 'own' CHECK(kind IN ('own', 'saved')),
+                    owner_handle TEXT,
+                    synced_at TEXT
+                );",
+            )?;
+            // Copy common columns; old rows always have the sync columns after ensure_sync_schema.
+            conn.execute(
+                "INSERT INTO templates_new
+                    (id, name, page_w_mm, page_h_mm, orientation, html, css, compiled_css, compiled_key,
+                     created_at, updated_at, readme, summary, remote_id, published_at, origin, origin_owner,
+                     withdrawn, server_id, server_revision, base_revision, sync_state, kind, owner_handle, synced_at)
+                 SELECT id, name, page_w_mm, page_h_mm, orientation, html, css, compiled_css, compiled_key,
+                     created_at, updated_at, readme, summary, remote_id, published_at, origin, origin_owner,
+                     withdrawn, server_id, server_revision, base_revision, sync_state, kind, owner_handle, synced_at
+                 FROM templates",
+                [],
+            )?;
+            conn.execute("DROP TABLE templates", [])?;
+            conn.execute("ALTER TABLE templates_new RENAME TO templates", [])?;
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_templates_server_id ON templates(server_id);",
+                [],
+            )?;
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_templates_remote ON templates(remote_id);",
+                [],
+            )?;
+        }
+        if has_versions_table > 0 {
+            conn.execute("DROP TABLE IF EXISTS template_versions", [])?;
+            conn.execute("DROP INDEX IF EXISTS idx_versions_template", [])?;
+        }
+        if has_job_version_col {
+            conn.execute_batch(
+                "CREATE TABLE print_jobs_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    batch_id INTEGER REFERENCES batches(id) ON DELETE SET NULL,
+                    record_index INTEGER CHECK(record_index IS NULL OR record_index >= 0),
+                    template_id INTEGER REFERENCES templates(id) ON DELETE SET NULL,
+                    printer_id INTEGER REFERENCES printers(id) ON DELETE SET NULL,
+                    source TEXT NOT NULL DEFAULT 'ui' CHECK(source IN ('ui', 'api', 'deeplink', 'batch', 'test')),
+                    source_url TEXT,
+                    status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'printing', 'success', 'failed', 'cancelled')),
+                    error TEXT,
+                    copies INTEGER NOT NULL DEFAULT 1 CHECK(copies >= 1),
+                    settings_json TEXT,
+                    rendered_html TEXT,
+                    data_json TEXT,
+                    idempotency_key TEXT,
+                    is_test INTEGER NOT NULL DEFAULT 0 CHECK(is_test IN (0, 1)),
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    started_at TEXT,
+                    finished_at TEXT,
+                    duration_ms INTEGER CHECK(duration_ms IS NULL OR duration_ms >= 0),
+                    timings_json TEXT
+                );",
+            )?;
+            conn.execute(
+                "INSERT INTO print_jobs_new
+                    (id, batch_id, record_index, template_id, printer_id, source, source_url, status, error,
+                     copies, settings_json, rendered_html, data_json, idempotency_key, is_test,
+                     created_at, started_at, finished_at, duration_ms, timings_json)
+                 SELECT id, batch_id, record_index, template_id, printer_id, source, source_url, status, error,
+                     copies, settings_json, rendered_html, data_json, idempotency_key, is_test,
+                     created_at, started_at, finished_at, duration_ms, timings_json
+                 FROM print_jobs",
+                [],
+            )?;
+            conn.execute("DROP TABLE print_jobs", [])?;
+            conn.execute("ALTER TABLE print_jobs_new RENAME TO print_jobs", [])?;
+            conn.execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_jobs_status ON print_jobs(status);
+                 CREATE INDEX IF NOT EXISTS idx_jobs_printer ON print_jobs(printer_id);
+                 CREATE INDEX IF NOT EXISTS idx_jobs_template ON print_jobs(template_id);
+                 CREATE INDEX IF NOT EXISTS idx_jobs_batch ON print_jobs(batch_id);
+                 CREATE INDEX IF NOT EXISTS idx_jobs_created ON print_jobs(created_at);
+                 CREATE UNIQUE INDEX IF NOT EXISTS idx_print_jobs_idempotency ON print_jobs(idempotency_key);",
+            )?;
+        }
+        Ok(())
+    })();
+    if fk_before != 0 {
+        let _ = conn.execute_batch("PRAGMA foreign_keys = ON;");
+    }
+    rebuild_result?;
+    // Sanitize content columns on old rows (kept outside the rebuild so it
+    // also covers fresh rows written before this migration existed).
+    conn.execute_batch(
+        "UPDATE templates SET html = '' WHERE html IS NULL;
+         UPDATE templates SET css = '' WHERE css IS NULL;",
+    )?;
+    Ok(())
+}
+
 /// P2 CHECK backfill for databases created before `schema.sql` carried
 /// them. Fresh installs already satisfy every rule below; this brings
 /// old files to the same constraints.
@@ -585,7 +722,6 @@ fn ensure_p2_checks(conn: &Connection) -> rusqlite::Result<()> {
          UPDATE templates SET name = '(unnamed)' WHERE trim(name) = '';
          UPDATE templates SET page_w_mm = 210 WHERE page_w_mm <= 0;
          UPDATE templates SET page_h_mm = 297 WHERE page_h_mm <= 0;
-         UPDATE template_versions SET version_no = 1 WHERE version_no < 1;
          UPDATE fonts SET family = '(unnamed)' WHERE trim(family) = '';
          UPDATE fonts SET format = 'ttf'
              WHERE format NOT IN ('ttf', 'otf', 'woff', 'woff2');
@@ -633,10 +769,13 @@ fn ensure_p2_checks(conn: &Connection) -> rusqlite::Result<()> {
         "CREATE TABLE templates_new (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL CHECK(length(name) > 0),
-            current_version_id INTEGER,
             page_w_mm INTEGER NOT NULL DEFAULT 210 CHECK(page_w_mm > 0),
             page_h_mm INTEGER NOT NULL DEFAULT 297 CHECK(page_h_mm > 0),
             orientation TEXT NOT NULL DEFAULT 'portrait' CHECK(orientation IN ('portrait', 'landscape')),
+            html TEXT NOT NULL DEFAULT '',
+            css TEXT NOT NULL DEFAULT '',
+            compiled_css TEXT NOT NULL DEFAULT '',
+            compiled_key TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
             readme TEXT NOT NULL DEFAULT '',
@@ -654,32 +793,15 @@ fn ensure_p2_checks(conn: &Connection) -> rusqlite::Result<()> {
             owner_handle TEXT,
             synced_at TEXT
         );",
-        "id, name, current_version_id, page_w_mm, page_h_mm, orientation, created_at, updated_at, readme, summary, remote_id, published_at, origin, origin_owner, withdrawn, server_id, server_revision, base_revision, sync_state, kind, owner_handle, synced_at",
+        "id, name, page_w_mm, page_h_mm, orientation, html, css, compiled_css, compiled_key, created_at, updated_at, readme, summary, remote_id, published_at, origin, origin_owner, withdrawn, server_id, server_revision, base_revision, sync_state, kind, owner_handle, synced_at",
         &[
             "CREATE INDEX IF NOT EXISTS idx_templates_remote ON templates(remote_id);",
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_templates_server_id ON templates(server_id);",
         ],
     )?;
-    rebuild_p2(
-        conn,
-        "template_versions",
-        "version_no >= 1",
-        "CREATE TABLE template_versions_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            template_id INTEGER NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
-            version_no INTEGER NOT NULL CHECK(version_no >= 1),
-            html TEXT NOT NULL,
-            css TEXT NOT NULL DEFAULT '',
-            label TEXT,
-            note TEXT,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            created_by TEXT NOT NULL DEFAULT 'manual' CHECK(created_by IN ('manual', 'autosave', 'restore', 'sync')),
-            compiled_css TEXT NOT NULL DEFAULT '',
-            compiled_key TEXT NOT NULL DEFAULT ''
-        );",
-        "id, template_id, version_no, html, css, label, note, created_at, created_by, compiled_css, compiled_key",
-        &["CREATE INDEX IF NOT EXISTS idx_versions_template ON template_versions(template_id);"],
-    )?;
+    // Versions are gone: drop any leftover table from old databases.
+    conn.execute("DROP TABLE IF EXISTS template_versions", [])?;
+    conn.execute("DROP INDEX IF EXISTS idx_versions_template", [])?;
     rebuild_p2(
         conn,
         "fonts",
@@ -731,7 +853,6 @@ fn ensure_p2_checks(conn: &Connection) -> rusqlite::Result<()> {
             batch_id INTEGER REFERENCES batches(id) ON DELETE SET NULL,
             record_index INTEGER CHECK(record_index IS NULL OR record_index >= 0),
             template_id INTEGER REFERENCES templates(id) ON DELETE SET NULL,
-            template_version_id INTEGER REFERENCES template_versions(id) ON DELETE SET NULL,
             printer_id INTEGER REFERENCES printers(id) ON DELETE SET NULL,
             source TEXT NOT NULL DEFAULT 'ui' CHECK(source IN ('ui', 'api', 'deeplink', 'batch', 'test')),
             source_url TEXT,
@@ -749,7 +870,7 @@ fn ensure_p2_checks(conn: &Connection) -> rusqlite::Result<()> {
             duration_ms INTEGER CHECK(duration_ms IS NULL OR duration_ms >= 0),
             timings_json TEXT
         );",
-        "id, batch_id, record_index, template_id, template_version_id, printer_id, source, source_url, status, error, copies, settings_json, rendered_html, data_json, idempotency_key, is_test, created_at, started_at, finished_at, duration_ms, timings_json",
+        "id, batch_id, record_index, template_id, printer_id, source, source_url, status, error, copies, settings_json, rendered_html, data_json, idempotency_key, is_test, created_at, started_at, finished_at, duration_ms, timings_json",
         &[
             "CREATE INDEX IF NOT EXISTS idx_jobs_status ON print_jobs(status);",
             "CREATE INDEX IF NOT EXISTS idx_jobs_printer ON print_jobs(printer_id);",

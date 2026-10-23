@@ -270,7 +270,7 @@ DATABASE_URL=libsql://YOUR-DB.turso.io DATABASE_AUTH_TOKEN=TOKEN \
   HOST=127.0.0.1 PORT=3001 node server/dist/server.js
 ```
 Run it under a service manager so it restarts on failure. The service reads
-environment variables only (see `env.example`); it loads no `.env` file by
+environment variables only (see `server/env.example`); it loads no `.env` file by
 itself. Put persistent storage under the database (on an ephemeral disk, use
 Turso Cloud — every account is lost with the disk), and put a TLS reverse
 proxy in front that sets `X-Forwarded-For`.

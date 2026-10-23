@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { renderTemplate, wrapWithTailwind } from "@/lib/render/renderTemplate";
+import {
+  renderRecords,
+  renderTemplate,
+  wrapWithTailwind,
+} from "@/lib/render/renderTemplate";
 import {
   TEMPLATE_BASE_CSS,
   buildTemplateCss,
@@ -365,4 +369,25 @@ describe("per-template compiled CSS", () => {
       expect(doc).not.toContain("--tw-");
     },
   );
+});
+
+describe("renderRecords", () => {
+  it("renders one page for a single object", () => {
+    const doc = renderRecords("<p>Hi {{name}}</p>", "", { name: "Ana" });
+    expect(doc).toContain("Hi Ana");
+    expect(doc).not.toContain('<div style="break-before:page"></div>');
+  });
+
+  it("renders one page per array element with page breaks", () => {
+    const doc = renderRecords("<p>Hi {{name}}</p>", "", [
+      { name: "Ana" },
+      { name: "Bo" },
+    ]);
+    expect(doc).toContain("Hi Ana");
+    expect(doc).toContain("Hi Bo");
+    expect(doc.indexOf("Hi Bo")).toBeGreaterThan(doc.indexOf("Hi Ana"));
+    expect(doc).toContain('<div style="break-before:page"></div>');
+    // Wrapped once, not once per record.
+    expect(doc.match(/<!DOCTYPE html>/g)).toHaveLength(1);
+  });
 });

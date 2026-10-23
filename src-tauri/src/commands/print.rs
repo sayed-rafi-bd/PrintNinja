@@ -47,9 +47,6 @@ pub struct PrintRequest {
     /// When set, render this template from the DB instead of raw HTML.
     #[serde(default)]
     pub template_id: Option<i64>,
-    /// Pin to an exact template version (used by Reprint).
-    #[serde(default)]
-    pub template_version_id: Option<i64>,
     /// JSON payload merged into the template context.
     #[serde(default)]
     pub data: Option<serde_json::Value>,
@@ -163,46 +160,25 @@ impl JobRenderer for PdfRenderer {
     }
 }
 
-/// Load template HTML/CSS for a job (pinned version, or current version).
-/// The tuple is `(html, css, compiled_css, version_id, width_mm, height_mm)`.
+/// Load template HTML/CSS for a job directly from the template row.
+/// The tuple is `(html, css, compiled_css, width_mm, height_mm)`.
 fn resolve_template(
     conn: &rusqlite::Connection,
     template_id: i64,
-    version_id: Option<i64>,
-) -> AppResult<(String, String, String, i64, f64, f64)> {
-    let version_id = match version_id {
-        Some(v) => v,
-        None => {
-            let current: Option<i64> = conn
-                .query_row(
-                    "SELECT current_version_id FROM templates WHERE id = ?1",
-                    [template_id],
-                    |r| r.get(0),
-                )
-                .map_err(|_| AppError::NotFound(format!("Template {} not found", template_id)))?;
-            current.ok_or_else(|| {
-                AppError::NotFound(format!("Template {} has no versions", template_id))
-            })?
-        }
-    };
-
-    let (html, css, compiled_css): (String, String, String) = conn
-        .query_row(
-            "SELECT html, css, compiled_css FROM template_versions WHERE id = ?1 AND template_id = ?2",
-            [version_id, template_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .map_err(|_| AppError::NotFound(format!("Version {} not found", version_id)))?;
-
-    let (w, h): (i64, i64) = conn
-        .query_row(
-            "SELECT page_w_mm, page_h_mm FROM templates WHERE id = ?1",
-            [template_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .map_err(|_| AppError::NotFound(format!("Template {} not found", template_id)))?;
-
-    Ok((html, css, compiled_css, version_id, w as f64, h as f64))
+) -> AppResult<(String, String, String, f64, f64)> {
+    conn.query_row(
+        "SELECT html, css, compiled_css, page_w_mm, page_h_mm FROM templates WHERE id = ?1",
+        [template_id],
+        |r| {
+            let html: String = r.get(0)?;
+            let css: String = r.get(1)?;
+            let compiled: String = r.get(2)?;
+            let w: i64 = r.get(3)?;
+            let h: i64 = r.get(4)?;
+            Ok((html, css, compiled, w as f64, h as f64))
+        },
+    )
+    .map_err(|_| AppError::NotFound(format!("Template {} not found", template_id)))
 }
 
 /// Base print stylesheet, byte-identical to `TEMPLATE_BASE_CSS` in
@@ -425,13 +401,7 @@ pub async fn run_print_with(
     // state with the real start time. Later stages only update it, so a
     // running job is visible in History and every failure path — fetch,
     // render, send — leaves a row that already carries its own id.
-    let job_id = begin_job(
-        db,
-        &req,
-        content.template_version_id,
-        copies as i64,
-        (content.w_mm, content.h_mm),
-    )?;
+    let job_id = begin_job(db, &req, copies as i64, (content.w_mm, content.h_mm))?;
 
     run_stages(
         cache_dir,
@@ -487,7 +457,6 @@ pub async fn run_claimed_job(
             css: String::new(),
             w_mm: req.page_width_mm.unwrap_or(100.0),
             h_mm: req.page_height_mm.unwrap_or(150.0),
-            template_version_id: req.template_version_id,
             render_template: false,
         },
         None => match resolve_content(db, &req) {
@@ -539,7 +508,6 @@ struct ResolvedContent {
     css: String,
     w_mm: f64,
     h_mm: f64,
-    template_version_id: Option<i64>,
     render_template: bool,
 }
 
@@ -552,20 +520,18 @@ struct JobRun {
 /// Step 1: the document to print — the pinned template version's HTML and
 /// CSS, or the request's own HTML — plus the page size it prints at.
 fn resolve_content(db: &DbState, req: &PrintRequest) -> AppResult<ResolvedContent> {
-    let (html, css, template_version_id, mut w_mm, mut h_mm) = match req.template_id {
+    let (html, css, mut w_mm, mut h_mm) = match req.template_id {
         Some(tid) => {
             let guard = db
                 .lock()
                 .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
             let conn = guard.connection();
-            let (h, c, compiled, vid, tw, th) =
-                resolve_template(conn, tid, req.template_version_id)?;
-            (h, build_template_css(&c, &compiled), Some(vid), tw, th)
+            let (h, c, compiled, tw, th) = resolve_template(conn, tid)?;
+            (h, build_template_css(&c, &compiled), tw, th)
         }
         None => (
             req.html.clone(),
             String::new(),
-            req.template_version_id,
             req.page_width_mm.unwrap_or(210.0),
             req.page_height_mm.unwrap_or(297.0),
         ),
@@ -583,7 +549,6 @@ fn resolve_content(db: &DbState, req: &PrintRequest) -> AppResult<ResolvedConten
         css,
         w_mm,
         h_mm,
-        template_version_id,
         render_template: true,
     })
 }
@@ -697,13 +662,13 @@ async fn run_stages(
     // printing the raw template source instead of failing. A replayed job is
     // the exception: its HTML already went through the engine once.
     if render_template {
+        // One object prints one page; an array prints one page per
+        // record in a single document (page-break between records).
         let context = fetched.unwrap_or_else(|| serde_json::json!({}));
-        let engine = TemplateEngine::new();
-        html = match engine.render(&html, &context) {
-            Ok(rendered) => rendered,
-            Err(e) => {
-                let msg = format!("Template render failed: {e}");
-                // No rendered content to replay (P3): store none.
+        let records: Vec<serde_json::Value> = match context {
+            serde_json::Value::Array(arr) if !arr.is_empty() => arr,
+            serde_json::Value::Array(_) => {
+                let msg = "Data is an empty array: nothing to print".to_string();
                 finish_job(
                     db,
                     job_id,
@@ -724,7 +689,43 @@ async fn run_stages(
                     timings: Some(timings),
                 });
             }
+            single => vec![single],
         };
+        let engine = TemplateEngine::new();
+        let mut pages: Vec<String> = Vec::with_capacity(records.len());
+        for (idx, record) in records.iter().enumerate() {
+            match engine.render(&html, record) {
+                Ok(rendered) => pages.push(rendered),
+                Err(e) => {
+                    let msg = if records.len() > 1 {
+                        format!("Template render failed on record {}: {e}", idx + 1)
+                    } else {
+                        format!("Template render failed: {e}")
+                    };
+                    // No rendered content to replay (P3): store none.
+                    finish_job(
+                        db,
+                        job_id,
+                        "failed",
+                        Some(msg.clone()),
+                        "",
+                        &req,
+                        start.elapsed().as_millis() as i64,
+                    )?;
+                    timings.template_ms = ms(t_template);
+                    timings.total_ms = ms(start);
+                    save_timings(db, job_id, &timings);
+                    return Ok(PrintResponse {
+                        success: false,
+                        job_id: job_id.to_string(),
+                        duration_ms: start.elapsed().as_millis(),
+                        error: Some(msg),
+                        timings: Some(timings),
+                    });
+                }
+            }
+        }
+        html = pages.join("\n<div style=\"break-before:page\"></div>\n");
     }
 
     let template_ms = ms(t_template);
@@ -1038,13 +1039,7 @@ fn redact_with_secrets(html: &str, secrets: &[String]) -> String {
 /// unique index on `idempotency_key` makes this INSERT the point where the
 /// key is taken — before render and before send — so two simultaneous
 /// requests with one key insert once and print once.
-fn begin_job(
-    db: &DbState,
-    req: &PrintRequest,
-    template_version_id: Option<i64>,
-    copies: i64,
-    page_mm: (f64, f64),
-) -> AppResult<i64> {
+fn begin_job(db: &DbState, req: &PrintRequest, copies: i64, page_mm: (f64, f64)) -> AppResult<i64> {
     let guard = db
         .lock()
         .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
@@ -1083,14 +1078,13 @@ fn begin_job(
 
     match conn.execute(
         "INSERT INTO print_jobs
-           (template_id, template_version_id, printer_id, source, source_url,
+           (template_id, printer_id, source, source_url,
             status, copies, settings_json, rendered_html, is_test,
             started_at, idempotency_key, data_json)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'printing', ?6, ?7, '', ?8,
-                 datetime('now'), ?9, ?10)",
+         VALUES (?1, ?2, ?3, ?4, 'printing', ?5, ?6, '', ?7,
+                 datetime('now'), ?8, ?9)",
         rusqlite::params![
             req.template_id,
-            template_version_id,
             printer_id,
             req.source.clone().unwrap_or_else(|| "ui".into()),
             req.data_url,
@@ -1218,7 +1212,6 @@ struct JobRow {
     printer_id: Option<i64>,
     printer_name: Option<String>,
     template_id: Option<i64>,
-    template_version_id: Option<i64>,
     source: String,
     source_url: Option<String>,
     copies: i64,
@@ -1238,7 +1231,6 @@ fn load_job_request(db: &DbState, job_id: i64) -> AppResult<(PrintRequest, Optio
         printer_id,
         printer_name,
         template_id,
-        template_version_id,
         source,
         source_url,
         copies,
@@ -1247,7 +1239,7 @@ fn load_job_request(db: &DbState, job_id: i64) -> AppResult<(PrintRequest, Optio
         is_test,
         data_json,
     } = conn.query_row(
-        "SELECT j.printer_id, p.name, j.template_id, j.template_version_id, j.source,
+        "SELECT j.printer_id, p.name, j.template_id, j.source,
                 j.source_url, j.copies, j.settings_json, j.rendered_html, j.is_test,
                 j.data_json
          FROM print_jobs j LEFT JOIN printers p ON p.id = j.printer_id
@@ -1258,14 +1250,13 @@ fn load_job_request(db: &DbState, job_id: i64) -> AppResult<(PrintRequest, Optio
                 printer_id: r.get(0)?,
                 printer_name: r.get(1)?,
                 template_id: r.get(2)?,
-                template_version_id: r.get(3)?,
-                source: r.get(4)?,
-                source_url: r.get(5)?,
-                copies: r.get(6)?,
-                settings_json: r.get(7)?,
-                rendered_html: r.get(8)?,
-                is_test: r.get(9)?,
-                data_json: r.get(10)?,
+                source: r.get(3)?,
+                source_url: r.get(4)?,
+                copies: r.get(5)?,
+                settings_json: r.get(6)?,
+                rendered_html: r.get(7)?,
+                is_test: r.get(8)?,
+                data_json: r.get(9)?,
             })
         },
     )?;
@@ -1327,7 +1318,6 @@ fn load_job_request(db: &DbState, job_id: i64) -> AppResult<(PrintRequest, Optio
             .and_then(|v| v.as_str())
             .map(String::from),
         template_id,
-        template_version_id,
         data,
         // A replay prints the HTML on the row; it needs no live data.
         data_url: if replay.is_some() { None } else { source_url },
@@ -1381,7 +1371,6 @@ pub async fn spike_test_print(
         page_range: None,
         grayscale: None,
         template_id: None,
-        template_version_id: None,
         data: None,
         data_url: None,
         http_method: None,
@@ -1413,7 +1402,6 @@ mod tests {
             page_range: None,
             grayscale: None,
             template_id: None,
-            template_version_id: None,
             data: None,
             data_url: None,
             http_method: None,

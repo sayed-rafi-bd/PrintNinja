@@ -11,18 +11,16 @@ const shellState = vi.hoisted(() => ({
     | { state: "signed_out" },
   sync: {
     state: "synced",
-    pending: 0,
-    conflicts: 0,
-    lastPullAt: null,
+    drafts: 0,
+    lastPulledAt: null,
     lastError: null,
   } as {
-    state: "synced" | "syncing" | "pending" | "offline" | "conflict";
-    pending: number;
-    conflicts: number;
-    lastPullAt: string | null;
+    state: "synced" | "syncing" | "offline";
+    drafts: number;
+    lastPulledAt: string | null;
     lastError: string | null;
   },
-  syncNow: vi.fn(async () => {}),
+  cacheNow: vi.fn(async () => {}),
 }));
 
 vi.mock("@/lib/shell/useShareStatus", () => ({
@@ -31,51 +29,49 @@ vi.mock("@/lib/shell/useShareStatus", () => ({
 
 vi.mock("@/lib/sync/useSyncStatus", () => ({
   useSyncStatus: () => shellState.sync,
-  notifyLocalEdit: vi.fn(),
-  syncNow: (...args: unknown[]) =>
-    (shellState.syncNow as (...a: unknown[]) => Promise<void>)(...args),
+  cacheNow: (...args: unknown[]) =>
+    (shellState.cacheNow as (...a: unknown[]) => Promise<void>)(...args),
 }));
 
 beforeEach(() => {
   shellState.share = { state: "online", handle: "rafi" };
   shellState.sync = {
     state: "synced",
-    pending: 0,
-    conflicts: 0,
-    lastPullAt: null,
+    drafts: 0,
+    lastPulledAt: null,
     lastError: null,
   };
-  shellState.syncNow.mockClear();
+  shellState.cacheNow.mockClear();
 });
 
 describe("SyncStatusCard", () => {
-  it("shows connection, queue, last sync and a working Sync now", () => {
+  it("shows connection, drafts, last refresh and a working Refresh cache", () => {
     shellState.sync = {
-      state: "pending",
-      pending: 2,
-      conflicts: 0,
-      lastPullAt: "2026-01-01T00:00:00.000Z",
+      state: "synced",
+      drafts: 2,
+      lastPulledAt: "2026-01-01T00:00:00.000Z",
       lastError: null,
     };
     render(<SyncStatusCard />);
-    expect(screen.getByText("Sync status")).toBeInTheDocument();
+    expect(screen.getByText("Cache status")).toBeInTheDocument();
     expect(screen.getByText("rafi")).toBeInTheDocument();
-    expect(screen.getByText("2 change(s) waiting to send")).toBeInTheDocument();
     expect(
-      screen.getByText("Last synced", { exact: true }),
+      screen.getByText("2 draft(s) not saved to the server"),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Last synced 2026/)).toBeInTheDocument();
+    expect(
+      screen.getByText("Last refreshed", { exact: true }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Last refreshed 2026/)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Sync now/ }));
-    expect(shellState.syncNow).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: /Refresh cache/ }));
+    expect(shellState.cacheNow).toHaveBeenCalledOnce();
   });
 
   it("renders the last error as plain text, no hover needed", () => {
     shellState.sync = {
       state: "offline",
-      pending: 1,
-      conflicts: 0,
-      lastPullAt: null,
+      drafts: 1,
+      lastPulledAt: null,
       lastError: "template is 600000 bytes, limit 524288",
     };
     render(<SyncStatusCard />);
@@ -84,12 +80,14 @@ describe("SyncStatusCard", () => {
     expect(screen.getByText("Never")).toBeInTheDocument();
   });
 
-  it("disables Sync now when signed out", () => {
+  it("disables Refresh cache when signed out", () => {
     shellState.share = { state: "signed_out" };
     render(<SyncStatusCard />);
-    expect(screen.getByRole("button", { name: /Sync now/ })).toBeDisabled();
     expect(
-      screen.getByText("Sign in to the share service to sync."),
+      screen.getByRole("button", { name: /Refresh cache/ }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText("Sign in to the share service to refresh the cache."),
     ).toBeInTheDocument();
   });
 });

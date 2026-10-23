@@ -41,10 +41,8 @@ const batchHandlers: Record<string, Handler> = {
   create_batch: (args) => {
     const req = (args["req"] ?? args) as Record<string, unknown>;
     const mode = String(req["mode"] ?? "");
-    if (mode !== "single_job" && mode !== "per_record") {
-      throw new Error(
-        `Invalid mode '${mode}'. Expected one of ["single_job", "per_record"]`,
-      );
+    if (mode !== "per_record") {
+      throw new Error(`Invalid mode '${mode}'. Only "per_record" is supported`);
     }
     const data = req["data"];
     if (!Array.isArray(data)) {

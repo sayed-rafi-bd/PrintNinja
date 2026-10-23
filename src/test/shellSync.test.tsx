@@ -12,18 +12,16 @@ const shellState = vi.hoisted(() => ({
     | { state: "signed_out" },
   sync: {
     state: "synced",
-    pending: 0,
-    conflicts: 0,
-    lastPullAt: null,
+    drafts: 0,
+    lastPulledAt: null,
     lastError: null,
   } as {
-    state: "synced" | "syncing" | "pending" | "offline" | "conflict";
-    pending: number;
-    conflicts: number;
-    lastPullAt: string | null;
+    state: "synced" | "syncing" | "offline";
+    drafts: number;
+    lastPulledAt: string | null;
     lastError: string | null;
   },
-  syncNow: vi.fn(async () => {}),
+  cacheNow: vi.fn(async () => {}),
 }));
 
 vi.mock("@/lib/shell/useShareStatus", () => ({
@@ -32,20 +30,8 @@ vi.mock("@/lib/shell/useShareStatus", () => ({
 
 vi.mock("@/lib/sync/useSyncStatus", () => ({
   useSyncStatus: () => shellState.sync,
-  notifyLocalEdit: vi.fn(),
-  syncNow: (...args: unknown[]) =>
-    (shellState.syncNow as (...a: unknown[]) => Promise<void>)(...args),
-}));
-
-vi.mock("@/lib/sync/useAdoption", () => ({
-  useAdoption: () => ({
-    pending: false,
-    rows: [],
-    busy: false,
-    error: "",
-    confirm: vi.fn(),
-    decline: vi.fn(),
-  }),
+  cacheNow: (...args: unknown[]) =>
+    (shellState.cacheNow as (...a: unknown[]) => Promise<void>)(...args),
 }));
 
 function renderShell() {
@@ -62,21 +48,19 @@ beforeEach(() => {
   shellState.share = { state: "online", handle: "rafi" };
   shellState.sync = {
     state: "synced",
-    pending: 0,
-    conflicts: 0,
-    lastPullAt: null,
+    drafts: 0,
+    lastPulledAt: null,
     lastError: null,
   };
-  shellState.syncNow.mockClear();
+  shellState.cacheNow.mockClear();
 });
 
-describe("topbar share + sync", () => {
-  it("always shows the online badge, next to the pending sync button", () => {
+describe("topbar share + cache", () => {
+  it("always shows the online badge, next to the cache button", () => {
     shellState.sync = {
-      state: "pending",
-      pending: 1,
-      conflicts: 0,
-      lastPullAt: null,
+      state: "synced",
+      drafts: 1,
+      lastPulledAt: null,
       lastError: null,
     };
     renderShell();
@@ -84,24 +68,26 @@ describe("topbar share + sync", () => {
     expect(
       screen.getByTitle("Share service connected as rafi"),
     ).toBeInTheDocument();
-    // …and the queue gets its own control.
+    // …and the cache gets its own control, counting drafts in its tooltip.
     const sync = screen.getByTestId("sync-chip");
-    expect(sync).toHaveTextContent("1 change(s) waiting to send");
+    expect(sync).toHaveAttribute(
+      "title",
+      expect.stringContaining("1 draft(s) not saved to the server"),
+    );
     expect(sync.tagName).toBe("BUTTON");
   });
 
-  it("runs a full sync when the sync button is clicked", async () => {
+  it("runs a cache refresh when the cache button is clicked", async () => {
     renderShell();
     fireEvent.click(screen.getByTestId("sync-chip"));
-    expect(shellState.syncNow).toHaveBeenCalledOnce();
+    expect(shellState.cacheNow).toHaveBeenCalledOnce();
   });
 
-  it("surfaces the last push error on the sync button", () => {
+  it("surfaces the last refresh error on the cache button", () => {
     shellState.sync = {
       state: "offline",
-      pending: 1,
-      conflicts: 0,
-      lastPullAt: null,
+      drafts: 1,
+      lastPulledAt: null,
       lastError: "template is 600000 bytes, limit 524288",
     };
     renderShell();
@@ -109,25 +95,11 @@ describe("topbar share + sync", () => {
     expect(
       screen.getByTitle("Share service connected as rafi"),
     ).toBeInTheDocument();
-    // …but the button says why the queue is stuck.
+    // …but the button says why the refresh failed.
     expect(screen.getByTestId("sync-chip")).toHaveAttribute(
       "title",
       expect.stringContaining("template is 600000 bytes"),
     );
-  });
-
-  it("links to Templates on conflict", () => {
-    shellState.sync = {
-      state: "conflict",
-      pending: 0,
-      conflicts: 1,
-      lastPullAt: null,
-      lastError: null,
-    };
-    renderShell();
-    const sync = screen.getByTestId("sync-chip");
-    expect(sync.tagName).toBe("A");
-    expect(sync).toHaveAttribute("href", "/templates");
   });
 
   it("shows only the offline badge when the share is down", () => {

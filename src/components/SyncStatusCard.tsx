@@ -5,14 +5,15 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { RefreshCw } from "lucide-react";
 import { useShareStatus } from "@/lib/shell/useShareStatus";
-import { syncNow, useSyncStatus } from "@/lib/sync/useSyncStatus";
+import { cacheNow, useSyncStatus } from "@/lib/sync/useSyncStatus";
 
 /**
- * Visible sync state for the Settings → Share tab. The topbar only
- * carries badges and a hover tooltip (and hides on phones), so a stuck
- * queue's failure reason had nowhere to be read. This card shows the
- * connection, the queue, the last sync time and — when set — the last
- * error as plain text, plus a manual Sync now (the phones' only one).
+ * Visible cache state for the Settings → Share tab. The topbar only
+ * carries badges and a hover tooltip (and hides on phones), so a failed
+ * refresh's reason had nowhere to be read. This card shows the
+ * connection, the local drafts (edits not yet saved to the server), the
+ * last refresh time and — when set — the last error as plain text, plus
+ * a manual Refresh cache (the phones' only way to pull now).
  */
 export function SyncStatusCard() {
   const { t } = useTranslation();
@@ -32,11 +33,11 @@ export function SyncStatusCard() {
           ? t("shell.share_signed_out")
           : t("settings_page.sync_unconfigured");
 
-  const onSyncNow = async () => {
+  const onCacheNow = async () => {
     if (busy || !online) return;
     setBusy(true);
     try {
-      await syncNow();
+      await cacheNow();
     } finally {
       setBusy(false);
     }
@@ -68,16 +69,14 @@ export function SyncStatusCard() {
 
         <div className="flex items-center justify-between gap-2">
           <p className="text-sm text-muted-foreground">
-            {t("settings_page.sync_queue")}
+            {t("settings_page.sync_drafts")}
           </p>
-          {sync.state === "conflict" ? (
-            <StatusBadge status="conflict" />
-          ) : syncing ? (
+          {syncing ? (
             <StatusBadge status="syncing" />
-          ) : sync.pending > 0 ? (
+          ) : sync.drafts > 0 ? (
             <StatusBadge
               status="pending"
-              label={t("shell.sync_pending", { count: sync.pending })}
+              label={t("shell.sync_drafts", { count: sync.drafts })}
             />
           ) : (
             <StatusBadge status="synced" />
@@ -89,8 +88,8 @@ export function SyncStatusCard() {
             {t("settings_page.sync_last")}
           </p>
           <span className="text-sm">
-            {sync.lastPullAt
-              ? t("shell.sync_synced", { time: sync.lastPullAt })
+            {sync.lastPulledAt
+              ? t("shell.sync_synced", { time: sync.lastPulledAt })
               : t("settings_page.sync_never")}
           </span>
         </div>
@@ -103,7 +102,7 @@ export function SyncStatusCard() {
 
         <Button
           variant="outline"
-          onClick={() => void onSyncNow()}
+          onClick={() => void onCacheNow()}
           disabled={!online || syncing}
           title={
             online ? t("shell.sync_now") : t("settings_page.sync_sign_in_first")

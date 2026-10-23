@@ -4,9 +4,12 @@ import { pc } from "../support/fixtures";
 import { readStackState } from "../support/stack-state";
 import { testids } from "../support/testids";
 
-// F12 (REFACTORING.md section 11): with a cache and a session the app
-// opens while the API is down, edits show as pending, and recovery
-// pushes them. Without a cache the unreachable screen stays and Retry
+// F12: with a cache and a session the app opens while the API is down.
+// Offline is viewing and printing only: the cached template lists, the
+// Designer opens it, but Save stays disabled because the server owns
+// the copies and there is nowhere to send. When the API comes back,
+// a reload pulls, and an explicit Save sends the edit — nothing queues
+// in between. Without a cache the unreachable screen stays and Retry
 // recovers once the API is back.
 
 const PASSWORD = "password123";
@@ -23,7 +26,9 @@ function blockApi(
   });
 }
 
-test("F12 offline start, pending edits, and recovery", async ({ browser }) => {
+test("F12 offline opens the cache view-only, recovery pulls then saves", async ({
+  browser,
+}) => {
   const { apiUrl } = readStackState();
   const runId = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
   const handle = `f12-${runId}`;
@@ -61,76 +66,40 @@ test("F12 offline start, pending edits, and recovery", async ({ browser }) => {
   // connection badge and the sync button render once the share is back.
   await expect(page.getByTitle("Share service unreachable")).toBeVisible();
 
-  // A local edit marks the row dirty; the push cannot reach the server,
-  // so the row waits in the cache (the pending the chip reports once
-  // the share is back). The edit touches every synced field — html, css,
-  // readme and page size — so recovery proves the full content
-  // round-trips, not just the row's existence.
-  await page.evaluate(() =>
-    (
-      window as unknown as {
-        __TAURI_INTERNALS__: {
-          invoke: (cmd: string, args?: unknown) => Promise<unknown>;
-        };
-      }
-    ).__TAURI_INTERNALS__.invoke("create_version", {
-      req: {
-        template_id: 1,
-        html: "<p>edited offline</p>",
-        css: ".edited{color:red}",
-        created_by: "manual",
-      },
-    }),
+  // The cached copy opens in the Designer, but Save is disabled: offline
+  // is viewing and printing only, and the button says why.
+  await page.getByRole("button", { name: /Edit/ }).first().click();
+  await expect(page.getByTitle("Canvas preview")).toBeVisible({
+    timeout: 15_000,
+  });
+  const saveButton = page.getByTestId(testids.designerSave);
+  await expect(saveButton).toBeDisabled({ timeout: 15_000 });
+  await expect(saveButton).toHaveAttribute(
+    "title",
+    /Offline — connect to save/,
   );
-  await page.evaluate(() =>
-    (
-      window as unknown as {
-        __TAURI_INTERNALS__: {
-          invoke: (cmd: string, args?: unknown) => Promise<unknown>;
-        };
-      }
-    ).__TAURI_INTERNALS__.invoke("update_readme", {
-      req: { id: 1, readme: "# Offline Invoice\nEdited offline readme" },
-    }),
-  );
-  await page.evaluate(() =>
-    (
-      window as unknown as {
-        __TAURI_INTERNALS__: {
-          invoke: (cmd: string, args?: unknown) => Promise<unknown>;
-        };
-      }
-    ).__TAURI_INTERNALS__.invoke("update_template_meta", {
-      req: {
-        id: 1,
-        name: "Offline Invoice",
-        page_w_mm: 100,
-        page_h_mm: 150,
-      },
-    }),
-  );
-  await expect(async () => {
-    const rows = await page.evaluate(
-      () =>
-        JSON.parse(
-          localStorage.getItem("fake-agent:templates") ?? "[]",
-        ) as Array<{ sync_state: string }>,
-    );
-    expect(rows.map((r) => r.sync_state)).toContain("dirty");
-  }).toPass({ timeout: 10_000 });
 
-  // The API comes back; a reload pulls and pushes the queued edit.
+  // The API comes back; a reload pulls. The edit the user types now is
+  // sent only when they explicitly save it — nothing queued offline.
   await seeded.context.unroute("**/*");
   await page.reload();
   await expect(page.getByTestId(testids.shellApp)).toBeVisible({
     timeout: 15_000,
   });
-  await expect(async () => {
-    const mine = await apiMine(auth.token);
-    expect(mine.items.map((t) => t.name)).toContain("Offline Invoice");
-  }).toPass({ timeout: 30_000 });
-  // The pushed upsert carries the edited content, not just the row:
-  // html, css, readme and page size all land server-side.
+  await expect(page.getByTestId(testids.designerSave)).toBeEnabled({
+    timeout: 15_000,
+  });
+
+  const content = page.getByLabel("HTML editor").locator(".cm-content");
+  await content.click();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type("<p>edited online</p>", { delay: 5 });
+  await page.getByTestId(testids.designerSave).click();
+  await expect(page.getByText("Saved to the server")).toBeVisible({
+    timeout: 30_000,
+  });
+  // The pushed upsert carries the edited content, not just the row.
   await expect(async () => {
     const sync = await apiSyncChanges(auth.token, "template");
     const upsert = sync.changes.find(
@@ -139,20 +108,8 @@ test("F12 offline start, pending edits, and recovery", async ({ browser }) => {
         c.op === "upsert" &&
         (c.data as { id?: string } | undefined)?.id === serverId,
     );
-    const data = upsert?.data as
-      | {
-          body?: string;
-          css?: string;
-          readme?: string;
-          page_w_mm?: number;
-          page_h_mm?: number;
-        }
-      | undefined;
-    expect(data?.body).toContain("edited offline");
-    expect(data?.css).toContain(".edited");
-    expect(data?.readme).toContain("Edited offline readme");
-    expect(data?.page_w_mm).toBe(100);
-    expect(data?.page_h_mm).toBe(150);
+    const data = upsert?.data as { body?: string } | undefined;
+    expect(data?.body).toContain("edited online");
   }).toPass({ timeout: 60_000 });
   await expect(page.getByTestId(testids.offlineBanner)).toBeHidden();
   await expect(page.getByTestId(testids.syncChip)).toBeVisible();

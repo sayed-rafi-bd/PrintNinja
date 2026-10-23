@@ -24,13 +24,11 @@ export const testids = {
   offlineBanner: "offline-banner",
   /** Banner on Templates when rows are conflicted. */
   conflictBanner: "conflict-banner",
-  /** Designer version row N (parameterized in the app). */
-  versionRow: (versionNo: number) => `version-row-${versionNo}`,
   /** Settings font row id (parameterized in the app). */
   fontRow: (id: number | string) => `font-row-${id}`,
   /** Prefix for "any font row" locators. */
   fontRowPrefix: "font-row-",
-  /** The three-way conflict dialog. */
+  /** The three-way conflict dialog (legacy conflicted rows on Templates). */
   conflictDialog: "conflict-dialog",
   /** Conflict dialog: keep pushing the local edits. */
   conflictKeepMine: "conflict-keep-mine",
@@ -38,32 +36,20 @@ export const testids = {
   conflictTakeServer: "conflict-take-server",
   /** Conflict dialog: duplicate locally, then take the server copy. */
   conflictKeepBoth: "conflict-keep-both",
-  /** File import control in the designer toolbar. */
-  templateImport: "template-import",
+  /** Designer save-conflict dialog: the server copy moved since last save. */
+  saveConflictDialog: "save-conflict-dialog",
+  /** Save-conflict dialog: overwrite the server with the editor's copy. */
+  saveConflictOverwrite: "save-conflict-overwrite",
+  /** Save-conflict dialog: load the server copy into the editor. */
+  saveConflictTakeServer: "save-conflict-take-server",
   /** Tailwind warnings panel in the designer. */
   classWarnings: "class-warnings",
-  /** Designer toolbar: save the working copy locally. */
+  /** Designer toolbar: save the editor to the server. */
   designerSave: "designer-save",
   /** Designer sync bar: state badge wrapper (data-state). */
   templateState: "template-state",
-  /** Designer sync bar: publish button. */
-  templatePublish: "template-publish",
-  /** Designer sync bar: unpublish button. */
-  templateUnpublish: "template-unpublish",
-  /** Designer version panel: list container. */
-  versionList: "version-list",
-  /** Designer version row N diff viewer opener. */
-  versionDiff: (versionNo: number) => `version-diff-${versionNo}`,
-  /** Designer version row N restore button. */
-  versionRestore: (versionNo: number) => `version-restore-${versionNo}`,
-  /** Designer version row N delete button. */
-  versionDelete: (versionNo: number) => `version-delete-${versionNo}`,
-  /** Save-version dialog: label input. */
-  versionLabel: "version-label",
-  /** Designer actions: open the save-version dialog. */
-  designerSaveVersion: "designer-save-version",
-  /** Designer sync bar: manual sync button. */
-  templateSyncNow: "template-sync-now",
+  /** Designer sync bar: visibility switch (Public/Private). */
+  templateVisibility: "template-visibility",
   /** Settings appearance: app name field. */
   settingsBrandName: "settings-brand-name",
   /** Settings appearance: density radio group. */

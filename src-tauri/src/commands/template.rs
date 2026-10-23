@@ -8,10 +8,13 @@ use tauri::State;
 pub struct Template {
     pub id: i64,
     pub name: String,
-    pub current_version_id: Option<i64>,
     pub page_w_mm: i64,
     pub page_h_mm: i64,
     pub orientation: String,
+    pub html: String,
+    pub css: String,
+    pub compiled_css: String,
+    pub compiled_key: String,
     pub readme: String,
     pub summary: String,
     pub remote_id: Option<String>,
@@ -20,6 +23,13 @@ pub struct Template {
     pub origin: String,
     pub origin_owner: Option<String>,
     pub withdrawn: bool,
+    /// The server revision this copy was last synced at. Saves send it
+    /// as a guard; NULL means the server has never seen this row.
+    pub base_revision: Option<i64>,
+    /// `synced` | `dirty` | `deleted_pending` | `conflict`. A `dirty`
+    /// row under the server-authoritative model is a draft: edits not
+    /// yet saved to the server.
+    pub sync_state: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -34,9 +44,11 @@ pub fn list_templates(db: State<DbState>) -> AppResult<Vec<Template>> {
     let conn = guard.connection();
 
     let mut stmt = conn.prepare(
-        "SELECT id, name, current_version_id, page_w_mm, page_h_mm,
-                orientation, readme, summary, remote_id, server_id, published_at,
-                origin, origin_owner, withdrawn, created_at, updated_at
+        "SELECT id, name, page_w_mm, page_h_mm,
+                orientation, html, css, compiled_css, compiled_key,
+                readme, summary, remote_id, server_id, published_at,
+                origin, origin_owner, withdrawn, created_at, updated_at,
+                base_revision, sync_state
          FROM templates WHERE sync_state <> 'deleted_pending'
          ORDER BY name COLLATE NOCASE",
     )?;
@@ -46,20 +58,25 @@ pub fn list_templates(db: State<DbState>) -> AppResult<Vec<Template>> {
             Ok(Template {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                current_version_id: row.get(2)?,
-                page_w_mm: row.get(3)?,
-                page_h_mm: row.get(4)?,
-                orientation: row.get(5)?,
-                readme: row.get(6)?,
-                summary: row.get(7)?,
-                remote_id: row.get(8)?,
-                server_id: row.get(9)?,
-                published_at: row.get(10)?,
-                origin: row.get(11)?,
-                origin_owner: row.get(12)?,
-                withdrawn: row.get::<_, i64>(13)? != 0,
-                created_at: row.get(14)?,
-                updated_at: row.get(15)?,
+                page_w_mm: row.get(2)?,
+                page_h_mm: row.get(3)?,
+                orientation: row.get(4)?,
+                html: row.get(5)?,
+                css: row.get(6)?,
+                compiled_css: row.get(7)?,
+                compiled_key: row.get(8)?,
+                readme: row.get(9)?,
+                summary: row.get(10)?,
+                remote_id: row.get(11)?,
+                server_id: row.get(12)?,
+                published_at: row.get(13)?,
+                origin: row.get(14)?,
+                origin_owner: row.get(15)?,
+                withdrawn: row.get::<_, i64>(16)? != 0,
+                created_at: row.get(17)?,
+                updated_at: row.get(18)?,
+                base_revision: row.get(19)?,
+                sync_state: row.get(20)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -182,14 +199,19 @@ pub fn write_template(conn: &Connection, req: &CreateTemplateRequest) -> AppResu
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     tx.execute(
-        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, readme, summary,
+        "INSERT INTO templates (name, page_w_mm, page_h_mm, orientation, html, css, compiled_css, compiled_key,
+                readme, summary,
                 server_id, server_revision, base_revision, sync_state, kind, owner_handle)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         rusqlite::params![
             name,
             page_w_mm,
             page_h_mm,
             orientation,
+            html,
+            css,
+            req.compiled_css.clone().unwrap_or_default(),
+            req.compiled_key.clone().unwrap_or_default(),
             readme,
             summary,
             server_id,
@@ -202,26 +224,6 @@ pub fn write_template(conn: &Connection, req: &CreateTemplateRequest) -> AppResu
     )?;
     let template_id = tx.last_insert_rowid();
 
-    // Create version 1 so `current_version_id` always points somewhere.
-    tx.execute(
-        "INSERT INTO template_versions
-           (template_id, version_no, html, css, created_by, compiled_css, compiled_key)
-         VALUES (?1, 1, ?2, ?3, 'manual', ?4, ?5)",
-        rusqlite::params![
-            template_id,
-            html,
-            css,
-            req.compiled_css.clone().unwrap_or_default(),
-            req.compiled_key.clone().unwrap_or_default(),
-        ],
-    )?;
-    let version_id = tx.last_insert_rowid();
-
-    tx.execute(
-        "UPDATE templates SET current_version_id = ?1 WHERE id = ?2",
-        rusqlite::params![version_id, template_id],
-    )?;
-
     tx.commit()?;
 
     let template = tx_guard_to_template(conn, template_id)?;
@@ -230,29 +232,36 @@ pub fn write_template(conn: &Connection, req: &CreateTemplateRequest) -> AppResu
 
 fn tx_guard_to_template(conn: &rusqlite::Connection, id: i64) -> rusqlite::Result<Template> {
     conn.query_row(
-        "SELECT id, name, current_version_id, page_w_mm, page_h_mm,
-                orientation, readme, summary, remote_id, server_id, published_at,
-                origin, origin_owner, withdrawn, created_at, updated_at
+        "SELECT id, name, page_w_mm, page_h_mm,
+                orientation, html, css, compiled_css, compiled_key,
+                readme, summary, remote_id, server_id, published_at,
+                origin, origin_owner, withdrawn, created_at, updated_at,
+                base_revision, sync_state
          FROM templates WHERE id = ?1 AND sync_state <> 'deleted_pending'",
         [id],
         |row| {
             Ok(Template {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                current_version_id: row.get(2)?,
-                page_w_mm: row.get(3)?,
-                page_h_mm: row.get(4)?,
-                orientation: row.get(5)?,
-                readme: row.get(6)?,
-                summary: row.get(7)?,
-                remote_id: row.get(8)?,
-                server_id: row.get(9)?,
-                published_at: row.get(10)?,
-                origin: row.get(11)?,
-                origin_owner: row.get(12)?,
-                withdrawn: row.get::<_, i64>(13)? != 0,
-                created_at: row.get(14)?,
-                updated_at: row.get(15)?,
+                page_w_mm: row.get(2)?,
+                page_h_mm: row.get(3)?,
+                orientation: row.get(4)?,
+                html: row.get(5)?,
+                css: row.get(6)?,
+                compiled_css: row.get(7)?,
+                compiled_key: row.get(8)?,
+                readme: row.get(9)?,
+                summary: row.get(10)?,
+                remote_id: row.get(11)?,
+                server_id: row.get(12)?,
+                published_at: row.get(13)?,
+                origin: row.get(14)?,
+                origin_owner: row.get(15)?,
+                withdrawn: row.get::<_, i64>(16)? != 0,
+                created_at: row.get(17)?,
+                updated_at: row.get(18)?,
+                base_revision: row.get(19)?,
+                sync_state: row.get(20)?,
             })
         },
     )
@@ -279,9 +288,13 @@ pub struct UpdateTemplateMetaRequest {
     pub page_w_mm: i64,
     pub page_h_mm: i64,
     pub summary: Option<String>,
+    pub html: Option<String>,
+    pub css: Option<String>,
+    pub compiled_css: Option<String>,
+    pub compiled_key: Option<String>,
 }
 
-/// Writes a template's name, page size and summary. Refresh and Get from server
+/// Writes a template's name, page size, summary and content. Refresh and Get from server
 /// use it, because no other local command writes those fields (MIGRATION_PLAN.md
 /// phase 1). Orientation follows the page size, as elsewhere in the app.
 #[tauri::command]
@@ -317,17 +330,42 @@ pub fn write_template_meta(
         "portrait"
     };
 
+    // Content fields are optional so old callers (meta-only updates) keep
+    // working; when present they overwrite the row's content directly.
+    let current: (String, String, String, String) = conn
+        .query_row(
+            "SELECT html, css, compiled_css, compiled_key FROM templates WHERE id = ?1",
+            [req.id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .map_err(|_| AppError::NotFound(format!("Template {} not found", req.id)))?;
+    let html = req.html.clone().unwrap_or(current.0);
+    let css = req.css.clone().unwrap_or(current.1);
+    let compiled_css = req.compiled_css.clone().unwrap_or(current.2);
+    let compiled_key = req.compiled_key.clone().unwrap_or(current.3);
+    if let Some(issues) = crate::render::handlebars::find_remote_refs(&html, &css) {
+        return Err(AppError::Validation(format!(
+            "Template contains remote references ({}). Use data: URIs instead.",
+            issues.join("; ")
+        )));
+    }
+
     let affected = conn.execute(
         "UPDATE templates SET name = ?1, page_w_mm = ?2, page_h_mm = ?3, orientation = ?4,
-             summary = ?5, updated_at = datetime('now'),
+             summary = ?5, html = ?6, css = ?7, compiled_css = ?8, compiled_key = ?9,
+             updated_at = datetime('now'),
              sync_state = CASE WHEN sync_state = 'deleted_pending' THEN 'deleted_pending' ELSE 'dirty' END
-         WHERE id = ?6",
+         WHERE id = ?10",
         rusqlite::params![
             name,
             req.page_w_mm,
             req.page_h_mm,
             orientation,
             req.summary.clone().unwrap_or_default(),
+            html,
+            css,
+            compiled_css,
+            compiled_key,
             req.id
         ],
     )?;

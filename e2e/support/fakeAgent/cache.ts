@@ -540,6 +540,8 @@ export function createFakeCache() {
           origin: t.kind === "saved" ? "saved" : "own",
           origin_owner: t.owner_handle,
           withdrawn: false,
+          base_revision: t.base_revision,
+          sync_state: t.sync_state,
           created_at: t.updated_at,
           updated_at: t.updated_at,
         }));
@@ -564,6 +566,8 @@ export function createFakeCache() {
         origin: row.kind === "saved" ? "saved" : "own",
         origin_owner: row.owner_handle,
         withdrawn: false,
+        base_revision: row.base_revision,
+        sync_state: row.sync_state,
         created_at: row.updated_at,
         updated_at: row.updated_at,
       };
