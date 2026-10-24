@@ -66,7 +66,11 @@ describe("getAppVersion", () => {
 
   it("falls back to the baked package version in web mode", async () => {
     getVersionMock.mockRejectedValue(new Error("no tauri"));
-    await expect(getAppVersion()).resolves.toBe("3.1.0");
+    // The baked version tracks package.json (see vite.config.ts), so compare
+    // against it instead of a literal that breaks on every version bump.
+    await expect(getAppVersion()).resolves.toBe(
+      normalizeVersion(__APP_VERSION__),
+    );
   });
 });
 
