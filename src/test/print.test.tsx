@@ -58,6 +58,9 @@ beforeEach(() => {
     timings: null,
     pageRange: "",
     grayscale: false,
+    orientation: "portrait",
+    paperW: null,
+    paperH: null,
   });
   invoke.mockImplementation(async (cmd: string) => {
     if (cmd === "enumerate_system_printers")
@@ -112,13 +115,17 @@ describe("Print page", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("keeps margins and fit options behind Advanced options", async () => {
+  it("shows layout options inline with no advanced section", async () => {
     renderPage();
     await screen.findByRole("button", { name: /^Print$/ });
-    expect(screen.queryByLabelText("Page range")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
+    // Everything lives in the default section: no toggle, no hiding.
+    expect(
+      screen.queryByRole("button", { name: /Advanced options/ }),
+    ).toBeNull();
     expect(screen.getByLabelText("Page range")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: /Margins/ })).toBeInTheDocument();
+    expect(screen.getByLabelText("Paper size")).toBeInTheDocument();
+    expect(screen.getByLabelText("Fit mode")).toBeInTheDocument();
   });
 
   it("announces success, and failure with a retry", async () => {
@@ -190,6 +197,45 @@ describe("Print page", () => {
           req: expect.objectContaining({
             data_url: "https://api.example.com/orders/123",
             http_method: "POST",
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("sends the template size as paper by default, explicit paper when set", async () => {
+    renderPage();
+    const print = await screen.findByRole("button", { name: /^Print$/ });
+    await waitFor(() => expect(print).toBeEnabled());
+    fireEvent.click(print);
+    // Mock template is 100×150 portrait: orientation and paper follow it.
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "print_html",
+        expect.objectContaining({
+          req: expect.objectContaining({
+            page_width_mm: 100,
+            page_height_mm: 150,
+            orientation: "portrait",
+          }),
+        }),
+      ),
+    );
+  });
+
+  it("sends an explicit paper size override with the print request", async () => {
+    usePrintStore.setState({ paperW: 210, paperH: 297 });
+    renderPage();
+    const print = await screen.findByRole("button", { name: /^Print$/ });
+    await waitFor(() => expect(print).toBeEnabled());
+    fireEvent.click(print);
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith(
+        "print_html",
+        expect.objectContaining({
+          req: expect.objectContaining({
+            page_width_mm: 210,
+            page_height_mm: 297,
           }),
         }),
       ),

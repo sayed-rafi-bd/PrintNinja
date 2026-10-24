@@ -50,9 +50,10 @@ test("print submits the whole form, including page range and grayscale", async (
     page.locator('iframe[title="Print preview"]').first(),
   ).toBeAttached({ timeout: 15_000 });
 
-  await page.getByRole("button", { name: /Advanced options/ }).click();
   await page.getByLabel("Page range").fill("1-3");
   await page.getByLabel("Grayscale").click();
+  await page.getByRole("combobox", { name: "Paper size" }).click();
+  await page.getByRole("option", { name: /A4/ }).click();
 
   await page.getByRole("button", { name: /^Print$/ }).click();
 
@@ -63,6 +64,8 @@ test("print submits the whole form, including page range and grayscale", async (
   expect(call?.args.req).toMatchObject({
     printer_name: "E2E Submit Printer",
     page_range: "1-3",
+    page_width_mm: 210,
+    page_height_mm: 297,
     grayscale: true,
   });
   expect(typeof call?.args.req?.template_id).toBe("number");
