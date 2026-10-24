@@ -106,6 +106,7 @@ const resources = {
         reprint_title: "Reprint job #{{id}}?",
         reprint_body: "This sends the same job to the printer again.",
         reprint_confirm: "Reprint",
+        update_available: "Update to {{version}} (opens the release page)",
         reprint_none: "There are no jobs to reprint yet.",
         reprint_failed: "Could not reprint the last job.",
         reprint_done: "Queued reprint of job #{{id}}",

@@ -136,6 +136,8 @@ It is deployed by hand, see section 7.
 
 Open the draft release on GitHub. If you sign locally, replace the unsigned files with your signed builds, then publish.
 
+The app surfaces new releases itself: on boot it compares its version with the latest GitHub Release and shows an "Update vX.Y.Z" badge in the top bar linking to the release page, where users download and update by hand. There is no auto-update path to maintain.
+
 ## 6. Architecture targets summary
 
 | Platform | CI bundle | Local signing | Architectures |

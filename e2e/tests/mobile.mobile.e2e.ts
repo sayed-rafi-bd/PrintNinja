@@ -47,6 +47,19 @@ test.beforeEach(async ({ context }) => {
     ],
     printers: [{ name: "Mobile Zebra" }],
   });
+  // Pin the update check to a newer release: the badge renders
+  // deterministically (and gets tap-target/axe/screenshot coverage).
+  await context.route("https://api.github.com/**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        tag_name: "v9.9.9",
+        html_url:
+          "https://github.com/sayed-rafi-bd/PrintNinja/releases/tag/v9.9.9",
+      }),
+    }),
+  );
 });
 
 interface SmallTarget {
@@ -77,6 +90,13 @@ async function checkRoute(
   shotName: string,
 ) {
   await expect(page.getByRole("main")).toBeVisible({ timeout: 15_000 });
+  // The mocked release is newer than the app: the badge links to it.
+  const badge = page.getByRole("link", { name: "Update to v9.9.9" });
+  await expect(badge).toBeVisible({ timeout: 15_000 });
+  await expect(badge).toHaveAttribute(
+    "href",
+    "https://github.com/sayed-rafi-bd/PrintNinja/releases/tag/v9.9.9",
+  );
   // Let debounced previews and share polling settle before measuring.
   await page.waitForTimeout(1000);
 

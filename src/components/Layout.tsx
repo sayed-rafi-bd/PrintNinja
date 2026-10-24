@@ -8,6 +8,7 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
 import { StatusBadge } from "@/components/StatusBadge";
+import { UpdateBadge } from "@/components/UpdateBadge";
 import { Button } from "@/components/ui/button";
 import {
   DialogDescription,
@@ -320,6 +321,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           {/* Share/sync state stays visible on phones as a compact icon-only
               badge; the word returns from sm up (see StatusBadge compact). */}
           <ShareIndicator />
+          <UpdateBadge />
           <Button
             variant="ghost"
             size="icon"
