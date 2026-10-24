@@ -551,6 +551,187 @@ export function PrintPage() {
               )}
               {!store.useTestData && dataFields}
 
+              {/* Advanced options live in this same card, collapsed by
+                  default so the first screen stays short. */}
+              <div className="border-t pt-1">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between py-2 text-left text-sm font-semibold"
+                  aria-expanded={showAdvanced}
+                  aria-controls="print-advanced"
+                  onClick={() => setShowAdvanced((v) => !v)}
+                >
+                  {t("print.advanced")}
+                  <ChevronDown
+                    className={cn(
+                      "h-4 w-4 transition-transform",
+                      showAdvanced && "rotate-180",
+                    )}
+                    aria-hidden="true"
+                  />
+                </button>
+                {showAdvanced && (
+                  <div id="print-advanced" className="space-y-4 pb-1 pt-2">
+                    {/* While test data is on these live here instead of the main
+                  card; disabled fields still show their current values. */}
+                    {store.useTestData && dataFields}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className={field}>
+                        <Label htmlFor="print-orientation">
+                          {t("print.orientation")}
+                        </Label>
+                        <Select
+                          value={store.orientation}
+                          onValueChange={(v) =>
+                            store.setOrientation(v as "portrait" | "landscape")
+                          }
+                        >
+                          <SelectTrigger
+                            id="print-orientation"
+                            aria-label={t("print.orientation")}
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="portrait">
+                              {t("designer.portrait")}
+                            </SelectItem>
+                            <SelectItem value="landscape">
+                              {t("designer.landscape")}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className={field}>
+                        <Label htmlFor="print-fit">{t("print.fit_mode")}</Label>
+                        <Select
+                          value={store.fitMode}
+                          onValueChange={(v) =>
+                            store.setFitMode(
+                              v as
+                                | "actual"
+                                | "fit-width"
+                                | "fit-page"
+                                | "shrink"
+                                | "fill",
+                            )
+                          }
+                        >
+                          <SelectTrigger
+                            id="print-fit"
+                            aria-label={t("print.fit_mode")}
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="actual">
+                              {t("print.fit_actual")}
+                            </SelectItem>
+                            <SelectItem value="fit-width">
+                              {t("print.fit_width")}
+                            </SelectItem>
+                            <SelectItem value="fit-page">
+                              {t("print.fit_page")}
+                            </SelectItem>
+                            <SelectItem value="shrink">
+                              {t("print.fit_shrink")}
+                            </SelectItem>
+                            <SelectItem value="fill">
+                              {t("print.fit_fill")}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className={field}>
+                      <Label htmlFor="page-range">
+                        {t("print.page_range")}
+                      </Label>
+                      <Input
+                        id="page-range"
+                        placeholder={t("print.page_range_example")}
+                        value={store.pageRange}
+                        onChange={(e) => store.setPageRange(e.target.value)}
+                      />
+                    </div>
+                    <fieldset className="space-y-1.5">
+                      <legend className="text-sm font-medium leading-none">
+                        {t("print.margins")} (mm)
+                      </legend>
+                      <div className="grid grid-cols-4 gap-2 pt-1.5">
+                        {(
+                          [
+                            [
+                              "mt",
+                              "print.margin_top",
+                              store.marginTop,
+                              store.setMarginTop,
+                            ],
+                            [
+                              "mr",
+                              "print.margin_right",
+                              store.marginRight,
+                              store.setMarginRight,
+                            ],
+                            [
+                              "mb",
+                              "print.margin_bottom",
+                              store.marginBottom,
+                              store.setMarginBottom,
+                            ],
+                            [
+                              "ml",
+                              "print.margin_left",
+                              store.marginLeft,
+                              store.setMarginLeft,
+                            ],
+                          ] as const
+                        ).map(([id, key, value, set]) => (
+                          <div key={id} className="space-y-1">
+                            <Label
+                              htmlFor={id}
+                              className="text-xs font-normal text-muted-foreground"
+                            >
+                              {t(key)}
+                            </Label>
+                            <Input
+                              id={id}
+                              type="number"
+                              value={value}
+                              onChange={(e) => set(Number(e.target.value))}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </fieldset>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="grayscale"
+                        checked={store.grayscale}
+                        onCheckedChange={store.setGrayscale}
+                      />
+                      <Label htmlFor="grayscale" className="font-normal">
+                        {t("print.grayscale")}
+                      </Label>
+                    </div>
+                    <div className="border-t pt-3">
+                      <p className="mb-2 text-xs text-muted-foreground">
+                        {t("print.test_hint")}
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleSpikeTest}
+                        disabled={store.status === "printing"}
+                      >
+                        <Zap className="h-4 w-4" aria-hidden="true" />
+                        {t("print.send_test")}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-2 pt-1">
                 {/* Phone: the sticky bar owns the Print button (below). Two
                     buttons with the same name would break the tests' single
@@ -580,187 +761,6 @@ export function PrintPage() {
                 )}
               </div>
             </CardContent>
-          </Card>
-
-          {/* {t("print.advanced")} stay out of the way until needed */}
-          <Card>
-            <button
-              type="button"
-              className="flex w-full items-center justify-between px-5 py-3 text-left text-sm font-semibold"
-              aria-expanded={showAdvanced}
-              aria-controls="print-advanced"
-              onClick={() => setShowAdvanced((v) => !v)}
-            >
-              {t("print.advanced")}
-              <ChevronDown
-                className={cn(
-                  "h-4 w-4 transition-transform",
-                  showAdvanced && "rotate-180",
-                )}
-                aria-hidden="true"
-              />
-            </button>
-            {showAdvanced && (
-              <CardContent
-                id="print-advanced"
-                className="space-y-4 border-t pt-4"
-              >
-                {/* While test data is on these live here instead of the main
-                    card; disabled fields still show their current values. */}
-                {store.useTestData && dataFields}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className={field}>
-                    <Label htmlFor="print-orientation">
-                      {t("print.orientation")}
-                    </Label>
-                    <Select
-                      value={store.orientation}
-                      onValueChange={(v) =>
-                        store.setOrientation(v as "portrait" | "landscape")
-                      }
-                    >
-                      <SelectTrigger
-                        id="print-orientation"
-                        aria-label={t("print.orientation")}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="portrait">
-                          {t("designer.portrait")}
-                        </SelectItem>
-                        <SelectItem value="landscape">
-                          {t("designer.landscape")}
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className={field}>
-                    <Label htmlFor="print-fit">{t("print.fit_mode")}</Label>
-                    <Select
-                      value={store.fitMode}
-                      onValueChange={(v) =>
-                        store.setFitMode(
-                          v as
-                            | "actual"
-                            | "fit-width"
-                            | "fit-page"
-                            | "shrink"
-                            | "fill",
-                        )
-                      }
-                    >
-                      <SelectTrigger
-                        id="print-fit"
-                        aria-label={t("print.fit_mode")}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="actual">
-                          {t("print.fit_actual")}
-                        </SelectItem>
-                        <SelectItem value="fit-width">
-                          {t("print.fit_width")}
-                        </SelectItem>
-                        <SelectItem value="fit-page">
-                          {t("print.fit_page")}
-                        </SelectItem>
-                        <SelectItem value="shrink">
-                          {t("print.fit_shrink")}
-                        </SelectItem>
-                        <SelectItem value="fill">
-                          {t("print.fit_fill")}
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className={field}>
-                  <Label htmlFor="page-range">{t("print.page_range")}</Label>
-                  <Input
-                    id="page-range"
-                    placeholder={t("print.page_range_example")}
-                    value={store.pageRange}
-                    onChange={(e) => store.setPageRange(e.target.value)}
-                  />
-                </div>
-                <fieldset className="space-y-1.5">
-                  <legend className="text-sm font-medium leading-none">
-                    {t("print.margins")} (mm)
-                  </legend>
-                  <div className="grid grid-cols-4 gap-2 pt-1.5">
-                    {(
-                      [
-                        [
-                          "mt",
-                          "print.margin_top",
-                          store.marginTop,
-                          store.setMarginTop,
-                        ],
-                        [
-                          "mr",
-                          "print.margin_right",
-                          store.marginRight,
-                          store.setMarginRight,
-                        ],
-                        [
-                          "mb",
-                          "print.margin_bottom",
-                          store.marginBottom,
-                          store.setMarginBottom,
-                        ],
-                        [
-                          "ml",
-                          "print.margin_left",
-                          store.marginLeft,
-                          store.setMarginLeft,
-                        ],
-                      ] as const
-                    ).map(([id, key, value, set]) => (
-                      <div key={id} className="space-y-1">
-                        <Label
-                          htmlFor={id}
-                          className="text-xs font-normal text-muted-foreground"
-                        >
-                          {t(key)}
-                        </Label>
-                        <Input
-                          id={id}
-                          type="number"
-                          value={value}
-                          onChange={(e) => set(Number(e.target.value))}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </fieldset>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="grayscale"
-                    checked={store.grayscale}
-                    onCheckedChange={store.setGrayscale}
-                  />
-                  <Label htmlFor="grayscale" className="font-normal">
-                    {t("print.grayscale")}
-                  </Label>
-                </div>
-                <div className="border-t pt-3">
-                  <p className="mb-2 text-xs text-muted-foreground">
-                    {t("print.test_hint")}
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleSpikeTest}
-                    disabled={store.status === "printing"}
-                  >
-                    <Zap className="h-4 w-4" aria-hidden="true" />
-                    {t("print.send_test")}
-                  </Button>
-                </div>
-              </CardContent>
-            )}
           </Card>
         </div>
 
