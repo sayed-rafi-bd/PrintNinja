@@ -3,6 +3,7 @@ import {
   Ban,
   Bookmark,
   CheckCircle2,
+  CircleHelp,
   Clock,
   EyeOff,
   Globe,
@@ -37,6 +38,7 @@ export const STATUS = {
   // Printers
   online: { tone: "success", icon: Wifi, label: "Online" },
   offline: { tone: "danger", icon: WifiOff, label: "Offline" },
+  unchecked: { tone: "neutral", icon: CircleHelp, label: "Not checked" },
   // Local API server: loopback shows a green badge, LAN a red alert.
   api: { tone: "success", icon: Globe, label: "API" },
   lan: { tone: "danger", icon: Wifi, label: "LAN" },

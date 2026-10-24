@@ -36,7 +36,14 @@ import {
   TestTube,
   Scan,
   RefreshCw,
+  MoreHorizontal,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { validatePrinterForm } from "@/lib/printerSchema";
 import type { PrinterRow } from "@/lib/agent/types";
@@ -309,11 +316,11 @@ export function PrinterSetupPage() {
         header: "Status",
         cell: (c) => {
           const st = c.row.original.status;
+          // Icon + word in both cases (PLAN.md phase 2); unknown states
+          // read "Not checked" instead of bare muted text.
           if (st === "online" || st === "offline")
             return <StatusBadge status={st} />;
-          return (
-            <span className="text-xs text-muted-foreground">Not checked</span>
-          );
+          return <StatusBadge status="unchecked" />;
         },
       },
       {
@@ -390,6 +397,79 @@ export function PrinterSetupPage() {
     [testing, t],
   );
 
+  // Phone card (PLAN.md phase 2): name + address, status chip, a primary
+  // Test print button, and a ⋯ menu holding Edit and Delete (Delete confirms
+  // via the same dialog as the table).
+  const printerCard = (p: PrinterRow) => {
+    const st = p.status;
+    const Icon = TYPE_ICONS[p.printer_type] ?? Printer;
+    return (
+      <div className="space-y-2">
+        <div className="flex items-start gap-2">
+          <Icon
+            className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-medium">{p.name}</p>
+            <p
+              className="truncate font-mono text-xs text-muted-foreground"
+              title={p.address}
+            >
+              {p.address}
+            </p>
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={t("common.actions_for", { name: p.name })}
+              >
+                <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => openEdit(p)}>
+                <Pencil className="h-4 w-4" aria-hidden="true" />
+                {`Edit ${p.name}`}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => setRemoveTarget(p)}
+                className="text-danger focus:text-danger"
+              >
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+                {`Remove ${p.name}`}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {st === "online" || st === "offline" ? (
+            <StatusBadge status={st} />
+          ) : (
+            <StatusBadge status="unchecked" />
+          )}
+          <span className="text-xs text-muted-foreground">
+            {PRINTER_TYPES.find((x) => x.value === p.printer_type)?.label ??
+              p.printer_type}
+            {p.paper_width_mm ? ` · ${p.paper_width_mm} mm` : ""}
+          </span>
+        </div>
+        <Button
+          size="sm"
+          className="w-full"
+          disabled={testing === p.id}
+          onClick={() => testPrinter(p)}
+          aria-label={`Test print on ${p.name}`}
+        >
+          <TestTube className="h-4 w-4" aria-hidden="true" />
+          {testing === p.id ? "Testing…" : t("printers.test_print")}
+        </Button>
+      </div>
+    );
+  };
+
   const field = "space-y-1.5";
   const addressLabel =
     form.printer_type === "system"
@@ -429,7 +509,8 @@ export function PrinterSetupPage() {
       </PageHeader>
 
       <Tabs value={tab} onValueChange={setTab} className="w-full">
-        <TabsList>
+        {/* Edge fade signals the row scrolls on phones (PLAN.md phase 2). */}
+        <TabsList className="[mask-image:linear-gradient(to_right,black_calc(100%-12px),transparent)]">
           {GROUPS.map((g) => (
             <TabsTrigger key={g.key} value={g.key}>
               {g.label} ({counts(g.types)})
@@ -444,6 +525,7 @@ export function PrinterSetupPage() {
             data={filtered}
             getRowId={(p) => String(p.id)}
             loading={loading}
+            renderCard={printerCard}
             empty={{
               title:
                 tab === "all"

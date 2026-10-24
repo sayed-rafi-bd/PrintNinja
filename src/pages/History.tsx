@@ -4,6 +4,7 @@ import {
   Bookmark,
   Download,
   Eye,
+  MoreHorizontal,
   RotateCcw,
   Search,
   SlidersHorizontal,
@@ -709,6 +710,69 @@ export function HistoryPage() {
       clear: () => store.setFilter({ dateTo: "" }),
     });
 
+  // Phone card (PLAN.md phase 2): job + status stay visible without
+  // horizontal scrolling; row actions move into a ⋯ menu; tapping the card
+  // opens the details via the DataTable's onRowActivate.
+  const historyCard = (job: HistoryJob) => (
+    <div className="flex items-start gap-2">
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-mono text-sm">#{job.id}</span>
+          <JobStatusBadge status={job.status} />
+        </div>
+        <p className="truncate text-xs text-muted-foreground">
+          {printerName(job.printer_id)} · {fmtTime(job)} · {job.source}
+        </p>
+        {job.error && (
+          <p className="truncate text-xs text-danger">{job.error}</p>
+        )}
+      </div>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+        className="shrink-0"
+      >
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t("common.actions_for", { name: `job ${job.id}` })}
+            >
+              <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => store.setSelectedJob(job)}>
+              <Eye className="h-4 w-4" aria-hidden="true" />
+              {`View job ${job.id}`}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => setConfirm({ kind: "reprint", job })}
+            >
+              <RotateCcw className="h-4 w-4" aria-hidden="true" />
+              {`Reprint job ${job.id}`}
+            </DropdownMenuItem>
+            {job.status === "failed" && (
+              <DropdownMenuItem
+                onSelect={() => setConfirm({ kind: "retry", job })}
+              >
+                {t("history.retry")}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem
+              onSelect={() => setConfirm({ kind: "delete", job })}
+              className="text-danger focus:text-danger"
+            >
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
+              {`Delete job ${job.id}`}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-4">
       <PageHeader title={t("history.title")} description={t("pages.history")}>
@@ -869,7 +933,11 @@ export function HistoryPage() {
 
       {selected.size > 0 && (
         <div
-          className="flex flex-wrap items-center gap-2 rounded-lg border bg-accent px-3 py-2 text-sm"
+          className={`flex flex-wrap items-center gap-2 rounded-lg border bg-accent px-3 py-2 text-sm${
+            // Phone card mode: the bar sticks to the bottom of the scroll
+            // area (above the bottom nav) so Reprint stays reachable.
+            isPhone ? " sticky bottom-0 z-10 shadow-md" : ""
+          }`}
           role="status"
         >
           <span className="font-medium text-accent-foreground">
@@ -909,6 +977,7 @@ export function HistoryPage() {
         loading={loading}
         onRowActivate={(j) => store.setSelectedJob(j)}
         selection={{ selectedIds: selected, onChange: setSelected }}
+        renderCard={historyCard}
         empty={{
           title: filtersActive
             ? "No jobs match these filters"

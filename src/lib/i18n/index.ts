@@ -36,6 +36,7 @@ const resources = {
         sort_by: "Sort by {{column}}",
         select_all_rows: "Select all rows",
         select_row: "Select row {{id}}",
+        actions_for: "Actions for {{name}}",
       },
       nav: {
         designer: "Designer",
@@ -229,6 +230,7 @@ const resources = {
         withdrawn: "Withdrawn",
         online: "Online",
         offline: "Offline",
+        unchecked: "Not checked",
         api: "API",
         lan: "LAN",
       },

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { ColumnDef, SortingState } from "@tanstack/react-table";
 import {
   Bookmark,
   BookmarkCheck,
   CloudDownload,
   CloudUpload,
   Eye,
+  MoreHorizontal,
   Pencil,
   Printer,
   RefreshCw,
@@ -34,6 +35,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Label } from "@/components/ui/label";
 import { usePrintStore } from "@/lib/store/printStore";
 import { DEFAULT_MOCK_DATA } from "@/lib/templates/defaultTemplate";
 import { Button } from "@/components/ui/button";
@@ -49,6 +57,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import * as share from "@/lib/share/client";
+import { PHONE_QUERY, useMediaQuery } from "@/lib/hooks/useMediaQuery";
 import { downloadToLocal } from "@/lib/share/sync";
 import {
   deleteTemplateEverywhere,
@@ -56,6 +65,7 @@ import {
   takeServerCopy,
 } from "@/lib/share/save";
 import { cn } from "@/lib/utils";
+import type { ReactNode } from "react";
 
 type ServerSummary = share.CommunitySummary;
 
@@ -84,6 +94,13 @@ export function TemplatesPage() {
   }, [search]);
   const [mine, setMine] = useState<TemplateRow[]>([]);
   const [saved, setSaved] = useState<TemplateRow[]>([]);
+  // Controlled sorting for the phone-only sort dropdowns below (PLAN.md
+  // phase 2): desktop keeps header-button sorting on the same state.
+  const [mineSorting, setMineSorting] = useState<SortingState>([]);
+  const [savedSorting, setSavedSorting] = useState<SortingState>([]);
+  const [mineSortKey, setMineSortKey] = useState("");
+  const [savedSortKey, setSavedSortKey] = useState("");
+  const isPhone = useMediaQuery(PHONE_QUERY);
   const [saving, setSaving] = useState<Set<string>>(new Set());
   const [syncing, setSyncing] = useState<number | null>(null);
   const [offline, setOffline] = useState(false);
@@ -359,6 +376,186 @@ export function TemplatesPage() {
   const isSaved = (serverId: string) =>
     saved.some((t) => t.remote_id === serverId);
 
+  // Shared by the table cells and the phone cards below (PLAN.md phase 2).
+  // Every local row carries a server id (minted at creation), so "on the
+  // server" means the server has actually seen it: the row records the
+  // revision it was last synced at.
+  const mineStatus = (tpl: TemplateRow) => {
+    if (tpl.base_revision == null)
+      return <StatusBadge status="draft" label="Not on the server" />;
+    if (!tpl.published_at)
+      return <StatusBadge status="draft" label="Private" />;
+    return share.hasUnpublishedChanges(tpl) ? (
+      <StatusBadge status="draft" label="Changes not saved" />
+    ) : (
+      <StatusBadge status="published" />
+    );
+  };
+  const savedStatus = (tpl: TemplateRow) =>
+    tpl.withdrawn || gone.has(tpl.id) ? (
+      <StatusBadge status="withdrawn" label="Withdrawn by author" />
+    ) : (
+      <StatusBadge status="saved" />
+    );
+
+  // ⋯ menu for phone cards: the same actions and handlers as the table row.
+  // The wrapper stops the tap from also activating the card.
+  const cardMenu = (name: string, items: ReactNode) => (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+      className="shrink-0"
+    >
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={t("common.actions_for", { name })}
+          >
+            <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">{items}</DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+
+  // Phone cards (PLAN.md phase 2): name + summary, status badge and page
+  // size, kebab menu for actions. Tapping a Mine card opens the Designer
+  // via the DataTable's onRowActivate.
+  const mineCard = (tpl: TemplateRow) => (
+    <div className="space-y-2">
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-medium">{tpl.name}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {tpl.summary || "No summary"}
+          </p>
+        </div>
+        {cardMenu(
+          tpl.name,
+          <>
+            <DropdownMenuItem
+              disabled={syncing != null}
+              onSelect={() => handleSaveToServer(tpl)}
+            >
+              <CloudUpload className="h-4 w-4" aria-hidden="true" />
+              {`Save ${tpl.name} to the server`}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={syncing != null}
+              onSelect={() => setRefreshTarget(tpl)}
+            >
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              {`Refresh ${tpl.name} from the server`}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => navigate(`/template/${tpl.id}`)}>
+              <Pencil className="h-4 w-4" aria-hidden="true" />
+              Edit
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => handleUse(tpl, false)}>
+              <Printer className="h-4 w-4" aria-hidden="true" />
+              Print
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={syncing != null}
+              onSelect={() => setDeleteTarget(tpl)}
+              className="text-danger focus:text-danger"
+            >
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
+              {`Delete ${tpl.name} everywhere`}
+            </DropdownMenuItem>
+          </>,
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {mineStatus(tpl)}
+        <span className="text-xs text-muted-foreground">
+          {tpl.page_w_mm} × {tpl.page_h_mm} mm
+        </span>
+      </div>
+    </div>
+  );
+  const savedCard = (tpl: TemplateRow) => (
+    <div className="space-y-2">
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-medium">{tpl.name}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {tpl.summary || "No summary"}
+          </p>
+        </div>
+        {cardMenu(
+          tpl.name,
+          <>
+            <DropdownMenuItem
+              disabled={syncing != null}
+              onSelect={() => setRefreshTarget(tpl)}
+            >
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              {`Refresh ${tpl.name} from the server`}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => handleUse(tpl, true)}>
+              <Printer className="h-4 w-4" aria-hidden="true" />
+              Print
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => setRemoveTarget(tpl)}
+              className="text-danger focus:text-danger"
+            >
+              Remove
+            </DropdownMenuItem>
+          </>,
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {savedStatus(tpl)}
+        <span className="text-xs text-muted-foreground">
+          Saved from {tpl.origin_owner ?? "unknown"}
+        </span>
+      </div>
+    </div>
+  );
+
+  // Phone-only sort dropdown: cards have no headers to sort by. Desktop
+  // keeps header-button sorting on the same state.
+  const sortSelect = (
+    id: string,
+    sortKey: string,
+    onSortKey: (key: string) => void,
+    withUpdated: boolean,
+  ) => (
+    <div className="mb-2 flex items-center justify-end gap-2">
+      <Label htmlFor={id}>Sort</Label>
+      <Select value={sortKey} onValueChange={onSortKey}>
+        <SelectTrigger
+          id={id}
+          aria-label="Sort templates"
+          className="w-[170px]"
+        >
+          <SelectValue placeholder="Sort" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="name">Name (A–Z)</SelectItem>
+          {withUpdated && (
+            <SelectItem value="updated">Recently updated</SelectItem>
+          )}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+  const applySortKey = (
+    key: string,
+    setKey: (k: string) => void,
+    setSorting: (s: SortingState) => void,
+  ) => {
+    setKey(key);
+    if (key === "name") setSorting([{ id: "name", desc: false }]);
+    else if (key === "updated") setSorting([{ id: "updated", desc: true }]);
+    else setSorting([]);
+  };
+
   const mineColumns = useMemo<ColumnDef<TemplateRow>[]>(
     () => [
       {
@@ -378,21 +575,7 @@ export function TemplatesPage() {
       {
         id: "status",
         header: "Status",
-        cell: (c) => {
-          const tpl = c.row.original;
-          // Every local row carries a server id (minted at creation), so
-          // "on the server" means the server has actually seen it: the
-          // row records the revision it was last synced at.
-          if (tpl.base_revision == null)
-            return <StatusBadge status="draft" label="Not on the server" />;
-          if (!tpl.published_at)
-            return <StatusBadge status="draft" label="Private" />;
-          return share.hasUnpublishedChanges(tpl) ? (
-            <StatusBadge status="draft" label="Changes not saved" />
-          ) : (
-            <StatusBadge status="published" />
-          );
-        },
+        cell: (c) => mineStatus(c.row.original),
       },
       {
         id: "size",
@@ -504,12 +687,7 @@ export function TemplatesPage() {
       {
         id: "status",
         header: "Status",
-        cell: (c) =>
-          c.row.original.withdrawn || gone.has(c.row.original.id) ? (
-            <StatusBadge status="withdrawn" label="Withdrawn by author" />
-          ) : (
-            <StatusBadge status="saved" />
-          ),
+        cell: (c) => savedStatus(c.row.original),
       },
       {
         id: "actions",
@@ -577,6 +755,13 @@ export function TemplatesPage() {
 
         {/* Mine */}
         <TabsContent value="mine" className="mt-4">
+          {isPhone &&
+            sortSelect(
+              "mine-sort",
+              mineSortKey,
+              (k) => applySortKey(k, setMineSortKey, setMineSorting),
+              true,
+            )}
           {conflicts.length > 0 && (
             <div
               data-testid="conflict-banner"
@@ -605,6 +790,9 @@ export function TemplatesPage() {
             data={mine}
             getRowId={(r) => String(r.id)}
             onRowActivate={(r) => navigate(`/template/${r.id}`)}
+            sorting={mineSorting}
+            onSortingChange={setMineSorting}
+            renderCard={mineCard}
             empty={{
               title: "No templates yet",
               description: "Create one in Designer.",
@@ -615,11 +803,21 @@ export function TemplatesPage() {
 
         {/* Saved */}
         <TabsContent value="saved" className="mt-4">
+          {isPhone &&
+            sortSelect(
+              "saved-sort",
+              savedSortKey,
+              (k) => applySortKey(k, setSavedSortKey, setSavedSorting),
+              false,
+            )}
           <DataTable
             caption="Saved templates"
             columns={savedColumns}
             data={saved}
             getRowId={(r) => String(r.id)}
+            sorting={savedSorting}
+            onSortingChange={setSavedSorting}
+            renderCard={savedCard}
             empty={{
               title: "No saved templates",
               description:
