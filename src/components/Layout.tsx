@@ -328,7 +328,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
               Release tooling bumps this literal: scripts/release.mjs,
               scripts/set-version.mjs and CI version-check all read it. */}
           <span className="shrink-0 text-xs text-muted-foreground">
-            {appVersion ? `v${appVersion}` : "v3.1.0"}
+            {appVersion ? `v${appVersion}` : "v3.1.1"}
           </span>
         </Link>
         {!shortLandscape && (
