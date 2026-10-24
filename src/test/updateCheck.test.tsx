@@ -147,7 +147,7 @@ describe("useUpdateCheck", () => {
 });
 
 describe("UpdateBadge", () => {
-  it("links a newer release to its page and opens it externally", async () => {
+  it("links a newer release to its page and follows the anchor in web mode", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -170,6 +170,31 @@ describe("UpdateBadge", () => {
       "https://github.com/o/r/releases/tag/v9.9.9",
     );
     expect(link).toHaveAttribute("target", "_blank");
+    fireEvent.click(link);
+    // Web builds let the anchor open the tab natively: the click gesture
+    // stays synchronous, so the popup blocker never trips. No opener call.
+    await waitFor(() => expect(openUrlMock).not.toHaveBeenCalled());
+  });
+
+  it("opens the release through the opener plugin in the desktop app", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          ({
+            ok: true,
+            json: async () => ({
+              tag_name: "v9.9.9",
+              html_url: "https://github.com/o/r/releases/tag/v9.9.9",
+            }),
+          }) as Response,
+      ),
+    );
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    render(<UpdateBadge />);
+    const link = await screen.findByRole("link", {
+      name: "Update to v9.9.9 (opens the release page)",
+    });
     fireEvent.click(link);
     await waitFor(() =>
       expect(openUrlMock).toHaveBeenCalledWith(

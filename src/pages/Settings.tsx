@@ -46,7 +46,6 @@ import {
   Trash2,
   Upload,
   Plus,
-  Info,
   ListChecks,
   ArrowLeft,
   ChevronRight,
@@ -119,7 +118,6 @@ const SECTION_META: Array<{
 
 export function SettingsPage() {
   const { t } = useTranslation();
-  const [appVersion, setAppVersion] = useState<string>("");
   const [searchParams, setSearchParams] = useSearchParams();
   const section = parseSection(searchParams.get("section"));
   const isPhone = useMediaQuery(PHONE_QUERY);
@@ -207,20 +205,6 @@ export function SettingsPage() {
     } catch {
       /* backend unavailable */
     }
-  }, []);
-
-  // Load app version
-  useEffect(() => {
-    (async () => {
-      try {
-        const { getVersion } = await import("@tauri-apps/api/app");
-        const v = await getVersion();
-        setAppVersion(v);
-      } catch {
-        // web mode: Tauri not available
-        setAppVersion("");
-      }
-    })();
   }, []);
 
   // Load persisted settings on mount.
@@ -1408,14 +1392,6 @@ export function SettingsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Version footer */}
-      <div className="flex items-center justify-center gap-2 pt-4 text-xs text-muted-foreground border-t">
-        <Info className="h-3 w-3" />
-        <span>PrintNinja {appVersion ? `v${appVersion}` : "v3.1.0"}</span>
-        <span className="opacity-50">·</span>
-        <span className="hidden sm:inline">com.printninja.desktop</span>
-      </div>
     </div>
   );
 }
