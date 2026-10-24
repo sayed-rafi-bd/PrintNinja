@@ -602,9 +602,6 @@ pub fn shared() -> &'static PersistentEdge {
 }
 
 impl PersistentEdge {
-    fn new() -> Self {
-        Self::default()
-    }
 
     /// The running browser, started (or restarted after a crash) if needed.
     /// Jobs that arrive during a start wait for it on the state lock rather
@@ -839,7 +836,7 @@ exec sleep 60
         let rig = Rig::new();
         let fake = Fake::default();
         let cfg = fake_edge(&rig.cache, fake.serve().await);
-        let edge = PersistentEdge::new();
+        let edge = PersistentEdge::default();
 
         let pdf = edge.print_pdf(&cfg, "file:///x.html").await.unwrap();
 
@@ -865,7 +862,7 @@ exec sleep 60
         let rig = Rig::new();
         let fake = Fake::default();
         let cfg = fake_edge(&rig.cache, fake.serve().await);
-        let edge = PersistentEdge::new();
+        let edge = PersistentEdge::default();
 
         let png = edge
             .screenshot(&cfg, "file:///x.html", 812, 406)
@@ -886,7 +883,7 @@ exec sleep 60
         let rig = Rig::new();
         let fake = Fake::default();
         let cfg = fake_edge(&rig.cache, fake.serve().await);
-        let edge = Arc::new(PersistentEdge::new());
+        let edge = Arc::new(PersistentEdge::default());
 
         let mut jobs = Vec::new();
         for i in 0..8 {
@@ -913,7 +910,7 @@ exec sleep 60
         let rig = Rig::new();
         let fake = Fake::default();
         let cfg = fake_edge(&rig.cache, fake.serve().await);
-        let edge = PersistentEdge::new();
+        let edge = PersistentEdge::default();
 
         let err = edge
             .print_pdf(&cfg, "file:///missing.html")
@@ -934,7 +931,7 @@ exec sleep 60
         let rig = Rig::new();
         let fake = Fake::default();
         let cfg = fake_edge(&rig.cache, fake.serve().await);
-        let edge = PersistentEdge::new();
+        let edge = PersistentEdge::default();
         edge.print_pdf(&cfg, "file:///a.html").await.unwrap();
 
         // The browser goes away under us.
@@ -959,7 +956,7 @@ exec sleep 60
     async fn a_failed_start_is_an_error_and_not_retried_at_once() {
         let rig = Rig::new();
         let cfg = Config::new(&rig.cache.join("no-such-edge"), &rig.cache);
-        let edge = PersistentEdge::new();
+        let edge = PersistentEdge::default();
 
         assert!(edge.print_pdf(&cfg, "file:///a.html").await.is_err());
         let t = Instant::now();
@@ -977,7 +974,7 @@ exec sleep 60
     async fn an_edge_that_exits_while_starting_is_reported_quickly() {
         let rig = Rig::new();
         let cfg = Config::new(Path::new("/bin/true"), &rig.cache);
-        let edge = PersistentEdge::new();
+        let edge = PersistentEdge::default();
 
         let t = Instant::now();
         let err = edge.start(&cfg).await.unwrap_err();
@@ -1031,7 +1028,7 @@ exec sleep 60
         )
         .unwrap();
         let url = format!("file://{}", html.display());
-        let edge = PersistentEdge::new();
+        let edge = PersistentEdge::default();
 
         let pdf = edge.print_pdf(&cfg, &url).await.unwrap();
         assert!(pdf.starts_with(b"%PDF"));
