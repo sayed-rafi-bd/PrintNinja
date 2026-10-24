@@ -188,6 +188,9 @@ describe("phone Print page", () => {
       useTestData: false,
       pageRange: "",
       grayscale: false,
+      orientation: "portrait",
+      paperW: null,
+      paperH: null,
       status: "idle",
       error: "",
       timings: null,
@@ -225,7 +228,7 @@ describe("phone Print page", () => {
     ).toBeInTheDocument();
   });
 
-  it("collapses data fields into Advanced options while test data is on", async () => {
+  it("keeps data fields visible but disabled while test data is on", async () => {
     usePrintStore.setState({ useTestData: true });
     render(
       <MemoryRouter>
@@ -233,10 +236,12 @@ describe("phone Print page", () => {
       </MemoryRouter>,
     );
     await screen.findByTestId("print-action-bar");
-    expect(screen.queryByLabelText("Data URL")).toBeNull();
-    expect(screen.queryByLabelText("Pages")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Advanced options/ }));
-    expect(screen.getByLabelText("Data URL")).toBeInTheDocument();
+    // No separate section: the fields stay inline, disabled in test mode.
+    expect(
+      screen.queryByRole("button", { name: /Advanced options/ }),
+    ).toBeNull();
+    const url = screen.getByLabelText("Data URL") as HTMLInputElement;
+    expect(url).toBeDisabled();
     expect(screen.getByLabelText("Pages")).toBeInTheDocument();
   });
 

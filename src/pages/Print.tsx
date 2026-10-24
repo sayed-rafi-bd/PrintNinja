@@ -28,6 +28,13 @@ import type { StarterTemplate } from "@/lib/templates/seedTemplates";
 import { compileTemplateCss } from "@/lib/templates/compileTemplateCss";
 const MM_TO_PX = 3.7795;
 
+/** Physical paper sheets offered as one-tap presets (mm). */
+const PAPER_PRESETS = [
+  { key: "a4", w: 210, h: 297, labelKey: "print.paper_a4" },
+  { key: "letter", w: 216, h: 279, labelKey: "print.paper_letter" },
+  { key: "photo", w: 100, h: 150, labelKey: "print.paper_photo" },
+] as const;
+
 export function PrintPage() {
   const { t } = useTranslation();
   const store = usePrintStore();
@@ -38,12 +45,11 @@ export function PrintPage() {
   const [previewHtml, setPreviewHtml] = useState<string>("");
   const [previewError, setPreviewError] = useState<string>("");
   const [previewNotice, setPreviewNotice] = useState<string>("");
-  const [previewPaper, setPreviewPaper] = useState({ w: 80, h: 200 });
+  const [previewPaper, setPreviewPaper] = useState({ w: 210, h: 297 });
   // Version ids already backfilled with compiled CSS this session, so the
   // preview effect does not write a "Compiled Tailwind CSS" version on
   // every render of the same template.
   const cssBackfilled = useRef<Set<number>>(new Set());
-  const [showAdvanced, setShowAdvanced] = useState(false);
   // Phone-only layout: the sticky action bar below. Desktop keeps the single
   // in-card Print button (jsdom has no matchMedia, so tests see that one too).
   const isPhone = useMediaQuery(PHONE_QUERY);
@@ -92,6 +98,19 @@ export function PrintPage() {
     () => templates.find((x) => String(x.id) === store.templateId),
     [templates, store.templateId],
   );
+
+  const selectedTemplateId = selectedTemplate?.id;
+  // The template's orientation is the default; flipping the selector below
+  // overrides it for this print only (never written back).
+  useEffect(() => {
+    if (selectedTemplate) {
+      store.setOrientation(
+        selectedTemplate.orientation === "landscape" ? "landscape" : "portrait",
+      );
+    }
+    // Keyed on the template only: a reload must not clobber a manual flip.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTemplateId]);
 
   // The preview follows the selected template and data source, so
   // operators see what will print. With test data it renders the bundled
@@ -200,6 +219,8 @@ export function PrintPage() {
             designW,
             designH,
             store.orientation,
+            store.paperW,
+            store.paperH,
           );
           setPreviewHtml(
             renderRecords(html, css, shownData, compiledCss, {
@@ -240,6 +261,8 @@ export function PrintPage() {
     httpMethod,
     pageCount,
     store.orientation,
+    store.paperW,
+    store.paperH,
     store.marginTop,
     store.marginRight,
     store.marginBottom,
@@ -281,8 +304,8 @@ export function PrintPage() {
           printer_name: store.printerId,
           html: "",
           template_id: Number(store.templateId),
-          page_width_mm: selectedTemplate?.page_w_mm ?? 210,
-          page_height_mm: selectedTemplate?.page_h_mm ?? 297,
+          page_width_mm: effPaperW,
+          page_height_mm: effPaperH,
           orientation: store.orientation,
           copies: store.copies,
           records: store.records,
@@ -355,9 +378,22 @@ export function PrintPage() {
             : "";
   const field = "space-y-1.5";
 
-  // Data URL / Method / Copies / Pages live in the main card for live-data
-  // jobs, and move into {t("print.advanced")} while "Use test data" is on — the
-  // operator changing repeat jobs never touches them.
+  // Paper presets: physical sheets. "auto" means the template's design
+  // size; "custom" is edited in the inputs below.
+  const designW = selectedTemplate?.page_w_mm ?? 80;
+  const designH = selectedTemplate?.page_h_mm ?? 200;
+  // Explicit paper size wins per axis; null falls back to the design size.
+  // The paper is per-print only — never written back to the template.
+  const effPaperW = store.paperW ?? designW;
+  const effPaperH = store.paperH ?? designH;
+  const paperPreset =
+    store.paperW == null && store.paperH == null
+      ? "auto"
+      : (PAPER_PRESETS.find((x) => x.w === store.paperW && x.h === store.paperH)
+          ?.key ?? "custom");
+
+  // Design size comes from the template; the paper size below overrides it
+  // per axis (null = template size). All controls live inline in this card.
   const dataFields = (
     <>
       <div className={field}>
@@ -591,187 +627,244 @@ export function PrintPage() {
                   })}
                 </p>
               )}
-              {!store.useTestData && dataFields}
+              {dataFields}
 
-              {/* Advanced options live in this same card, collapsed by
-                  default so the first screen stays short. */}
-              <div className="border-t pt-1">
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between py-2 text-left text-sm font-semibold"
-                  aria-expanded={showAdvanced}
-                  aria-controls="print-advanced"
-                  onClick={() => setShowAdvanced((v) => !v)}
+              {/* Layout controls live inline in this card, above the
+                  Print button — no separate advanced section. */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className={field}>
+                  <Label htmlFor="print-orientation">
+                    {t("print.orientation")}
+                  </Label>
+                  <Select
+                    value={store.orientation}
+                    onValueChange={(v) =>
+                      store.setOrientation(v as "portrait" | "landscape")
+                    }
+                  >
+                    <SelectTrigger
+                      id="print-orientation"
+                      aria-label={t("print.orientation")}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="portrait">
+                        {t("designer.portrait")}
+                      </SelectItem>
+                      <SelectItem value="landscape">
+                        {t("designer.landscape")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className={field}>
+                  <Label htmlFor="print-fit">{t("print.fit_mode")}</Label>
+                  <Select
+                    value={store.fitMode}
+                    onValueChange={(v) =>
+                      store.setFitMode(
+                        v as
+                          | "actual"
+                          | "fit-width"
+                          | "fit-page"
+                          | "shrink"
+                          | "fill",
+                      )
+                    }
+                  >
+                    <SelectTrigger
+                      id="print-fit"
+                      aria-label={t("print.fit_mode")}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="actual">
+                        {t("print.fit_actual")}
+                      </SelectItem>
+                      <SelectItem value="fit-width">
+                        {t("print.fit_width")}
+                      </SelectItem>
+                      <SelectItem value="fit-page">
+                        {t("print.fit_page")}
+                      </SelectItem>
+                      <SelectItem value="shrink">
+                        {t("print.fit_shrink")}
+                      </SelectItem>
+                      <SelectItem value="fill">
+                        {t("print.fit_fill")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className={field}>
+                <Label htmlFor="print-paper">{t("print.paper_size")}</Label>
+                <Select
+                  value={paperPreset}
+                  onValueChange={(v) => {
+                    const preset = PAPER_PRESETS.find((x) => x.key === v);
+                    if (!preset) {
+                      // Custom: start from the current effective size so
+                      // the inputs below are populated.
+                      store.setPaperW(effPaperW);
+                      store.setPaperH(effPaperH);
+                      return;
+                    }
+                    store.setPaperW(preset.w);
+                    store.setPaperH(preset.h);
+                  }}
                 >
-                  {t("print.advanced")}
-                  <ChevronDown
-                    className={cn(
-                      "h-4 w-4 transition-transform",
-                      showAdvanced && "rotate-180",
-                    )}
-                    aria-hidden="true"
-                  />
-                </button>
-                {showAdvanced && (
-                  <div id="print-advanced" className="space-y-4 pb-1 pt-2">
-                    {/* While test data is on these live here instead of the main
-                  card; disabled fields still show their current values. */}
-                    {store.useTestData && dataFields}
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className={field}>
-                        <Label htmlFor="print-orientation">
-                          {t("print.orientation")}
-                        </Label>
-                        <Select
-                          value={store.orientation}
-                          onValueChange={(v) =>
-                            store.setOrientation(v as "portrait" | "landscape")
-                          }
-                        >
-                          <SelectTrigger
-                            id="print-orientation"
-                            aria-label={t("print.orientation")}
-                          >
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="portrait">
-                              {t("designer.portrait")}
-                            </SelectItem>
-                            <SelectItem value="landscape">
-                              {t("designer.landscape")}
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className={field}>
-                        <Label htmlFor="print-fit">{t("print.fit_mode")}</Label>
-                        <Select
-                          value={store.fitMode}
-                          onValueChange={(v) =>
-                            store.setFitMode(
-                              v as
-                                | "actual"
-                                | "fit-width"
-                                | "fit-page"
-                                | "shrink"
-                                | "fill",
-                            )
-                          }
-                        >
-                          <SelectTrigger
-                            id="print-fit"
-                            aria-label={t("print.fit_mode")}
-                          >
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="actual">
-                              {t("print.fit_actual")}
-                            </SelectItem>
-                            <SelectItem value="fit-width">
-                              {t("print.fit_width")}
-                            </SelectItem>
-                            <SelectItem value="fit-page">
-                              {t("print.fit_page")}
-                            </SelectItem>
-                            <SelectItem value="shrink">
-                              {t("print.fit_shrink")}
-                            </SelectItem>
-                            <SelectItem value="fill">
-                              {t("print.fit_fill")}
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <div className={field}>
-                      <Label htmlFor="page-range">
-                        {t("print.page_range")}
+                  <SelectTrigger
+                    id="print-paper"
+                    aria-label={t("print.paper_size")}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">
+                      {t("print.paper_auto")}
+                    </SelectItem>
+                    {PAPER_PRESETS.map((x) => (
+                      <SelectItem key={x.key} value={x.key}>
+                        {t(x.labelKey)}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="custom">
+                      {t("print.paper_custom")}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {paperPreset === "custom" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className={field}>
+                    <Label htmlFor="paper-w">{t("print.paper_width")}</Label>
+                    <Input
+                      id="paper-w"
+                      type="number"
+                      min="1"
+                      value={store.paperW ?? ""}
+                      placeholder={String(designW)}
+                      onChange={(e) =>
+                        store.setPaperW(
+                          e.target.value === ""
+                            ? null
+                            : Math.max(1, Number(e.target.value) || 1),
+                        )
+                      }
+                    />
+                  </div>
+                  <div className={field}>
+                    <Label htmlFor="paper-h">{t("print.paper_height")}</Label>
+                    <Input
+                      id="paper-h"
+                      type="number"
+                      min="1"
+                      value={store.paperH ?? ""}
+                      placeholder={String(designH)}
+                      onChange={(e) =>
+                        store.setPaperH(
+                          e.target.value === ""
+                            ? null
+                            : Math.max(1, Number(e.target.value) || 1),
+                        )
+                      }
+                    />
+                  </div>
+                </div>
+              )}
+              <p className="-mt-2 text-xs text-muted-foreground">
+                {t("print.paper_note", {
+                  dw: designW,
+                  dh: designH,
+                  pw: effPaperW,
+                  ph: effPaperH,
+                })}
+              </p>
+              <div className={field}>
+                <Label htmlFor="page-range">{t("print.page_range")}</Label>
+                <Input
+                  id="page-range"
+                  placeholder={t("print.page_range_example")}
+                  value={store.pageRange}
+                  onChange={(e) => store.setPageRange(e.target.value)}
+                />
+              </div>
+              <fieldset className="space-y-1.5">
+                <legend className="text-sm font-medium leading-none">
+                  {t("print.margins")} (mm)
+                </legend>
+                <div className="grid grid-cols-4 gap-2 pt-1.5">
+                  {(
+                    [
+                      [
+                        "mt",
+                        "print.margin_top",
+                        store.marginTop,
+                        store.setMarginTop,
+                      ],
+                      [
+                        "mr",
+                        "print.margin_right",
+                        store.marginRight,
+                        store.setMarginRight,
+                      ],
+                      [
+                        "mb",
+                        "print.margin_bottom",
+                        store.marginBottom,
+                        store.setMarginBottom,
+                      ],
+                      [
+                        "ml",
+                        "print.margin_left",
+                        store.marginLeft,
+                        store.setMarginLeft,
+                      ],
+                    ] as const
+                  ).map(([id, key, value, set]) => (
+                    <div key={id} className="space-y-1">
+                      <Label
+                        htmlFor={id}
+                        className="text-xs font-normal text-muted-foreground"
+                      >
+                        {t(key)}
                       </Label>
                       <Input
-                        id="page-range"
-                        placeholder={t("print.page_range_example")}
-                        value={store.pageRange}
-                        onChange={(e) => store.setPageRange(e.target.value)}
+                        id={id}
+                        type="number"
+                        value={value}
+                        onChange={(e) => set(Number(e.target.value))}
                       />
                     </div>
-                    <fieldset className="space-y-1.5">
-                      <legend className="text-sm font-medium leading-none">
-                        {t("print.margins")} (mm)
-                      </legend>
-                      <div className="grid grid-cols-4 gap-2 pt-1.5">
-                        {(
-                          [
-                            [
-                              "mt",
-                              "print.margin_top",
-                              store.marginTop,
-                              store.setMarginTop,
-                            ],
-                            [
-                              "mr",
-                              "print.margin_right",
-                              store.marginRight,
-                              store.setMarginRight,
-                            ],
-                            [
-                              "mb",
-                              "print.margin_bottom",
-                              store.marginBottom,
-                              store.setMarginBottom,
-                            ],
-                            [
-                              "ml",
-                              "print.margin_left",
-                              store.marginLeft,
-                              store.setMarginLeft,
-                            ],
-                          ] as const
-                        ).map(([id, key, value, set]) => (
-                          <div key={id} className="space-y-1">
-                            <Label
-                              htmlFor={id}
-                              className="text-xs font-normal text-muted-foreground"
-                            >
-                              {t(key)}
-                            </Label>
-                            <Input
-                              id={id}
-                              type="number"
-                              value={value}
-                              onChange={(e) => set(Number(e.target.value))}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </fieldset>
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        id="grayscale"
-                        checked={store.grayscale}
-                        onCheckedChange={store.setGrayscale}
-                      />
-                      <Label htmlFor="grayscale" className="font-normal">
-                        {t("print.grayscale")}
-                      </Label>
-                    </div>
-                    <div className="border-t pt-3">
-                      <p className="mb-2 text-xs text-muted-foreground">
-                        {t("print.test_hint")}
-                      </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleSpikeTest}
-                        disabled={store.status === "printing"}
-                      >
-                        <Zap className="h-4 w-4" aria-hidden="true" />
-                        {t("print.send_test")}
-                      </Button>
-                    </div>
-                  </div>
-                )}
+                  ))}
+                </div>
+              </fieldset>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="grayscale"
+                  checked={store.grayscale}
+                  onCheckedChange={store.setGrayscale}
+                />
+                <Label htmlFor="grayscale" className="font-normal">
+                  {t("print.grayscale")}
+                </Label>
+              </div>
+              <div className="border-t pt-3">
+                <p className="mb-2 text-xs text-muted-foreground">
+                  {t("print.test_hint")}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSpikeTest}
+                  disabled={store.status === "printing"}
+                >
+                  <Zap className="h-4 w-4" aria-hidden="true" />
+                  {t("print.send_test")}
+                </Button>
               </div>
 
               <div className="space-y-2 pt-1">
@@ -826,6 +919,16 @@ export function PrintPage() {
                       })
                     : t("print.preview_empty")}
                 </p>
+                {selectedTemplate ? (
+                  <p className="text-xs text-muted-foreground">
+                    {t("print.paper_note", {
+                      dw: designW,
+                      dh: designH,
+                      pw: effPaperW,
+                      ph: effPaperH,
+                    })}
+                  </p>
+                ) : null}
               </div>
               {isPhone && (
                 <Button
