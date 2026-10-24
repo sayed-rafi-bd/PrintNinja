@@ -38,6 +38,7 @@ export function PrintPage() {
   const [previewHtml, setPreviewHtml] = useState<string>("");
   const [previewError, setPreviewError] = useState<string>("");
   const [previewNotice, setPreviewNotice] = useState<string>("");
+  const [previewPaper, setPreviewPaper] = useState({ w: 80, h: 200 });
   // Version ids already backfilled with compiled CSS this session, so the
   // preview effect does not write a "Compiled Tailwind CSS" version on
   // every render of the same template.
@@ -121,7 +122,9 @@ export function PrintPage() {
           }
           return;
         }
-        const { renderRecords } = await import("@/lib/render/renderTemplate");
+        const { renderRecords, resolvePaper } = await import(
+          "@/lib/render/renderTemplate"
+        );
 
         // Templates saved before per-template compilation have no stored
         // Tailwind CSS. Compile on the fly so the preview matches.
@@ -188,7 +191,33 @@ export function PrintPage() {
         }
 
         if (!cancelled) {
-          setPreviewHtml(renderRecords(html, css, shownData, compiledCss));
+          // Same paper mapping the backend uses: the template's design size
+          // onto the physical sheet (orientation swaps the paper, never the
+          // design), so the preview shows what will print.
+          const designW = template.page_w_mm ?? 80;
+          const designH = template.page_h_mm ?? 200;
+          const { paperW, paperH } = resolvePaper(
+            designW,
+            designH,
+            store.orientation,
+          );
+          setPreviewHtml(
+            renderRecords(html, css, shownData, compiledCss, {
+              paperW,
+              paperH,
+              designW,
+              designH,
+              margins: {
+                top: store.marginTop,
+                right: store.marginRight,
+                bottom: store.marginBottom,
+                left: store.marginLeft,
+              },
+              fitMode: store.fitMode,
+              grayscale: store.grayscale,
+            }),
+          );
+          setPreviewPaper({ w: paperW, h: paperH });
           setPreviewError("");
           setPreviewNotice(notice);
         }
@@ -204,7 +233,20 @@ export function PrintPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedTemplate, dataUrl, useTestData, httpMethod, pageCount]);
+  }, [
+    selectedTemplate,
+    dataUrl,
+    useTestData,
+    httpMethod,
+    pageCount,
+    store.orientation,
+    store.marginTop,
+    store.marginRight,
+    store.marginBottom,
+    store.marginLeft,
+    store.fitMode,
+    store.grayscale,
+  ]);
 
   const loadPrinters = async () => {
     try {
@@ -840,7 +882,7 @@ export function PrintPage() {
                   <div
                     className="mx-auto bg-white shadow-md"
                     style={{
-                      width: (selectedTemplate?.page_w_mm ?? 80) * MM_TO_PX,
+                      width: previewPaper.w * MM_TO_PX,
                       maxWidth: "100%",
                     }}
                   >
@@ -849,7 +891,7 @@ export function PrintPage() {
                       sandbox=""
                       className="w-full border-0"
                       style={{
-                        height: (selectedTemplate?.page_h_mm ?? 200) * MM_TO_PX,
+                        height: previewPaper.h * MM_TO_PX,
                       }}
                       title={t("print.preview_region")}
                     />
