@@ -1,257 +1,100 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
+import en from "./locales/en";
+import ja from "./locales/ja";
+
+/** Languages the UI ships in. The label is always written in its own language. */
+export const SUPPORTED_LANGUAGES = [
+  { code: "en", label: "English" },
+  { code: "ja", label: "日本語" },
+] as const;
+
+export type LanguageCode = (typeof SUPPORTED_LANGUAGES)[number]["code"];
+
+export const DEFAULT_LANGUAGE: LanguageCode = "en";
+export const LANGUAGE_STORAGE_KEY = "printninja.language";
 
 const resources = {
-  en: {
-    translation: {
-      common: {
-        save: "Save",
-        cancel: "Cancel",
-        delete: "Delete",
-        edit: "Edit",
-        close: "Close",
-        confirm: "Confirm",
-        loading: "Loading...",
-        error: "Error",
-        success: "Success",
-        search: "Search",
-        add: "Add",
-        back: "Back",
-        next: "Next",
-        test: "Test",
-        name: "Name",
-        status: "Status",
-        actions: "Actions",
-        created: "Created",
-        updated: "Updated",
-        type: "Type",
-        address: "Address",
-        copies: "Copies",
-        page: "Page",
-        of: "of",
-        all: "All",
-        sort_by: "Sort by {{column}}",
-        select_all_rows: "Select all rows",
-        select_row: "Select row {{id}}",
-      },
-      nav: {
-        designer: "Designer",
-        print: "Print",
-        printers: "Printers",
-        history: "History",
-        settings: "Settings",
-        templates: "Templates",
-        api_explorer: "API Explorer",
-        group_work: "Work",
-        group_build: "Build",
-        group_admin: "Admin",
-      },
-      auth: {
-        checking: "Connecting to the server...",
-        sign_in_title: "Sign in to {{appName}}",
-        register_title: "Create your account",
-        sign_in_description:
-          "Your templates are stored on the server. Printing still works from this PC.",
-        server_address: "Server address",
-        server_address_hint:
-          "The address of your PrintNinja server, for example https://printninja.example.com.",
-        server_address_invalid:
-          "Enter the full server address, starting with http:// or https://.",
-        handle: "Handle",
-        password: "Password",
-        password_hint: "At least 8 characters.",
-        handle_invalid: "A handle is 1 to 32 letters, numbers, _ or -.",
-        password_short: "The password must be at least 8 characters.",
-        required: "Enter your handle and password.",
-        sign_in: "Sign in",
-        signing_in: "Signing in...",
-        register: "Create account",
-        registering: "Creating account...",
-        switch_to_register: "New here? Create an account",
-        switch_to_sign_in: "Already have an account? Sign in",
-        session_expired:
-          "Your session ended. Sign in again to keep working. Your edits on this PC are kept.",
-        unreachable_inline:
-          "Cannot reach the server at {{url}}. Check the address and your network.",
-        unreachable_title: "Cannot reach the server",
-        unreachable_body:
-          "{{appName}} needs the server to sign in. Check your network connection, then try again.",
-        unreachable_address: "Server address: {{url}}",
-        retry: "Retry",
-        retrying: "Trying again...",
-        change_server: "Change server address",
-      },
-      shell: {
-        skip_to_content: "Skip to content",
-        primary_nav: "Primary",
-        mobile_nav: "Primary, bottom bar",
-        collapse: "Collapse sidebar",
-        expand: "Expand sidebar",
-        search: "Search",
-        search_placeholder: "Search pages, templates, actions",
-        search_hint: "Jump to a page, open a template, or run an action.",
-        no_results: "Nothing matches that search.",
-        group_pages: "Go to",
-        group_templates: "Templates",
-        group_actions: "Actions",
-        new_template: "New template",
-        reprint_last: "Reprint last job",
-        reprint_title: "Reprint job #{{id}}?",
-        reprint_body: "This sends the same job to the printer again.",
-        reprint_confirm: "Reprint",
-        reprint_none: "There are no jobs to reprint yet.",
-        reprint_failed: "Could not reprint the last job.",
-        reprint_done: "Queued reprint of job #{{id}}",
-        shortcuts: "Keyboard shortcuts",
-        shortcuts_hint: "Letter shortcuts are off while you type in a field.",
-        open_search: "Open search",
-        show_shortcuts: "Show this list",
-        go_to: "Go to {{page}}",
-        help: "Help and shortcuts",
-        share_online: "Share service connected as {{handle}}",
-        share_offline: "Share service unreachable",
-        share_signed_out: "Share service: not signed in",
-        offline_banner:
-          "Working offline — you can view and print the copies cached on this PC. Saving needs the server.",
-        sync_drafts: "{{count}} draft(s) not saved to the server",
-        sync_synced: "Last refreshed {{time}}",
-        sync_syncing: "Refreshing…",
-        sync_now: "Refresh cache",
-        sync_failed: "Last refresh failed: {{error}}",
-        lan_on: "LAN access is on",
-        lan_on_detail:
-          "Anyone on your network can reach the local API. Select to turn it off in Settings.",
-      },
-      designer: {
-        title: "Designer",
-        newTemplate: "New Template",
-        pageSetup: "Page Setup",
-        canvas: "Canvas",
-        code: "Code",
-        sampleData: "Sample data",
-        versions: "Versions",
-        preview_only: "Preview only",
-        template_name: "Template name",
-        page_width_mm: "Page width (mm)",
-        page_height_mm: "Page height (mm)",
-        orientation: "Orientation",
-        portrait: "Portrait",
-        landscape: "Landscape",
-      },
-      print: {
-        title: "Print",
-        printer: "Printer",
-        template: "Template",
-        data_url: "Data URL",
-        orientation: "Orientation",
-        margins: "Margins",
-        margin_top: "Top (mm)",
-        margin_right: "Right (mm)",
-        margin_bottom: "Bottom (mm)",
-        margin_left: "Left (mm)",
-        fit_mode: "Fit mode",
-        fit_actual: "Actual size",
-        fit_width: "Fit to width",
-        fit_page: "Fit to page",
-        fit_shrink: "Shrink only",
-        fit_fill: "Fill",
-        copies: "Copies",
-        test_data: "Use test data",
-        preview: "Preview",
-        print: "Print",
-        live_status: "Live status",
-        queued: "Queued",
-        rendering: "Rendering",
-        sending: "Sending",
-        done: "Done",
-        failed: "Failed",
-      },
-      printers: {
-        title: "Printer Setup",
-        add_printer: "Add Printer",
-        printer_type: "Printer Type",
-        wifi_lan: "Wi-Fi / LAN",
-        usb: "USB",
-        bluetooth: "Bluetooth",
-        system: "System",
-        language: "Language",
-        pdf: "PDF",
-        escpos: "ESC/POS",
-        tspl: "TSPL",
-        zpl: "ZPL",
-        cpcl: "CPCL",
-        paper_width_mm: "Paper width (mm)",
-        dpi: "DPI",
-        test_print: "Test Print",
-      },
-      history: {
-        title: "History",
-        reprint: "Reprint",
-        retry: "Retry",
-        export_csv: "Export CSV",
-        filter_status: "Filter by status",
-        filter_printer: "Filter by printer",
-        all: "All",
-        success: "Success",
-        failed: "Failed",
-        queued: "Queued",
-        printing: "Printing",
-        cancelled: "Cancelled",
-        duration: "Duration",
-        source: "Source",
-        version: "Version",
-      },
-      status: {
-        success: "Printed",
-        failed: "Failed",
-        queued: "Queued",
-        printing: "Printing",
-        cancelled: "Cancelled",
-        draft: "Draft",
-        published: "Published",
-        saved: "Saved",
-        withdrawn: "Withdrawn",
-        online: "Online",
-        offline: "Offline",
-        api: "API",
-        lan: "LAN",
-      },
-      pages: {
-        designer: "Build and edit print templates.",
-        templates: "Browse, save, and publish templates.",
-        print: "Send a template to a printer.",
-        printers: "Connect and test printers.",
-        history: "Review, reprint, and export print jobs.",
-        api_explorer: "Browse and try the local REST API.",
-        settings: "Configure the app, sharing, and automation.",
-      },
-      settings_page: {
-        title: "Settings",
-        fonts: "Fonts",
-        api: "API",
-        deep_links: "Deep Links",
-        allowed_domains: "Allowed Domains",
-        retention: "Retention",
-        sync_status: "Cache status",
-        sync_connection: "Connection",
-        sync_drafts: "Local drafts",
-        sync_last: "Last refreshed",
-        sync_never: "Never",
-        sync_unconfigured: "Not configured",
-        sync_sign_in_first:
-          "Sign in to the share service to refresh the cache.",
-      },
-    },
-  },
+  en: { translation: en },
+  ja: { translation: ja },
 };
+
+export function isSupportedLanguage(
+  value: string | null | undefined,
+): value is LanguageCode {
+  return SUPPORTED_LANGUAGES.some((l) => l.code === value);
+}
+
+/**
+ * Map a BCP-47 tag such as `ja-JP` or `en-US` to a supported language.
+ * Returns null when no supported language matches.
+ */
+export function matchLanguage(
+  tag: string | null | undefined,
+): LanguageCode | null {
+  if (!tag) return null;
+  const base = tag.toLowerCase().split(/[-_]/)[0];
+  return isSupportedLanguage(base) ? base : null;
+}
+
+function readStoredLanguage(): LanguageCode | null {
+  try {
+    const stored = globalThis.localStorage?.getItem(LANGUAGE_STORAGE_KEY);
+    return isSupportedLanguage(stored) ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Saved choice first, then the system language, then English. */
+export function detectLanguage(): LanguageCode {
+  const stored = readStoredLanguage();
+  if (stored) return stored;
+  const preferred =
+    typeof navigator !== "undefined"
+      ? [...(navigator.languages ?? []), navigator.language]
+      : [];
+  for (const tag of preferred) {
+    const match = matchLanguage(tag);
+    if (match) return match;
+  }
+  return DEFAULT_LANGUAGE;
+}
+
+/** The current UI language as a supported code. */
+export function currentLanguage(): LanguageCode {
+  return (
+    matchLanguage(i18n.resolvedLanguage ?? i18n.language) ?? DEFAULT_LANGUAGE
+  );
+}
+
+/** Switch the UI language and remember the choice on this device. */
+export async function setLanguage(code: LanguageCode): Promise<void> {
+  try {
+    globalThis.localStorage?.setItem(LANGUAGE_STORAGE_KEY, code);
+  } catch {
+    // Storage can be unavailable (private mode); the switch still applies.
+  }
+  await i18n.changeLanguage(code);
+}
+
+function syncDocumentLanguage(code: string) {
+  if (typeof document !== "undefined") {
+    document.documentElement.lang = code;
+  }
+}
 
 i18n.use(initReactI18next).init({
   resources,
-  lng: "en",
-  fallbackLng: "en",
+  lng: detectLanguage(),
+  fallbackLng: DEFAULT_LANGUAGE,
+  supportedLngs: SUPPORTED_LANGUAGES.map((l) => l.code),
   interpolation: {
     escapeValue: false,
   },
 });
+
+syncDocumentLanguage(i18n.language);
+i18n.on("languageChanged", syncDocumentLanguage);
 
 export default i18n;

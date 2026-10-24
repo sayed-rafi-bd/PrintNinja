@@ -1,4 +1,6 @@
+import { describeError } from "@/lib/errors";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Card } from "@/components/ui/card";
 import { DataTable } from "@/components/DataTable";
@@ -42,6 +44,7 @@ export function GetFromServerDialog({
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [downloading, setDownloading] = useState(false);
+  const { t } = useTranslation();
 
   const load = useCallback(async () => {
     setRows(null);
@@ -53,7 +56,7 @@ export function GetFromServerDialog({
         ...saved.map((t) => ({ ...t, group: "Saved" as const })),
       ]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(describeError(e));
     }
   }, []);
 
@@ -88,18 +91,28 @@ export function GetFromServerDialog({
         if (result.created) added += 1;
         else already += 1;
       } catch (e) {
-        failed.push(e instanceof Error ? e.message : String(e));
+        failed.push(describeError(e));
       }
     }
     setDownloading(false);
     onOpenChange(false);
     if (added > 0)
       toast.success(
-        `Added ${added} template${added === 1 ? "" : "s"} to this computer`,
+        t("templates.server_added", {
+          count: added,
+          plural: added === 1 ? "" : "s",
+        }),
       );
     if (already > 0)
       toast.success(
-        `${already} template${already === 1 ? " is" : "s are"} already on this computer`,
+        t("templates.server_already", {
+          count: already,
+          plural: already === 1 ? "" : "s",
+          verb:
+            already === 1
+              ? t("templates.server_is")
+              : t("templates.server_are"),
+        }),
       );
     for (const message of failed) toast.error(message);
     onDownloaded();
@@ -109,31 +122,34 @@ export function GetFromServerDialog({
     () => [
       {
         id: "name",
-        header: "Template",
+        header: t("templates.col_template"),
         accessorFn: (r) => r.name.toLowerCase(),
         enableSorting: true,
         cell: (c) => (
           <div className="min-w-0">
             <p className="truncate font-medium">{c.row.original.name}</p>
             <p className="truncate text-xs text-muted-foreground">
-              {c.row.original.summary || "No summary"}
+              {c.row.original.summary || t("templates.no_summary")}
             </p>
           </div>
         ),
       },
       {
         id: "where",
-        header: "Where",
+        header: t("templates.server_col_where"),
         cell: (c) =>
           c.row.original.group === "Mine" ? (
-            <StatusBadge status="published" label="Yours" />
+            <StatusBadge
+              status="published"
+              label={t("templates.server_mine")}
+            />
           ) : (
             <StatusBadge status="saved" />
           ),
       },
       {
         id: "owner",
-        header: "From",
+        header: t("templates.server_col_from"),
         meta: { className: "hidden md:table-cell" },
         cell: (c) => (
           <span className="font-mono text-xs">
@@ -143,36 +159,43 @@ export function GetFromServerDialog({
       },
       {
         id: "visibility",
-        header: "Visibility",
+        header: t("templates.server_col_visibility"),
         meta: { className: "hidden md:table-cell" },
         cell: (c) =>
           c.row.original.published_at ? (
-            <StatusBadge status="published" label="In Community" />
+            <StatusBadge
+              status="published"
+              label={t("templates.server_in_community")}
+            />
           ) : (
-            <StatusBadge status="draft" label="Private" />
+            <StatusBadge status="draft" label={t("templates.status_private")} />
           ),
       },
     ],
-    [],
+    [t],
   );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Get templates from the server</DialogTitle>
+          <DialogTitle>{t("templates.server_title")}</DialogTitle>
           <DialogDescription>
-            Your templates and the ones you saved from Community, with their
-            HTML, CSS and README.
+            {t("templates.server_description")}
           </DialogDescription>
         </DialogHeader>
 
         {error ? (
           <Card>
             <EmptyState
-              title="Can’t reach the server"
-              description={`${error}. Templates already on this computer still print.`}
-              action={{ label: "Try again", onClick: () => void load() }}
+              title={t("templates.server_unreachable")}
+              description={t("templates.server_unreachable_hint", {
+                error,
+              })}
+              action={{
+                label: t("templates.server_retry"),
+                onClick: () => void load(),
+              }}
             />
           </Card>
         ) : (
@@ -185,9 +208,8 @@ export function GetFromServerDialog({
             selection={{ selectedIds: selected, onChange: setSelected }}
             maxHeight="50vh"
             empty={{
-              title: "Nothing on the server yet",
-              description:
-                "Save a template to the server from Templates or the Designer, then it shows up here.",
+              title: t("templates.server_empty"),
+              description: t("templates.server_empty_hint"),
             }}
           />
         )}
@@ -198,7 +220,7 @@ export function GetFromServerDialog({
             onClick={() => onOpenChange(false)}
             disabled={downloading}
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             onClick={() => void handleDownload()}
@@ -210,10 +232,10 @@ export function GetFromServerDialog({
             }
           >
             {downloading
-              ? "Adding…"
+              ? t("templates.server_adding")
               : selected.size === 0
-                ? "Add selected"
-                : `Add ${selected.size} to this PC`}
+                ? t("templates.server_add_selected")
+                : t("templates.server_add_count", { count: selected.size })}
           </Button>
         </DialogFooter>
       </DialogContent>

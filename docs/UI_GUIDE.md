@@ -399,13 +399,24 @@ than hardcoding the product name in new UI, and use `AppLogo` to show the logo.
 
 - Sentence case everywhere. Buttons are verbs naming the result. Dialog titles name the thing
   being changed. Errors say what happened and what to do next.
-- The app currently ships English only (`lng: "en"`, one `en` resource in
-  `src/lib/i18n/index.ts`). The shell (navigation, palette, shortcuts, sign-in) and status
-  labels use `t()` keys. Some pages and components still use plain English strings
-  (Onboarding, SetupChecklist, most Designer and Templates toasts).
-- New shell, navigation and shared-component text should use a `t()` key. Page-level text
-  may stay plain until everything moves into `src/lib/i18n`, which is deferred until a second
-  language is needed. Do not mix a key and a literal in the same sentence.
+- The app ships English (`en`) and Japanese (`ja`). Strings live in
+  `src/lib/i18n/locales/en.ts` and `src/lib/i18n/locales/ja.ts`; `src/lib/i18n/index.ts` wires
+  them up. Every user-visible string uses a `t()` key. Do not mix a key and a literal in the
+  same sentence.
+- The language is the saved choice (Settings → General → Language, stored in `localStorage`),
+  otherwise the system language, otherwise English. `<html lang>` follows it.
+- `ja.ts` is typed against `en.ts`, and `src/test/i18n.test.ts` fails when a key is missing or a
+  `{{placeholder}}` is dropped. Add every new key to both files in the same change.
+- Write strings so word order is up to the translation: pass whole values (`{{count}}`,
+  `{{name}}`) and do not build sentences from fragments in code. English-only helpers such as
+  `plural` and `verb` are ignored by `ja`.
+- Errors from Rust commands and the share client are shown through `describeError()`
+  (`src/lib/errors.ts`), never `String(e)`. It reads the serialized `AppError` variant
+  (`{ NotFound: "…" }`), maps known messages to `errors.*` keys, and shows anything unmapped
+  as-is. To translate a new Rust message, add a row to `PATTERNS` in that file and the key to
+  both locale files. The Rust wording is the lookup key, so changing it means updating the row.
+- To add another language: create `locales/<code>.ts` typed as `Translation`, register it in
+  `resources` and `SUPPORTED_LANGUAGES`, and add a font fallback if the script needs one.
 
 ## Page checklist
 

@@ -23,7 +23,7 @@ const config: Config = {
       height: { control: "var(--control-h)" },
       width: { control: "var(--control-h)" },
       fontFamily: {
-        sans: ["IBM Plex Sans", "Segoe UI", "-apple-system", "BlinkMacSystemFont", "Roboto", "Noto Sans", "sans-serif"],
+        sans: ["IBM Plex Sans", "Segoe UI", "-apple-system", "BlinkMacSystemFont", "Roboto", "Noto Sans", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic", "Meiryo", "Noto Sans JP", "sans-serif"],
         mono: ["IBM Plex Mono", "ui-monospace", "Cascadia Mono", "Consolas", "monospace"],
       },
       colors: {

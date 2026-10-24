@@ -31,6 +31,9 @@ interface PrintState {
   useTestData: boolean;
   pageRange: string;
   grayscale: boolean;
+  /** Explicit paper size in mm; null means the template's design size. */
+  paperW: number | null;
+  paperH: number | null;
   status: "idle" | "queued" | "printing" | "success" | "failed";
   error: string;
   durationMs: number;
@@ -53,6 +56,8 @@ interface PrintState {
   setUseTestData: (v: boolean) => void;
   setPageRange: (v: string) => void;
   setGrayscale: (v: boolean) => void;
+  setPaperW: (v: number | null) => void;
+  setPaperH: (v: number | null) => void;
   setStatus: (v: "idle" | "queued" | "printing" | "success" | "failed") => void;
   setError: (v: string) => void;
   setDurationMs: (v: number) => void;
@@ -75,6 +80,8 @@ export const usePrintStore = create<PrintState>((set) => ({
   useTestData: false,
   pageRange: "",
   grayscale: false,
+  paperW: null,
+  paperH: null,
   status: "idle",
   error: "",
   durationMs: 0,
@@ -99,6 +106,8 @@ export const usePrintStore = create<PrintState>((set) => ({
   setUseTestData: (useTestData) => set({ useTestData }),
   setPageRange: (pageRange) => set({ pageRange }),
   setGrayscale: (grayscale) => set({ grayscale }),
+  setPaperW: (paperW) => set({ paperW }),
+  setPaperH: (paperH) => set({ paperH }),
   setStatus: (status) => set({ status }),
   setError: (error) => set({ error }),
   setDurationMs: (durationMs) => set({ durationMs }),

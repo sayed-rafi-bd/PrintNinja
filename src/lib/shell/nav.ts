@@ -79,6 +79,27 @@ export const NAV_GROUPS: NavGroup[] = [
 
 export const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
 
+/**
+ * The phone bottom bar has five slots: four primary pages plus a "More"
+ * button. Anything not in this list lives behind the More sheet, so the bar
+ * never grows past five tap targets.
+ */
+export const MOBILE_PRIMARY_PATHS = [
+  "/print",
+  "/history",
+  "/templates",
+  "/printers",
+] as const;
+
+export const MOBILE_PRIMARY_ITEMS: NavItem[] = MOBILE_PRIMARY_PATHS.map(
+  (path) => NAV_ITEMS.find((item) => item.path === path)!,
+);
+
+/** Pages behind the bottom bar's More button. */
+export const MOBILE_MORE_ITEMS: NavItem[] = NAV_ITEMS.filter(
+  (item) => !(MOBILE_PRIMARY_PATHS as readonly string[]).includes(item.path),
+);
+
 export function isActivePath(currentPath: string, itemPath: string): boolean {
   if (itemPath === "/")
     return currentPath === "/" || currentPath.startsWith("/template/");

@@ -1,3 +1,4 @@
+import { describeError } from "@/lib/errors";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import { AppearanceSettings } from "@/components/AppearanceSettings";
@@ -45,24 +46,94 @@ import {
   Trash2,
   Upload,
   Plus,
-  Info,
   ListChecks,
+  ArrowLeft,
+  ChevronRight,
+  type LucideIcon,
 } from "lucide-react";
+import { PHONE_QUERY, useMediaQuery } from "@/lib/hooks/useMediaQuery";
 import { ChangePasswordForm } from "@/components/ChangePasswordForm";
 import { toast } from "sonner";
 import { diagnostics } from "@/lib/diagnostics";
 import * as share from "@/lib/share/client";
 import { normalizeServiceUrl } from "@/lib/share/session";
 
+/** Phone list → detail navigation: icon, label and a
+    one-line summary per section. Labels match the desktop tab strip. */
+const SECTION_META: Array<{
+  key: SettingsSection;
+  icon: LucideIcon;
+  labelKey: string;
+  summaryKey: string;
+}> = [
+  {
+    key: "setup",
+    icon: ListChecks,
+    labelKey: "section_setup",
+    summaryKey: "hint_setup",
+  },
+  {
+    key: "general",
+    icon: Type,
+    labelKey: "section_general",
+    summaryKey: "hint_general",
+  },
+  {
+    key: "background",
+    icon: AppWindow,
+    labelKey: "section_background",
+    summaryKey: "hint_background",
+  },
+  {
+    key: "share",
+    icon: Globe,
+    labelKey: "section_share",
+    summaryKey: "hint_share",
+  },
+  {
+    key: "api",
+    icon: Key,
+    labelKey: "section_api",
+    summaryKey: "hint_api",
+  },
+  {
+    key: "data",
+    icon: Shield,
+    labelKey: "section_data",
+    summaryKey: "hint_data",
+  },
+  {
+    key: "retention",
+    icon: Archive,
+    labelKey: "section_retention",
+    summaryKey: "hint_retention",
+  },
+  {
+    key: "diagnostics",
+    icon: Activity,
+    labelKey: "section_diagnostics",
+    summaryKey: "hint_diagnostics",
+  },
+];
+
 export function SettingsPage() {
   const { t } = useTranslation();
-  const [appVersion, setAppVersion] = useState<string>("");
   const [searchParams, setSearchParams] = useSearchParams();
   const section = parseSection(searchParams.get("section"));
+  const isPhone = useMediaQuery(PHONE_QUERY);
+  // Phone list → detail: the list shows when no section is selected.
+  const hasSection = searchParams.has("section");
   const openSection = (next: SettingsSection) => {
     const params = new URLSearchParams(searchParams);
-    if (next === "general") params.delete("section");
+    // "general" is the default, so desktop drops the param; phones always
+    // set it, or tapping General would land back on the section list.
+    if (next === "general" && !isPhone) params.delete("section");
     else params.set("section", next);
+    setSearchParams(params, { replace: true });
+  };
+  const closeSection = () => {
+    const params = new URLSearchParams(searchParams);
+    params.delete("section");
     setSearchParams(params, { replace: true });
   };
 
@@ -134,20 +205,6 @@ export function SettingsPage() {
     } catch {
       /* backend unavailable */
     }
-  }, []);
-
-  // Load app version
-  useEffect(() => {
-    (async () => {
-      try {
-        const { getVersion } = await import("@tauri-apps/api/app");
-        const v = await getVersion();
-        setAppVersion(v);
-      } catch {
-        // web mode: Tauri not available
-        setAppVersion("");
-      }
-    })();
   }, []);
 
   // Load persisted settings on mount.
@@ -232,12 +289,12 @@ export function SettingsPage() {
   ) => {
     const n = Number(value);
     if (!Number.isInteger(n) || n < min) {
-      setErr(`${label} must be a whole number of at least ${min}.`);
+      setErr(t("settings_page.number_error", { label, min }));
       return;
     }
     setErr("");
     await writeSetting(key, String(n));
-    toast.success("Setting saved");
+    toast.success(t("settings_page.toast_saved"));
   };
 
   // One behavior for every background toggle: persist the key, ask the
@@ -255,7 +312,7 @@ export function SettingsPage() {
       // Web preview or an old backend: the stored value still applies
       // at the next launch.
     }
-    toast.success("Background setting saved");
+    toast.success(t("settings_page.toast_bg_saved"));
   };
 
   const startApi = async () => {
@@ -265,12 +322,14 @@ export function SettingsPage() {
         port: Number(apiPort),
         lan_access: lanAccess,
       });
-      toast.success(`API server listening on ${addr}`);
+      toast.success(t("settings_page.toast_api_up", { addr }));
       await writeSetting("api_port", apiPort);
       await writeSetting("api_lan_access", String(lanAccess));
       await loadApiStatus();
     } catch (e) {
-      toast.error(`Failed to start: ${e}`);
+      toast.error(
+        t("settings_page.toast_api_start_failed", { error: describeError(e) }),
+      );
     } finally {
       setStarting(false);
     }
@@ -279,10 +338,12 @@ export function SettingsPage() {
   const stopApi = async () => {
     try {
       await agent("stop_api_server", {});
-      toast.success("API server stopped");
+      toast.success(t("settings_page.toast_api_down"));
       await loadApiStatus();
     } catch (e) {
-      toast.error(`Failed to stop: ${e}`);
+      toast.error(
+        t("settings_page.toast_api_stop_failed", { error: describeError(e) }),
+      );
     }
   };
 
@@ -305,14 +366,18 @@ export function SettingsPage() {
         file_data: bytes,
         family: null,
       });
-      toast.success(`Uploaded ${file.name}`);
+      toast.success(
+        t("settings_page.toast_font_uploaded", { name: file.name }),
+      );
       await loadFonts();
       // Stored locally for now; sending fonts to the server gets its own
       // explicit action in phase 2.
     } catch (e) {
       // The wrong content (a non-font with a font extension) must read
       // inline, not just in a toast (F10).
-      setFontUploadError(`Upload failed: ${e}`);
+      setFontUploadError(
+        t("designer.custom_font_failed", { error: describeError(e) }),
+      );
     }
   };
 
@@ -344,12 +409,12 @@ export function SettingsPage() {
     const value = newTrusted.trim();
     if (!value) return;
     if (trusted.includes(value)) {
-      toast.info("That source is already trusted");
+      toast.info(t("settings_page.toast_already_trusted"));
       return;
     }
     await persistTrusted([...trusted, value]);
     setNewTrusted("");
-    toast.success(`Trusted source added`);
+    toast.success(t("settings_page.toast_trusted_added"));
   };
 
   const removeTrusted = async (value: string) => {
@@ -387,19 +452,19 @@ export function SettingsPage() {
     await writeSetting("allowed_domains", normalized);
     if (normalized !== raw) setAllowedDomains(normalized);
     lastSavedDomains.current = normalized;
-    toast.success("Allowed domains updated");
+    toast.success(t("settings_page.toast_domains_updated"));
   };
 
   const saveShareUrl = async () => {
     const typed = shareUrl.trim();
     const next = typed ? normalizeServiceUrl(typed) : null;
     if (typed && !next) {
-      toast.error("Enter the full address, starting with http:// or https://");
+      toast.error(t("settings_page.toast_bad_url"));
       return;
     }
     const current = await share.getServiceUrl();
     if (next === current) {
-      toast.success("Service URL unchanged");
+      toast.success(t("settings_page.toast_url_unchanged"));
       return;
     }
     const hadSession = !!(await share.getSessionToken());
@@ -411,12 +476,12 @@ export function SettingsPage() {
       setShareUser(null);
       await share.endSession("signed_out");
     }
-    toast.success("Service URL saved");
+    toast.success(t("settings_page.toast_url_saved"));
   };
 
   const doRegister = async () => {
     if (!shareUrl.trim() || !shareHandle.trim() || !sharePassword) {
-      toast.error("Service URL, handle and password required");
+      toast.error(t("settings_page.toast_signin_required"));
       return;
     }
     setShareBusy(true);
@@ -424,9 +489,11 @@ export function SettingsPage() {
       const res = await share.register(shareHandle.trim(), sharePassword);
       setShareUser({ handle: res.user.handle });
       setSharePassword("");
-      toast.success(`Registered as ${res.user.handle}`);
+      toast.success(
+        t("settings_page.toast_registered", { handle: res.user.handle }),
+      );
     } catch (e) {
-      toast.error(String(e));
+      toast.error(describeError(e));
     } finally {
       setShareBusy(false);
     }
@@ -434,7 +501,7 @@ export function SettingsPage() {
 
   const doLogin = async () => {
     if (!shareUrl.trim() || !shareHandle.trim() || !sharePassword) {
-      toast.error("Service URL, handle and password required");
+      toast.error(t("settings_page.toast_signin_required"));
       return;
     }
     setShareBusy(true);
@@ -442,9 +509,11 @@ export function SettingsPage() {
       const res = await share.login(shareHandle.trim(), sharePassword);
       setShareUser({ handle: res.user.handle });
       setSharePassword("");
-      toast.success(`Signed in as ${res.user.handle}`);
+      toast.success(
+        t("settings_page.toast_signed_in", { handle: res.user.handle }),
+      );
     } catch (e) {
-      toast.error(String(e));
+      toast.error(describeError(e));
     } finally {
       setShareBusy(false);
     }
@@ -455,9 +524,9 @@ export function SettingsPage() {
     try {
       await share.logout();
       setShareUser(null);
-      toast.success("Signed out");
+      toast.success(t("settings_page.toast_signed_out"));
     } catch (e) {
-      toast.error(String(e));
+      toast.error(describeError(e));
     } finally {
       setShareBusy(false);
     }
@@ -470,729 +539,788 @@ export function SettingsPage() {
         description={t("pages.settings")}
       />
 
-      <Tabs
-        value={section}
-        onValueChange={(v) => openSection(v as SettingsSection)}
-        orientation="vertical"
-        className="flex flex-col gap-4 md:flex-row md:items-start md:gap-8"
-      >
-        <TabsList
-          aria-label="Settings sections"
-          className="h-auto w-full shrink-0 flex-row items-stretch justify-start gap-1 overflow-x-auto bg-transparent p-0 md:w-56 md:flex-col md:overflow-visible"
+      {isPhone && !hasSection ? (
+        /* Phone section list: tapping one opens it with a back arrow. */
+        <ul className="space-y-2">
+          {SECTION_META.map((s) => (
+            <li key={s.key}>
+              <button
+                type="button"
+                onClick={() => openSection(s.key)}
+                className="flex min-h-11 w-full items-center gap-3 rounded-lg border bg-card p-3 text-left"
+              >
+                <s.icon
+                  className="h-4 w-4 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">
+                    {t(`settings_page.${s.labelKey}`)}
+                  </span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {t(`settings_page.${s.summaryKey}`)}
+                  </span>
+                </span>
+                <ChevronRight
+                  className="h-4 w-4 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <Tabs
+          value={section}
+          onValueChange={(v) => openSection(v as SettingsSection)}
+          orientation="vertical"
+          className="flex flex-col gap-4 md:flex-row md:items-start md:gap-8"
         >
-          <TabsTrigger
-            value="setup"
-            className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
-          >
-            <ListChecks className="h-4 w-4 shrink-0" aria-hidden="true" />
-            Setup
-          </TabsTrigger>
-          <TabsTrigger
-            value="general"
-            className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
-          >
-            <Type className="h-4 w-4 shrink-0" aria-hidden="true" />
-            General
-          </TabsTrigger>
-          <TabsTrigger
-            value="background"
-            className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
-          >
-            <AppWindow className="h-4 w-4 shrink-0" aria-hidden="true" />
-            Background
-          </TabsTrigger>
-          <TabsTrigger
-            value="share"
-            className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
-          >
-            <Globe className="h-4 w-4 shrink-0" aria-hidden="true" />
-            Share
-          </TabsTrigger>
-          <TabsTrigger
-            value="api"
-            className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
-          >
-            <Key className="h-4 w-4 shrink-0" aria-hidden="true" />
-            API and automation
-          </TabsTrigger>
-          <TabsTrigger
-            value="data"
-            className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
-          >
-            <Shield className="h-4 w-4 shrink-0" aria-hidden="true" />
-            Data sources
-          </TabsTrigger>
-          <TabsTrigger
-            value="retention"
-            className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
-          >
-            <Archive className="h-4 w-4 shrink-0" aria-hidden="true" />
-            Retention
-          </TabsTrigger>
-          <TabsTrigger
-            value="diagnostics"
-            className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
-          >
-            <Activity className="h-4 w-4 shrink-0" aria-hidden="true" />
-            Diagnostics
-          </TabsTrigger>
-        </TabsList>
-
-        <div className="min-w-0 max-w-3xl flex-1">
-          <TabsContent value="setup" className="mt-0 space-y-4">
-            <SetupChecklist onOpenSection={openSection} />
-          </TabsContent>
-
-          <TabsContent value="general" className="mt-0 space-y-4">
-            <AppearanceSettings />
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Installed Fonts</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {fonts.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No custom fonts installed. Noto Sans is bundled.
-                  </p>
-                ) : (
-                  fonts.map((f) => (
-                    <div
-                      key={f.id}
-                      data-testid={`font-row-${f.id}`}
-                      className="flex items-center justify-between p-3 rounded-md border"
-                    >
-                      <div>
-                        <p className="text-sm font-medium">{f.family}</p>
-                        <p className="text-xs text-muted-foreground uppercase">
-                          {f.format}
-                        </p>
-                        <p
-                          data-testid={`font-state-${f.id}`}
-                          className="text-xs text-muted-foreground"
-                        >
-                          {f.state === "ready"
-                            ? "Ready"
-                            : f.state === "error"
-                              ? "Download failed — will retry"
-                              : "Downloading…"}
-                        </p>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        aria-label={`Remove ${f.family}`}
-                        data-testid={`font-delete-${f.id}`}
-                        onClick={async () => {
-                          try {
-                            await agent("delete_font", { id: f.id });
-                            await loadFonts();
-                            toast.success(`Removed ${f.family}`);
-                          } catch (e) {
-                            toast.error(`Failed: ${e}`);
-                          }
-                        }}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  ))
-                )}
-
-                <input
-                  ref={fileRef}
-                  type="file"
-                  aria-label="Upload font file"
-                  tabIndex={-1}
-                  accept=".ttf,.otf,.woff,.woff2"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) uploadFont(f);
-                    e.target.value = "";
-                  }}
-                />
-                <Button
-                  variant="outline"
-                  data-testid="settings-font-upload"
-                  onClick={() => fileRef.current?.click()}
+          {isPhone ? (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={closeSection}
+                aria-label={t("common.back")}
+              >
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                {t("common.back")}
+              </Button>
+              <span className="truncate text-sm font-medium">
+                {t(`settings_page.section_${section}`, section)}
+              </span>
+            </div>
+          ) : (
+            <TabsList
+              aria-label={t("settings_page.sections_aria")}
+              className="h-auto w-full shrink-0 flex-row items-stretch justify-start gap-1 overflow-x-auto bg-transparent p-0 md:w-56 md:flex-col md:overflow-visible"
+            >
+              {SECTION_META.map((s) => (
+                <TabsTrigger
+                  key={s.key}
+                  value={s.key}
+                  className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
                 >
-                  <Upload className="h-4 w-4" />
-                  Upload Font (TTF, OTF, WOFF2)
-                </Button>
-                {fontUploadError && (
-                  <p role="alert" className="text-sm text-danger">
-                    {fontUploadError}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
+                  <s.icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  {t(`settings_page.${s.labelKey}`)}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          )}
 
-          <TabsContent value="background" className="mt-0 space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">
-                  Run in the background
-                </CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  Keep the print queue alive without a window in the way.
-                  Applies on desktop; on Android the notification controls this
-                  instead.
-                </p>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <AndroidBackgroundControls
-                  running={bgServiceRunning}
-                  exempt={batteryExempt}
-                  busy={bgBusy}
-                  onRefresh={async () => {
-                    const bg = await import("@/lib/android/background");
-                    if (!bg.isAndroid()) return;
-                    setBgBusy(true);
-                    try {
-                      setBgServiceRunning(
-                        await bg.isBackgroundServiceRunning(),
-                      );
-                      setBatteryExempt(await bg.isBatteryExemptionGranted());
-                    } finally {
-                      setBgBusy(false);
-                    }
-                  }}
-                  onRequestExemption={async () => {
-                    const bg = await import("@/lib/android/background");
-                    setBgBusy(true);
-                    try {
-                      await bg.requestBatteryExemption();
-                      setBatteryExempt(await bg.isBatteryExemptionGranted());
-                      toast.success("Battery setting updated");
-                    } finally {
-                      setBgBusy(false);
-                    }
-                  }}
-                />
-                {!isAndroidBackground() && (
-                  <>
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        id="launch-at-startup"
-                        data-testid="settings-launch-at-startup"
-                        checked={launchAtStartup}
-                        onCheckedChange={(v) =>
-                          setBackgroundPref(
-                            "launch_at_startup",
-                            v,
-                            setLaunchAtStartup,
-                          )
-                        }
-                      />
-                      <Label htmlFor="launch-at-startup">
-                        Launch at startup
-                      </Label>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        id="start-minimized"
-                        data-testid="settings-start-minimized"
-                        checked={startMinimized}
-                        disabled={!launchAtStartup}
-                        onCheckedChange={(v) =>
-                          setBackgroundPref(
-                            "start_minimized",
-                            v,
-                            setStartMinimized,
-                          )
-                        }
-                      />
-                      <Label htmlFor="start-minimized">
-                        Start minimized in the notification area
-                      </Label>
-                    </div>
-                    {!launchAtStartup && (
-                      <p className="text-xs text-muted-foreground">
-                        Start minimized needs launch at startup.
-                      </p>
-                    )}
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        id="minimize-to-tray"
-                        data-testid="settings-minimize-to-tray"
-                        checked={minimizeToTray}
-                        onCheckedChange={(v) =>
-                          setBackgroundPref(
-                            "minimize_to_tray",
-                            v,
-                            setMinimizeToTray,
-                          )
-                        }
-                      />
-                      <Label htmlFor="minimize-to-tray">
-                        Minimizing sends the app to the notification area
-                      </Label>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        id="close-to-tray"
-                        data-testid="settings-close-to-tray"
-                        checked={closeToTray}
-                        onCheckedChange={(v) =>
-                          setBackgroundPref("close_to_tray", v, setCloseToTray)
-                        }
-                      />
-                      <Label htmlFor="close-to-tray">
-                        Closing keeps the app in the notification area
-                      </Label>
-                    </div>
-                    {!closeToTray && (
-                      <p className="text-xs text-warning">
-                        Closing will quit the app and stop the print queue.
-                      </p>
-                    )}
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
+          <div className="min-w-0 max-w-3xl flex-1">
+            <TabsContent value="setup" className="mt-0 space-y-4">
+              <SetupChecklist onOpenSection={openSection} />
+            </TabsContent>
 
-          <TabsContent value="share" className="mt-0 space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Share Service</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-1">
-                  <Label htmlFor="share-url">Service URL</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      id="share-url"
-                      placeholder="https://share.printninja.example"
-                      value={shareUrl}
-                      onChange={(e) => setShareUrl(e.target.value)}
-                    />
-                    <Button variant="outline" onClick={saveShareUrl}>
-                      Save
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Leave empty to hide sharing features (V1 behaviour). No
-                    database credentials are bundled in the app — the service
-                    keeps its own database.
-                  </p>
-                </div>
-
-                {!shareUser ? (
-                  <div className="space-y-3 border-t pt-4">
-                    <p className="text-sm font-medium">Sign in to publish</p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label htmlFor="share-handle">Handle</Label>
-                        <Input
-                          id="share-handle"
-                          placeholder="alice"
-                          value={shareHandle}
-                          onChange={(e) => setShareHandle(e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="share-password">Password</Label>
-                        <Input
-                          id="share-password"
-                          type="password"
-                          value={sharePassword}
-                          onChange={(e) => setSharePassword(e.target.value)}
-                        />
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button onClick={doLogin} disabled={shareBusy}>
-                        {shareBusy ? "…" : "Sign in"}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={doRegister}
-                        disabled={shareBusy}
-                      >
-                        {shareBusy ? "…" : "Register"}
-                      </Button>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Handle: 1–32 chars, alphanumeric + _ -. Password ≥ 8
-                      chars. Throttled 5/min per handle/IP.
+            <TabsContent value="general" className="mt-0 space-y-4">
+              <AppearanceSettings />
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    {t("settings_page.fonts_installed")}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {fonts.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      {t("settings_page.fonts_empty")}
                     </p>
-                  </div>
-                ) : (
-                  <div className="space-y-3 border-t pt-4">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm">
-                        Signed in as{" "}
-                        <span className="font-medium">{shareUser.handle}</span>
-                      </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={doLogout}
-                        disabled={shareBusy}
-                      >
-                        Sign out
-                      </Button>
-                    </div>
-                    <ChangePasswordForm
-                      busy={shareBusy}
-                      setBusy={setShareBusy}
-                    />
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-            <SyncStatusCard />
-          </TabsContent>
-
-          <TabsContent value="api" className="mt-0 space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Local REST API</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between p-3 rounded-md border">
-                  <div>
-                    <p className="text-sm font-medium">Status</p>
-                    <p className="text-xs text-muted-foreground">
-                      {apiStatus?.running
-                        ? `${apiStatus.address}:${apiStatus.port}`
-                        : `Default: ${lanAccess ? "0.0.0.0" : "127.0.0.1"}:${apiPort}`}
-                    </p>
-                  </div>
-                  <Badge variant={apiStatus?.running ? "success" : "secondary"}>
-                    {apiStatus?.running ? "running" : "disabled"}
-                  </Badge>
-                </div>
-
-                <div className="space-y-1">
-                  <Label htmlFor="api-port">Port</Label>
-                  <Input
-                    id="api-port"
-                    data-testid="settings-api-port"
-                    type="number"
-                    min="1"
-                    max="65535"
-                    value={apiPort}
-                    onChange={(e) => setApiPort(e.target.value)}
-                    disabled={apiStatus?.running}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id="lan-access"
-                      checked={lanAccess}
-                      disabled={apiStatus?.running}
-                      onCheckedChange={(v) => {
-                        setLanAccess(v);
-                        writeSetting("api_lan_access", String(v));
-                      }}
-                    />
-                    <Label htmlFor="lan-access">Allow LAN access</Label>
-                  </div>
-                  {apiStatus?.running ? (
-                    <Button variant="destructive" onClick={stopApi}>
-                      Stop Server
-                    </Button>
                   ) : (
-                    <Button onClick={startApi} disabled={starting}>
-                      {starting ? "Starting…" : "Start Server"}
-                    </Button>
-                  )}
-                </div>
-
-                {lanAccess && (
-                  <p className="text-xs text-warning">
-                    LAN access is enabled: anyone on your network can trigger
-                    prints and read templates, jobs and metrics.
-                  </p>
-                )}
-
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="api-autostart"
-                    checked={apiAutostart}
-                    onCheckedChange={(v) => {
-                      setApiAutostart(v);
-                      writeSetting("api_autostart", String(v));
-                    }}
-                  />
-                  <Label htmlFor="api-autostart">
-                    Start server when the app starts
-                  </Label>
-                </div>
-                <p className="-mt-3 text-xs text-muted-foreground">
-                  Uses the port and LAN choice above.
-                </p>
-
-                <div className="rounded-md bg-muted p-3">
-                  <p className="text-xs font-medium mb-1">curl example</p>
-                  <pre className="text-[11px] overflow-x-auto">{`curl -X POST http://127.0.0.1:${apiPort}/v1/print \\
-  -H "Content-Type: application/json" \\
-  -d '{"template":"Receipt","printer":"Front Desk","data":{"order":1042}}'`}</pre>
-                </div>
-
-                <Button variant="outline" asChild>
-                  <Link to="/api-explorer">Open API Explorer</Link>
-                </Button>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Trusted Sources</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  Sources listed here skip the print confirmation sheet.
-                </p>
-                {trusted.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No trusted sources yet — every deep link asks for
-                    confirmation.
-                  </p>
-                ) : (
-                  trusted.map((src) => (
-                    <div
-                      key={src}
-                      className="flex items-center justify-between p-3 rounded-md border"
-                    >
-                      <span className="text-sm font-mono">{src}</span>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="success">Trusted</Badge>
+                    fonts.map((f) => (
+                      <div
+                        key={f.id}
+                        data-testid={`font-row-${f.id}`}
+                        className="flex items-center justify-between p-3 rounded-md border"
+                      >
+                        <div>
+                          <p className="text-sm font-medium">{f.family}</p>
+                          <p className="text-xs text-muted-foreground uppercase">
+                            {f.format}
+                          </p>
+                          <p
+                            data-testid={`font-state-${f.id}`}
+                            className="text-xs text-muted-foreground"
+                          >
+                            {f.state === "ready"
+                              ? t("settings_page.font_ready")
+                              : f.state === "error"
+                                ? "Download failed — will retry"
+                                : "Downloading…"}
+                          </p>
+                        </div>
                         <Button
                           variant="ghost"
                           size="sm"
-                          aria-label={`Remove ${src}`}
-                          onClick={() => removeTrusted(src)}
+                          aria-label={t("settings_page.font_remove", {
+                            name: f.family,
+                          })}
+                          data-testid={`font-delete-${f.id}`}
+                          onClick={async () => {
+                            try {
+                              await agent("delete_font", { id: f.id });
+                              await loadFonts();
+                              toast.success(
+                                t("settings_page.toast_font_removed", {
+                                  name: f.family,
+                                }),
+                              );
+                            } catch (e) {
+                              toast.error(
+                                t("settings_page.toast_failed", {
+                                  error: describeError(e),
+                                }),
+                              );
+                            }
+                          }}
                         >
                           <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
-                    </div>
-                  ))
-                )}
+                    ))
+                  )}
 
-                <div className="flex gap-2">
-                  <Input
-                    aria-label="Trusted source"
-                    placeholder="pos.local or com.example.app"
-                    value={newTrusted}
-                    onChange={(e) => setNewTrusted(e.target.value)}
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    aria-label={t("settings_page.font_upload_label")}
+                    tabIndex={-1}
+                    accept=".ttf,.otf,.woff,.woff2"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) uploadFont(f);
+                      e.target.value = "";
+                    }}
                   />
-                  <Button variant="outline" onClick={addTrusted}>
-                    <Plus className="h-4 w-4" />
-                    Add
+                  <Button
+                    variant="outline"
+                    data-testid="settings-font-upload"
+                    onClick={() => fileRef.current?.click()}
+                  >
+                    <Upload className="h-4 w-4" />
+                    {t("settings_page.font_upload")}
                   </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="data" className="mt-0 space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Data Sources</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-1">
-                  <Label htmlFor="allowed-domains">
-                    {t("settings_page.allowed_domains")}
-                  </Label>
-                  <Input
-                    id="allowed-domains"
-                    placeholder="api.example.com, pos.local"
-                    value={allowedDomains}
-                    aria-invalid={!!domainsError}
-                    aria-describedby={
-                      domainsError ? "allowed-domains-error" : undefined
-                    }
-                    onChange={(e) => {
-                      setAllowedDomains(e.target.value);
-                      setDomainsError("");
-                    }}
-                    onBlur={() => void saveAllowedDomains(allowedDomains)}
-                  />
-                  {domainsError && (
-                    <p
-                      id="allowed-domains-error"
-                      role="alert"
-                      className="text-xs text-danger"
-                    >
-                      {domainsError}
+                  {fontUploadError && (
+                    <p role="alert" className="text-sm text-danger">
+                      {fontUploadError}
                     </p>
                   )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="background" className="mt-0 space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    {t("settings_page.background_title")}
+                  </CardTitle>
                   <p className="text-xs text-muted-foreground">
-                    Comma-separated. Leave empty to allow any domain.
+                    {t("settings_page.background_hint")}
                   </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="block-private"
-                    checked={blockPrivate}
-                    onCheckedChange={(v) => {
-                      setBlockPrivate(v);
-                      writeSetting("block_private_ips", String(v));
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <AndroidBackgroundControls
+                    running={bgServiceRunning}
+                    exempt={batteryExempt}
+                    busy={bgBusy}
+                    onRefresh={async () => {
+                      const bg = await import("@/lib/android/background");
+                      if (!bg.isAndroid()) return;
+                      setBgBusy(true);
+                      try {
+                        setBgServiceRunning(
+                          await bg.isBackgroundServiceRunning(),
+                        );
+                        setBatteryExempt(await bg.isBatteryExemptionGranted());
+                      } finally {
+                        setBgBusy(false);
+                      }
+                    }}
+                    onRequestExemption={async () => {
+                      const bg = await import("@/lib/android/background");
+                      setBgBusy(true);
+                      try {
+                        await bg.requestBatteryExemption();
+                        setBatteryExempt(await bg.isBatteryExemptionGranted());
+                        toast.success(
+                          t("settings_page.background_toast_updated"),
+                        );
+                      } finally {
+                        setBgBusy(false);
+                      }
                     }}
                   />
-                  <Label htmlFor="block-private">Block private IP ranges</Label>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
+                  {!isAndroidBackground() && (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          id="launch-at-startup"
+                          data-testid="settings-launch-at-startup"
+                          checked={launchAtStartup}
+                          onCheckedChange={(v) =>
+                            setBackgroundPref(
+                              "launch_at_startup",
+                              v,
+                              setLaunchAtStartup,
+                            )
+                          }
+                        />
+                        <Label htmlFor="launch-at-startup">
+                          {t("settings_page.background_launch")}
+                        </Label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          id="start-minimized"
+                          data-testid="settings-start-minimized"
+                          checked={startMinimized}
+                          disabled={!launchAtStartup}
+                          onCheckedChange={(v) =>
+                            setBackgroundPref(
+                              "start_minimized",
+                              v,
+                              setStartMinimized,
+                            )
+                          }
+                        />
+                        <Label htmlFor="start-minimized">
+                          {t("settings_page.background_minimized")}
+                        </Label>
+                      </div>
+                      {!launchAtStartup && (
+                        <p className="text-xs text-muted-foreground">
+                          {t("settings_page.background_minimized_hint")}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          id="minimize-to-tray"
+                          data-testid="settings-minimize-to-tray"
+                          checked={minimizeToTray}
+                          onCheckedChange={(v) =>
+                            setBackgroundPref(
+                              "minimize_to_tray",
+                              v,
+                              setMinimizeToTray,
+                            )
+                          }
+                        />
+                        <Label htmlFor="minimize-to-tray">
+                          {t("settings_page.background_minimize_tray")}
+                        </Label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          id="close-to-tray"
+                          data-testid="settings-close-to-tray"
+                          checked={closeToTray}
+                          onCheckedChange={(v) =>
+                            setBackgroundPref(
+                              "close_to_tray",
+                              v,
+                              setCloseToTray,
+                            )
+                          }
+                        />
+                        <Label htmlFor="close-to-tray">
+                          {t("settings_page.background_close_tray")}
+                        </Label>
+                      </div>
+                      {!closeToTray && (
+                        <p className="text-xs text-warning">
+                          {t("settings_page.background_close_warning")}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
 
-          <TabsContent value="retention" className="mt-0 space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">
-                  {t("settings_page.retention")}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <Label htmlFor="retention-days">
-                    Keep history for (days)
-                  </Label>
-                  <Input
-                    id="retention-days"
-                    type="number"
-                    min="1"
-                    value={retentionDays}
-                    aria-invalid={!!retentionError}
-                    aria-describedby={
-                      retentionError ? "retention-days-error" : undefined
-                    }
-                    onChange={(e) => {
-                      setRetentionDays(e.target.value);
-                      setRetentionError("");
-                    }}
-                    onBlur={() =>
-                      saveNumber(
-                        "retention_days",
-                        retentionDays,
-                        1,
-                        "Keep history for",
-                        setRetentionError,
-                      )
-                    }
-                  />
-                  {retentionError && (
-                    <p
-                      id="retention-days-error"
-                      role="alert"
-                      className="text-xs text-danger"
+            <TabsContent value="share" className="mt-0 space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    {t("settings_page.share_title")}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-1">
+                    <Label htmlFor="share-url">
+                      {t("settings_page.share_url")}
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="share-url"
+                        placeholder={t("settings_page.share_url_example")}
+                        value={shareUrl}
+                        onChange={(e) => setShareUrl(e.target.value)}
+                      />
+                      <Button variant="outline" onClick={saveShareUrl}>
+                        {t("common.save")}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Leave empty to hide sharing features (V1 behaviour). No
+                      database credentials are bundled in the app — the service
+                      keeps its own database.
+                    </p>
+                  </div>
+
+                  {!shareUser ? (
+                    <div className="space-y-3 border-t pt-4">
+                      <p className="text-sm font-medium">
+                        {t("settings_page.share_signin_title")}
+                      </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label htmlFor="share-handle">
+                            {t("auth.handle")}
+                          </Label>
+                          <Input
+                            id="share-handle"
+                            placeholder={t(
+                              "settings_page.share_handle_example",
+                            )}
+                            value={shareHandle}
+                            onChange={(e) => setShareHandle(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="share-password">
+                            {t("auth.password")}
+                          </Label>
+                          <Input
+                            id="share-password"
+                            type="password"
+                            value={sharePassword}
+                            onChange={(e) => setSharePassword(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button onClick={doLogin} disabled={shareBusy}>
+                          {shareBusy ? "…" : t("auth.sign_in")}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={doRegister}
+                          disabled={shareBusy}
+                        >
+                          {shareBusy ? "…" : t("settings_page.share_register")}
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {t("settings_page.share_rules")}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 border-t pt-4">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm">
+                          {t("settings_page.share_signed_in")}{" "}
+                          <span className="font-medium">
+                            {shareUser.handle}
+                          </span>
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={doLogout}
+                          disabled={shareBusy}
+                        >
+                          {t("settings_page.share_sign_out")}
+                        </Button>
+                      </div>
+                      <ChangePasswordForm
+                        busy={shareBusy}
+                        setBusy={setShareBusy}
+                      />
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+              <SyncStatusCard />
+            </TabsContent>
+
+            <TabsContent value="api" className="mt-0 space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    {t("settings_page.api_title")}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between p-3 rounded-md border">
+                    <div>
+                      <p className="text-sm font-medium">
+                        {t("common.status")}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {apiStatus?.running
+                          ? `${apiStatus.address}:${apiStatus.port}`
+                          : `Default: ${lanAccess ? "0.0.0.0" : "127.0.0.1"}:${apiPort}`}
+                      </p>
+                    </div>
+                    <Badge
+                      variant={apiStatus?.running ? "success" : "secondary"}
                     >
-                      {retentionError}
+                      {apiStatus?.running ? "running" : "disabled"}
+                    </Badge>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label htmlFor="api-port">
+                      {t("settings_page.api_port")}
+                    </Label>
+                    <Input
+                      id="api-port"
+                      data-testid="settings-api-port"
+                      type="number"
+                      min="1"
+                      max="65535"
+                      value={apiPort}
+                      onChange={(e) => setApiPort(e.target.value)}
+                      disabled={apiStatus?.running}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="lan-access"
+                        checked={lanAccess}
+                        disabled={apiStatus?.running}
+                        onCheckedChange={(v) => {
+                          setLanAccess(v);
+                          writeSetting("api_lan_access", String(v));
+                        }}
+                      />
+                      <Label htmlFor="lan-access">
+                        {t("settings_page.api_lan")}
+                      </Label>
+                    </div>
+                    {apiStatus?.running ? (
+                      <Button variant="destructive" onClick={stopApi}>
+                        {t("settings_page.api_stop")}
+                      </Button>
+                    ) : (
+                      <Button onClick={startApi} disabled={starting}>
+                        {starting
+                          ? t("settings_page.api_starting")
+                          : t("settings_page.api_start")}
+                      </Button>
+                    )}
+                  </div>
+
+                  {lanAccess && (
+                    <p className="text-xs text-warning">
+                      {t("settings_page.api_lan_warning")}
                     </p>
                   )}
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="max-records">Max records</Label>
-                  <Input
-                    id="max-records"
-                    type="number"
-                    min="100"
-                    value={maxRecords}
-                    aria-invalid={!!maxError}
-                    aria-describedby={
-                      maxError ? "max-records-error" : undefined
-                    }
-                    onChange={(e) => {
-                      setMaxRecords(e.target.value);
-                      setMaxError("");
-                    }}
-                    onBlur={() =>
-                      saveNumber(
-                        "max_records",
-                        maxRecords,
-                        100,
-                        "Max records",
-                        setMaxError,
-                      )
-                    }
-                  />
-                  {maxError && (
-                    <p
-                      id="max-records-error"
-                      role="alert"
-                      className="text-xs text-danger"
-                    >
-                      {maxError}
-                    </p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Reset this PC</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  Erases everything the app owns on this PC: templates and
-                  versions, print history, printers, fonts and their files,
-                  datasets, profiles, the sync state and every setting —
-                  including the sign-in, so the app returns to the welcome
-                  screen. The server keeps the account; signing back in pulls it
-                  down again.
-                </p>
-                <Button
-                  variant="destructive"
-                  data-testid="settings-reset-database"
-                  onClick={() => setShowResetDialog(true)}
-                >
-                  <Trash2 className="h-3 w-3 mr-2" />
-                  Reset this PC…
-                </Button>
-              </CardContent>
-            </Card>
-          </TabsContent>
 
-          <TabsContent value="diagnostics" className="mt-0 space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Diagnostics</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  Export application logs and diagnostics for troubleshooting.
-                </p>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    diagnostics.download();
-                    toast.success("Diagnostics exported");
-                  }}
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  Export Diagnostics
-                </Button>
-                <p className="text-xs text-muted-foreground">
-                  Secrets and API tokens are redacted from the export.
-                </p>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </div>
-      </Tabs>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="api-autostart"
+                      checked={apiAutostart}
+                      onCheckedChange={(v) => {
+                        setApiAutostart(v);
+                        writeSetting("api_autostart", String(v));
+                      }}
+                    />
+                    <Label htmlFor="api-autostart">
+                      {t("settings_page.api_autostart")}
+                    </Label>
+                  </div>
+                  <p className="-mt-3 text-xs text-muted-foreground">
+                    {t("settings_page.api_autostart_hint")}
+                  </p>
+
+                  <div className="rounded-md bg-muted p-3">
+                    <p className="text-xs font-medium mb-1">
+                      {t("settings_page.api_curl_title")}
+                    </p>
+                    <pre className="text-[11px] overflow-x-auto whitespace-pre-wrap break-all">{`curl -X POST http://127.0.0.1:${apiPort}/v1/print \\
+  -H "Content-Type: application/json" \\
+  -d '{"template":"Receipt","printer":"Front Desk","data":{"order":1042}}'`}</pre>
+                  </div>
+
+                  <Button variant="outline" asChild>
+                    <Link to="/api-explorer">
+                      {t("settings_page.api_open_explorer")}
+                    </Link>
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    {t("settings_page.trusted_title")}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    {t("settings_page.trusted_hint")}
+                  </p>
+                  {trusted.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No trusted sources yet — every deep link asks for
+                      confirmation.
+                    </p>
+                  ) : (
+                    trusted.map((src) => (
+                      <div
+                        key={src}
+                        className="flex items-center justify-between p-3 rounded-md border"
+                      >
+                        <span className="text-sm font-mono">{src}</span>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="success">
+                            {t("settings_page.trusted_badge")}
+                          </Badge>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            aria-label={`Remove ${src}`}
+                            onClick={() => removeTrusted(src)}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+
+                  <div className="flex gap-2">
+                    <Input
+                      aria-label={t("settings_page.trusted_input_aria")}
+                      placeholder={t("settings_page.trusted_input_example")}
+                      value={newTrusted}
+                      onChange={(e) => setNewTrusted(e.target.value)}
+                    />
+                    <Button variant="outline" onClick={addTrusted}>
+                      <Plus className="h-4 w-4" />
+                      {t("common.add")}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="data" className="mt-0 space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    {t("settings_page.data_title")}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-1">
+                    <Label htmlFor="allowed-domains">
+                      {t("settings_page.allowed_domains")}
+                    </Label>
+                    <Input
+                      id="allowed-domains"
+                      placeholder={t("settings_page.domains_example")}
+                      value={allowedDomains}
+                      aria-invalid={!!domainsError}
+                      aria-describedby={
+                        domainsError ? "allowed-domains-error" : undefined
+                      }
+                      onChange={(e) => {
+                        setAllowedDomains(e.target.value);
+                        setDomainsError("");
+                      }}
+                      onBlur={() => void saveAllowedDomains(allowedDomains)}
+                    />
+                    {domainsError && (
+                      <p
+                        id="allowed-domains-error"
+                        role="alert"
+                        className="text-xs text-danger"
+                      >
+                        {domainsError}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      {t("settings_page.domains_hint")}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="block-private"
+                      checked={blockPrivate}
+                      onCheckedChange={(v) => {
+                        setBlockPrivate(v);
+                        writeSetting("block_private_ips", String(v));
+                      }}
+                    />
+                    <Label htmlFor="block-private">
+                      {t("settings_page.block_private")}
+                    </Label>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="retention" className="mt-0 space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    {t("settings_page.retention")}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label htmlFor="retention-days">
+                      {t("settings_page.retention_days")}
+                    </Label>
+                    <Input
+                      id="retention-days"
+                      type="number"
+                      min="1"
+                      value={retentionDays}
+                      aria-invalid={!!retentionError}
+                      aria-describedby={
+                        retentionError ? "retention-days-error" : undefined
+                      }
+                      onChange={(e) => {
+                        setRetentionDays(e.target.value);
+                        setRetentionError("");
+                      }}
+                      onBlur={() =>
+                        saveNumber(
+                          "retention_days",
+                          retentionDays,
+                          1,
+                          t("settings_page.retention_days"),
+                          setRetentionError,
+                        )
+                      }
+                    />
+                    {retentionError && (
+                      <p
+                        id="retention-days-error"
+                        role="alert"
+                        className="text-xs text-danger"
+                      >
+                        {retentionError}
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="max-records">
+                      {t("settings_page.max_records")}
+                    </Label>
+                    <Input
+                      id="max-records"
+                      type="number"
+                      min="100"
+                      value={maxRecords}
+                      aria-invalid={!!maxError}
+                      aria-describedby={
+                        maxError ? "max-records-error" : undefined
+                      }
+                      onChange={(e) => {
+                        setMaxRecords(e.target.value);
+                        setMaxError("");
+                      }}
+                      onBlur={() =>
+                        saveNumber(
+                          "max_records",
+                          maxRecords,
+                          100,
+                          t("settings_page.max_records"),
+                          setMaxError,
+                        )
+                      }
+                    />
+                    {maxError && (
+                      <p
+                        id="max-records-error"
+                        role="alert"
+                        className="text-xs text-danger"
+                      >
+                        {maxError}
+                      </p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    {t("settings_page.reset_title")}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    Erases everything the app owns on this PC: templates and
+                    versions, print history, printers, fonts and their files,
+                    datasets, profiles, the sync state and every setting —
+                    including the sign-in, so the app returns to the welcome
+                    screen. The server keeps the account; signing back in pulls
+                    it down again.
+                  </p>
+                  <Button
+                    variant="destructive"
+                    data-testid="settings-reset-database"
+                    onClick={() => setShowResetDialog(true)}
+                  >
+                    <Trash2 className="h-3 w-3 mr-2" />
+                    Reset this PC…
+                  </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="diagnostics" className="mt-0 space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    {t("settings_page.diag_title")}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    {t("settings_page.diag_hint")}
+                  </p>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      diagnostics.download();
+                      toast.success(t("settings_page.toast_diag_exported"));
+                    }}
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    {t("settings_page.diag_export")}
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    {t("settings_page.diag_note")}
+                  </p>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </div>
+        </Tabs>
+      )}
 
       {/* Clearing the allowlist means any domain can feed data URLs. */}
       <Dialog open={allowAllOpen} onOpenChange={setAllowAllOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Allow data from any domain?</DialogTitle>
+            <DialogTitle>{t("settings_page.allow_title")}</DialogTitle>
             <DialogDescription>
-              An empty list allows every domain. Live data URLs could then pull
-              content from anywhere — keep at least your own hosts listed unless
-              you mean it.
+              {t("settings_page.allow_hint")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAllowAllOpen(false)}>
-              Keep the list
+              {t("settings_page.allow_keep")}
             </Button>
             <Button
               variant="destructive"
@@ -1201,11 +1329,11 @@ export function SettingsPage() {
                   await writeSetting("allowed_domains", "");
                   lastSavedDomains.current = "";
                   setAllowAllOpen(false);
-                  toast.success("Allowed domains cleared — any domain allowed");
+                  toast.success(t("settings_page.toast_allow_all"));
                 })();
               }}
             >
-              Allow all
+              {t("settings_page.allow_all")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1215,11 +1343,9 @@ export function SettingsPage() {
       <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Erase everything on this PC?</DialogTitle>
+            <DialogTitle>{t("settings_page.reset_confirm_title")}</DialogTitle>
             <DialogDescription>
-              Templates, print history, printers, fonts, datasets, profiles and
-              all settings will be permanently deleted from this PC. The server
-              keeps the account — sign back in to pull it down again.
+              {t("settings_page.reset_body")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1239,11 +1365,19 @@ export function SettingsPage() {
                   try {
                     const report = await agent("reset_database", {});
                     toast.success(
-                      `Cleared ${report.templates} templates, ${report.print_jobs} jobs and ${report.fonts} fonts`,
+                      t("settings_page.toast_reset_done", {
+                        templates: report.templates,
+                        jobs: report.print_jobs,
+                        fonts: report.fonts,
+                      }),
                     );
                     window.location.reload();
                   } catch (e) {
-                    toast.error(`Reset failed: ${e}`);
+                    toast.error(
+                      t("settings_page.toast_reset_failed", {
+                        error: describeError(e),
+                      }),
+                    );
                   } finally {
                     setResetBusy(false);
                     setShowResetDialog(false);
@@ -1251,19 +1385,13 @@ export function SettingsPage() {
                 })();
               }}
             >
-              {resetBusy ? "Erasing…" : "Erase everything"}
+              {resetBusy
+                ? t("settings_page.reset_erasing")
+                : t("settings_page.reset_confirm")}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Version footer */}
-      <div className="flex items-center justify-center gap-2 pt-4 text-xs text-muted-foreground border-t">
-        <Info className="h-3 w-3" />
-        <span>PrintNinja {appVersion ? `v${appVersion}` : "v3.1.1"}</span>
-        <span className="opacity-50">·</span>
-        <span className="hidden sm:inline">com.printninja.desktop</span>
-      </div>
     </div>
   );
 }

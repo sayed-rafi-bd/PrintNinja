@@ -1,3 +1,4 @@
+import { describeError } from "@/lib/errors";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -17,8 +18,8 @@ import { cn } from "@/lib/utils";
 interface Endpoint {
   method: "GET" | "POST" | "DELETE";
   path: string;
-  summary: string;
-  description: string;
+  summaryKey: string;
+  descriptionKey: string;
   /** Needs a real-world side effect when executed. */
   mutating: boolean;
   needsId?: boolean;
@@ -35,84 +36,81 @@ const ENDPOINTS: Endpoint[] = [
   {
     method: "GET",
     path: "/v1/health",
-    summary: "Health check",
-    description: "Unauthenticated liveness probe. No parameters.",
+    summaryKey: "explorer.endpoint_health",
+    descriptionKey: "explorer.endpoint_health_desc",
     mutating: false,
   },
   {
     method: "GET",
     path: "/v1/printers",
-    summary: "List printers",
-    description: "Configured printers, with a count.",
+    summaryKey: "explorer.endpoint_printers",
+    descriptionKey: "explorer.endpoint_printers_desc",
     mutating: false,
   },
   {
     method: "GET",
     path: "/v1/templates",
-    summary: "List templates",
-    description: "Saved templates (id, name, size), with a count.",
+    summaryKey: "explorer.endpoint_templates",
+    descriptionKey: "explorer.endpoint_templates_desc",
     mutating: false,
   },
   {
     method: "GET",
     path: "/v1/jobs",
-    summary: "List jobs",
-    description: "Print job history, with a count.",
+    summaryKey: "explorer.endpoint_jobs",
+    descriptionKey: "explorer.endpoint_jobs_desc",
     mutating: false,
   },
   {
     method: "GET",
     path: "/v1/jobs/{id}",
-    summary: "Get job status",
-    description: "One job's record and result. Enter the job id.",
+    summaryKey: "explorer.endpoint_job",
+    descriptionKey: "explorer.endpoint_job_desc",
     mutating: false,
     needsId: true,
   },
   {
     method: "GET",
     path: "/v1/metrics",
-    summary: "Operational counters",
-    description:
-      "Jobs by status and completed totals as JSON. Same shape every call.",
+    summaryKey: "explorer.endpoint_metrics",
+    descriptionKey: "explorer.endpoint_metrics_desc",
     mutating: false,
   },
   {
     method: "GET",
     path: "/v1/metrics/prometheus",
-    summary: "Prometheus exposition",
-    description: "Same counters as /v1/metrics in text format 0.0.4.",
+    summaryKey: "explorer.endpoint_prom",
+    descriptionKey: "explorer.endpoint_prom_desc",
     mutating: false,
   },
   {
     method: "GET",
     path: "/v1/openapi.json",
-    summary: "This document",
-    description: "The OpenAPI description of this API.",
+    summaryKey: "explorer.endpoint_openapi",
+    descriptionKey: "explorer.endpoint_openapi_desc",
     mutating: false,
   },
   {
     method: "POST",
     path: "/v1/jobs/{id}/retry",
-    summary: "Re-queue a failed or cancelled job",
-    description:
-      "Only a terminal row (failed, cancelled) is re-queued and printed again.",
+    summaryKey: "explorer.endpoint_retry",
+    descriptionKey: "explorer.endpoint_retry_desc",
     mutating: true,
     needsId: true,
   },
   {
     method: "DELETE",
     path: "/v1/jobs/{id}",
-    summary: "Cancel a queued job",
-    description: "Only a queued row can be cancelled; the row ends cancelled.",
+    summaryKey: "explorer.endpoint_cancel",
+    descriptionKey: "explorer.endpoint_cancel_desc",
     mutating: true,
     needsId: true,
   },
   {
     method: "POST",
     path: "/v1/print",
-    summary: "Render a template and print it",
-    description:
-      "Prints for real: template and printer are required, data is optional. Send Idempotency-Key on a retryable request to avoid a second copy.",
+    summaryKey: "explorer.endpoint_print",
+    descriptionKey: "explorer.endpoint_print_desc",
     mutating: true,
     hasBody: true,
   },
@@ -209,7 +207,7 @@ export function ApiExplorerPage() {
   const send = async () => {
     if (!status?.running) return;
     if (selected.needsId && !jobId.trim()) {
-      toast.error("Enter a job id first");
+      toast.error(t("explorer.toast_job_id_required"));
       return;
     }
     let parsed: unknown = undefined;
@@ -217,7 +215,7 @@ export function ApiExplorerPage() {
       try {
         parsed = JSON.parse(body);
       } catch {
-        toast.error("Request body is not valid JSON");
+        toast.error(t("explorer.toast_bad_json"));
         return;
       }
     }
@@ -241,7 +239,9 @@ export function ApiExplorerPage() {
       const text = await res.text();
       setResponse({ status: res.status, text });
     } catch (e) {
-      toast.error(`Request failed: ${e}`);
+      toast.error(
+        t("explorer.toast_request_failed", { error: describeError(e) }),
+      );
     } finally {
       setBusy(false);
     }
@@ -253,10 +253,12 @@ export function ApiExplorerPage() {
       const port = Number((await readSetting("api_port")) || "17717");
       const lan = (await readSetting("api_lan_access")) === "true";
       await agent("start_api_server", { port, lan_access: lan });
-      toast.success("API server started");
+      toast.success(t("explorer.toast_started"));
       await loadStatus();
     } catch (e) {
-      toast.error(`Failed to start: ${e}`);
+      toast.error(
+        t("settings_page.toast_api_start_failed", { error: describeError(e) }),
+      );
     } finally {
       setStarting(false);
     }
@@ -273,8 +275,7 @@ export function ApiExplorerPage() {
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">
-              The API Explorer needs the desktop app: it calls the local server
-              on this machine, which the browser preview cannot reach.
+              {t("explorer.web_notice")}
             </p>
           </CardContent>
         </Card>
@@ -291,13 +292,13 @@ export function ApiExplorerPage() {
         <div className="flex items-center gap-2">
           {specVersion && (
             <Badge variant="outline" data-testid="api-explorer-spec-version">
-              spec v{specVersion}
+              {t("explorer.spec_version", { version: specVersion })}
             </Badge>
           )}
           <Badge variant={status?.running ? "success" : "secondary"}>
             {status?.running
               ? `${status.address}:${status.port}`
-              : "server stopped"}
+              : t("explorer.stopped")}
           </Badge>
         </div>
       </PageHeader>
@@ -305,19 +306,22 @@ export function ApiExplorerPage() {
       {!status?.running ? (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Server is not running</CardTitle>
+            <CardTitle className="text-base">
+              {t("explorer.not_running_title")}
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Start the local API server to browse and try its endpoints. Port
-              and LAN settings live under Settings → API.
+              {t("explorer.not_running_hint")}
             </p>
             <div className="flex gap-2">
               <Button onClick={startServer} disabled={starting}>
-                {starting ? "Starting…" : "Start Server"}
+                {starting ? t("explorer.starting") : t("explorer.start_server")}
               </Button>
               <Button variant="outline" asChild>
-                <Link to="/settings?section=api">Open Settings → API</Link>
+                <Link to="/settings?section=api">
+                  {t("explorer.open_settings")}
+                </Link>
               </Button>
             </div>
           </CardContent>
@@ -328,7 +332,7 @@ export function ApiExplorerPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">
-                Endpoints
+                {t("explorer.endpoints")}
                 <span className="ml-2 text-xs font-normal text-muted-foreground">
                   live: {baseUrl(status)}
                 </span>
@@ -360,7 +364,7 @@ export function ApiExplorerPage() {
                       {ep.path}
                     </span>
                     <span className="block truncate text-xs text-muted-foreground">
-                      {ep.summary}
+                      {t(ep.summaryKey)}
                     </span>
                   </span>
                 </button>
@@ -371,7 +375,7 @@ export function ApiExplorerPage() {
                 rel="noreferrer"
                 className="block px-2 pt-2 text-xs text-muted-foreground underline-offset-2 hover:underline"
               >
-                View raw openapi.json
+                {t("explorer.raw_link")}
               </a>
             </CardContent>
           </Card>
@@ -389,7 +393,7 @@ export function ApiExplorerPage() {
                 <span className="font-mono text-sm">{resolvedPath}</span>
               </CardTitle>
               <p className="text-sm text-muted-foreground">
-                {selected.summary} — {selected.description}
+                {t(selected.summaryKey)} — {t(selected.descriptionKey)}
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -398,8 +402,7 @@ export function ApiExplorerPage() {
                   role="alert"
                   className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning"
                 >
-                  This prints for real — paper and toner. Double-check the
-                  template and printer before sending.
+                  {t("explorer.print_warning")}
                 </p>
               )}
               {selected.mutating && selected.path !== "/v1/print" && (
@@ -407,18 +410,20 @@ export function ApiExplorerPage() {
                   role="alert"
                   className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning"
                 >
-                  This changes server state (re-queue or cancel a job).
+                  {t("explorer.mutate_warning")}
                 </p>
               )}
 
               {selected.needsId && (
                 <div className="space-y-1">
-                  <Label htmlFor="api-explorer-id">Job id</Label>
+                  <Label htmlFor="api-explorer-id">
+                    {t("explorer.job_id")}
+                  </Label>
                   <Input
                     id="api-explorer-id"
                     data-testid="api-explorer-job-id"
                     inputMode="numeric"
-                    placeholder="e.g. 12"
+                    placeholder={t("explorer.job_id_example")}
                     value={jobId}
                     onChange={(e) => setJobId(e.target.value)}
                   />
@@ -430,7 +435,7 @@ export function ApiExplorerPage() {
                   {selected.path === "/v1/print" && (
                     <div
                       role="group"
-                      aria-label="Fill an example body"
+                      aria-label={t("explorer.fill_example_aria")}
                       className="flex flex-wrap gap-2"
                     >
                       <Button
@@ -439,7 +444,7 @@ export function ApiExplorerPage() {
                         size="sm"
                         onClick={() => setBody(PRINT_BODY_EXAMPLE)}
                       >
-                        Example: inline data
+                        {t("explorer.example_inline")}
                       </Button>
                       <Button
                         type="button"
@@ -447,13 +452,13 @@ export function ApiExplorerPage() {
                         size="sm"
                         onClick={() => setBody(PRINT_URL_EXAMPLE)}
                       >
-                        Example: data URL
+                        {t("explorer.example_url")}
                       </Button>
                     </div>
                   )}
                   <div className="space-y-1">
                     <Label htmlFor="api-explorer-body">
-                      Request body (JSON)
+                      {t("explorer.body_label")}
                     </Label>
                     <Textarea
                       id="api-explorer-body"
@@ -465,19 +470,18 @@ export function ApiExplorerPage() {
                     />
                     {selected.path === "/v1/print" && (
                       <p className="text-xs text-muted-foreground">
-                        Either inline `data` or `data_url` (the server fetches
-                        the URL and prints the returned JSON; http/https only).
+                        {t("explorer.body_hint")}
                       </p>
                     )}
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="api-explorer-idempotency">
-                      Idempotency-Key (optional)
+                      {t("explorer.idem_label")}
                     </Label>
                     <Input
                       id="api-explorer-idempotency"
                       data-testid="api-explorer-idempotency"
-                      placeholder="replay-safe key for retries"
+                      placeholder={t("explorer.idem_hint")}
                       value={idempotencyKey}
                       onChange={(e) => setIdempotencyKey(e.target.value)}
                     />
@@ -490,13 +494,18 @@ export function ApiExplorerPage() {
                 disabled={!canSend}
                 data-testid="api-explorer-send"
               >
-                {busy ? "Sending…" : `Send ${selected.method} ${resolvedPath}`}
+                {busy
+                  ? t("explorer.sending")
+                  : t("explorer.send", {
+                      method: selected.method,
+                      path: resolvedPath,
+                    })}
               </Button>
 
               {response && (
                 <div className="space-y-1">
                   <p className="text-sm font-medium">
-                    Response
+                    {t("explorer.response")}
                     <Badge
                       variant={
                         response.status < 400 ? "success" : "destructive"
@@ -509,6 +518,7 @@ export function ApiExplorerPage() {
                   <pre
                     data-testid="api-explorer-response"
                     className="max-h-96 overflow-auto rounded-md bg-muted p-3 font-mono text-xs"
+                    tabIndex={0}
                   >
                     {formatResponse(response.text)}
                   </pre>

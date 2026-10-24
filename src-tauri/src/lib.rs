@@ -99,6 +99,10 @@ pub fn run() {
     // Android printing + background service (no-op stub on desktop).
     let builder = builder.plugin(tauri_plugin_android_print::init());
 
+    // External links (the update badge's release page). Link opening only;
+    // updates stay manual, there is no auto-download or install path.
+    let builder = builder.plugin(tauri_plugin_opener::init());
+
     // A second launch (or deeplink) focuses the running window instead of
     // starting a second queue. Required once close-to-tray keeps the
     // process alive after the window is gone.

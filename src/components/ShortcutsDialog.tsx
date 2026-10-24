@@ -9,12 +9,18 @@ import {
 import { NAV_ITEMS } from "@/lib/shell/nav";
 
 function Keys({ keys }: { keys: string[] }) {
+  const { t } = useTranslation();
   return (
     <span className="flex items-center gap-1">
       {keys.map((k, i) => (
         <span key={i} className="flex items-center gap-1">
-          {i > 0 && <span className="text-xs text-muted-foreground">then</span>}
-          <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-xs">
+          {i > 0 && (
+            <span className="text-xs text-muted-foreground">
+              {t("shell.then")}
+            </span>
+          )}
+          {/* Meaningless on touch: hide on coarse pointers. */}
+          <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-xs [@media(pointer:coarse)]:hidden">
             {k}
           </kbd>
         </span>

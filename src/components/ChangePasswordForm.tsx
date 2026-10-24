@@ -1,4 +1,6 @@
+import { describeError } from "@/lib/errors";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,18 +22,19 @@ export function ChangePasswordForm({
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
+  const { t } = useTranslation();
 
   const submit = async () => {
     if (!current) {
-      toast.error("Enter the current password");
+      toast.error(t("settings_page.change_password_current_required"));
       return;
     }
     if (next.length < 8) {
-      toast.error("The new password needs at least 8 characters");
+      toast.error(t("settings_page.change_password_too_short"));
       return;
     }
     if (next !== confirm) {
-      toast.error("The new passwords do not match");
+      toast.error(t("settings_page.change_password_mismatch"));
       return;
     }
     setBusy(true);
@@ -42,11 +45,11 @@ export function ChangePasswordForm({
       setConfirm("");
       toast.success(
         revoked > 0
-          ? `Password changed — ${revoked} other session(s) signed out`
-          : "Password changed",
+          ? t("settings_page.change_password_revoked", { count: revoked })
+          : t("settings_page.change_password_done"),
       );
     } catch (e) {
-      toast.error(String(e));
+      toast.error(describeError(e));
     } finally {
       setBusy(false);
     }
@@ -54,10 +57,14 @@ export function ChangePasswordForm({
 
   return (
     <div className="space-y-2 rounded-md border p-3">
-      <p className="text-sm font-medium">Change password</p>
+      <p className="text-sm font-medium">
+        {t("settings_page.change_password_title")}
+      </p>
       <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
         <div className="space-y-1">
-          <Label htmlFor="change-password-current">Current password</Label>
+          <Label htmlFor="change-password-current">
+            {t("settings_page.change_password_current")}
+          </Label>
           <Input
             id="change-password-current"
             data-testid="settings-change-password-current"
@@ -69,7 +76,9 @@ export function ChangePasswordForm({
           />
         </div>
         <div className="space-y-1">
-          <Label htmlFor="change-password-new">New password</Label>
+          <Label htmlFor="change-password-new">
+            {t("settings_page.change_password_new")}
+          </Label>
           <Input
             id="change-password-new"
             data-testid="settings-change-password-new"
@@ -81,7 +90,9 @@ export function ChangePasswordForm({
           />
         </div>
         <div className="space-y-1">
-          <Label htmlFor="change-password-confirm">Confirm new</Label>
+          <Label htmlFor="change-password-confirm">
+            {t("settings_page.change_password_confirm")}
+          </Label>
           <Input
             id="change-password-confirm"
             data-testid="settings-change-password-confirm"
@@ -100,10 +111,10 @@ export function ChangePasswordForm({
         onClick={() => void submit()}
         disabled={busy}
       >
-        Change password
+        {t("settings_page.change_password_title")}
       </Button>
       <p className="text-xs text-muted-foreground">
-        Other signed-in devices are signed out (8+ characters).
+        {t("settings_page.change_password_hint")}
       </p>
     </div>
   );

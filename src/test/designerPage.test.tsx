@@ -154,18 +154,24 @@ describe("Designer page layout on a phone", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("keeps Templates and Page Setup collapsed above the tabs", async () => {
+  it("keeps Templates and Page Setup in a Settings sheet above the tabs", async () => {
     renderDesigner();
     await screen.findByRole("tablist", { name: "Designer views" });
+    // The inline accordion is gone; a single Settings button opens the sheet.
+    expect(screen.queryByRole("button", { name: "Templates" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const dialog = await screen.findByRole("dialog");
     for (const name of ["Templates", "Page Setup"]) {
-      expect(screen.getByRole("button", { name })).toHaveAttribute(
+      expect(within(dialog).getByRole("button", { name })).toHaveAttribute(
         "aria-expanded",
         "false",
       );
     }
-    expect(screen.queryByLabelText("Width (mm)")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Page Setup" }));
-    expect(screen.getByLabelText("Width (mm)")).toBeInTheDocument();
+    expect(
+      within(dialog).queryByLabelText("Width (mm)"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Page Setup" }));
+    expect(within(dialog).getByLabelText("Width (mm)")).toBeInTheDocument();
   });
 
   it("no longer shows the Properties card, and keeps the helpers in the Sample data tab", async () => {

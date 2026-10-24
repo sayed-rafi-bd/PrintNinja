@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
-  renderRecords,
+  renderDesignPages,
   renderTemplate,
+  resolvePaper,
   wrapWithTailwind,
 } from "@/lib/render/renderTemplate";
 import {
@@ -371,23 +372,59 @@ describe("per-template compiled CSS", () => {
   );
 });
 
-describe("renderRecords", () => {
-  it("renders one page for a single object", () => {
-    const doc = renderRecords("<p>Hi {{name}}</p>", "", { name: "Ana" });
-    expect(doc).toContain("Hi Ana");
-    expect(doc).not.toContain('<div style="break-before:page"></div>');
+describe("renderDesignPages", () => {
+  it("renders one design document for a single object", () => {
+    const pages = renderDesignPages("<p>Hi {{name}}</p>", "", [
+      { name: "Ana" },
+    ]);
+    expect(pages).toHaveLength(1);
+    expect(pages[0]).toContain("Hi Ana");
   });
 
-  it("renders one page per array element with page breaks", () => {
-    const doc = renderRecords("<p>Hi {{name}}</p>", "", [
+  it("renders one complete document per record", () => {
+    const pages = renderDesignPages("<p>Hi {{name}}</p>", "", [
       { name: "Ana" },
       { name: "Bo" },
     ]);
-    expect(doc).toContain("Hi Ana");
-    expect(doc).toContain("Hi Bo");
-    expect(doc.indexOf("Hi Bo")).toBeGreaterThan(doc.indexOf("Hi Ana"));
-    expect(doc).toContain('<div style="break-before:page"></div>');
-    // Wrapped once, not once per record.
-    expect(doc.match(/<!DOCTYPE html>/g)).toHaveLength(1);
+    expect(pages).toHaveLength(2);
+    expect(pages[0]).toContain("Hi Ana");
+    expect(pages[0]).not.toContain("Hi Bo");
+    expect(pages[1]).toContain("Hi Bo");
+    for (const doc of pages) {
+      expect(doc.match(/<!DOCTYPE html>/g)).toHaveLength(1);
+    }
+  });
+
+  it("carries no paper size, margin or zoom: the design is laid out as authored", () => {
+    const [doc] = renderDesignPages("<p>x</p>", "", [{}]);
+    expect(doc).not.toContain("size: ");
+    expect(doc).not.toMatch(/zoom\s*:/);
+    // The one @page in the document is the base reset's.
+    expect(doc.match(/@page/g)).toHaveLength(1);
+  });
+
+  it("keeps the template's own CSS", () => {
+    const [doc] = renderDesignPages("<p>x</p>", ".brand{color:#f00}", [{}]);
+    expect(doc).toContain(".brand{color:#f00}");
+  });
+});
+
+describe("resolvePaper", () => {
+  it("swaps the paper for landscape, never the design", () => {
+    expect(resolvePaper(80, 200, "landscape")).toEqual({
+      paperW: 200,
+      paperH: 80,
+    });
+    expect(resolvePaper(80, 200, "portrait")).toEqual({
+      paperW: 80,
+      paperH: 200,
+    });
+  });
+
+  it("lets an explicit paper size win per axis", () => {
+    expect(resolvePaper(80, 200, "portrait", 210, null)).toEqual({
+      paperW: 210,
+      paperH: 200,
+    });
   });
 });

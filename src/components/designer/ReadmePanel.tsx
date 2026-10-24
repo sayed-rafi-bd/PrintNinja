@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { ReadmeEditor } from "@/components/ReadmeEditor";
 
@@ -17,14 +18,15 @@ export function ReadmePanel({
   saving,
   onSave,
 }: Props) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         <h2 className="min-w-0 truncate text-sm font-semibold">
-          README — {templateName}
+          {t("readme.panel_title", { name: templateName })}
         </h2>
         <Button size="sm" onClick={onSave} disabled={saving}>
-          {saving ? "Saving…" : "Save README"}
+          {saving ? t("readme.saving") : t("readme.save")}
         </Button>
       </div>
       <ReadmeEditor

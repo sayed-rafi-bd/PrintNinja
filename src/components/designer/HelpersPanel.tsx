@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { BARCODE_TYPES } from "@/lib/utils/barcode";
 
@@ -26,12 +27,13 @@ interface Props {
 
 /** The Handlebars helpers and barcode types a template can use. */
 export function HelpersPanel({ onInsert }: Props) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2">
       <div className="text-xs text-muted-foreground">
         {onInsert
-          ? "Click a helper to insert it at the cursor:"
-          : "Available helpers:"}
+          ? t("designer.helpers_insert")
+          : t("designer.helpers_available")}
       </div>
       <div className="flex flex-wrap gap-1">
         {HELPERS.map((helper) =>
@@ -39,8 +41,10 @@ export function HelpersPanel({ onInsert }: Props) {
             <button
               key={helper}
               type="button"
-              aria-label={`Insert ${helper} helper`}
-              title={`Insert {{${helper} }} at the cursor`}
+              aria-label={t("designer.helper_insert", { helper })}
+              title={t("designer.helper_title", {
+                snippet: `{{${helper} }}`,
+              })}
               onClick={() => {
                 const { text, back } = helperSnippet(helper);
                 onInsert(text, back);
@@ -61,7 +65,9 @@ export function HelpersPanel({ onInsert }: Props) {
           ),
         )}
       </div>
-      <div className="text-xs text-muted-foreground">Barcode types:</div>
+      <div className="text-xs text-muted-foreground">
+        {t("designer.barcode_types")}
+      </div>
       <div className="flex flex-wrap gap-1">
         {BARCODE_TYPES.slice(0, 5).map((bc) => (
           <Badge key={bc.value} variant="outline" className="text-xs">
@@ -69,7 +75,7 @@ export function HelpersPanel({ onInsert }: Props) {
           </Badge>
         ))}
         <Badge variant="outline" className="text-xs">
-          +{BARCODE_TYPES.length - 5} more
+          {t("designer.barcode_more", { count: BARCODE_TYPES.length - 5 })}
         </Badge>
       </div>
     </div>

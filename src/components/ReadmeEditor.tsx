@@ -1,4 +1,6 @@
 import { useState, useRef } from "react";
+import { useTranslation } from "react-i18next";
+import { currentLanguage } from "@/lib/i18n";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
@@ -114,6 +116,7 @@ export function ReadmeEditor({
   onReset,
   scaffoldForName,
 }: ReadmeEditorProps) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<"edit" | "preview">("edit");
   const [showResetDialog, setShowResetDialog] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -149,25 +152,25 @@ export function ReadmeEditor({
   const handleToolbar = (action: string) => {
     switch (action) {
       case "bold":
-        applyWrap("**", "**", "bold");
+        applyWrap("**", "**", t("readme.ph_bold"));
         break;
       case "heading":
-        applyWrap("\n## ", "", "Heading");
+        applyWrap("\n## ", "", t("readme.ph_heading"));
         break;
       case "link":
-        applyWrap("[", "](https://)", "text");
+        applyWrap("[", "](https://)", t("readme.ph_text"));
         break;
       case "code":
-        applyWrap("`", "`", "code");
+        applyWrap("`", "`", t("readme.ph_code"));
         break;
       case "codeblock":
-        applyWrap("\n```\n", "\n```\n", "code");
+        applyWrap("\n```\n", "\n```\n", t("readme.ph_code"));
         break;
       case "list":
-        applyWrap("\n- ", "", "item");
+        applyWrap("\n- ", "", t("readme.ph_item"));
         break;
       case "quote":
-        applyWrap("\n> ", "", "quote");
+        applyWrap("\n> ", "", t("readme.ph_quote"));
         break;
       default:
         break;
@@ -208,7 +211,7 @@ export function ReadmeEditor({
           },
         }}
       >
-        {value || "*Empty README — write something*"}
+        {value || t("readme.empty_hint")}
       </ReactMarkdown>
     </div>
   );
@@ -220,7 +223,7 @@ export function ReadmeEditor({
           variant="ghost"
           size="sm"
           onClick={() => handleToolbar("bold")}
-          title="Bold"
+          title={t("readme.tool_bold")}
         >
           <strong>B</strong>
         </Button>
@@ -228,7 +231,7 @@ export function ReadmeEditor({
           variant="ghost"
           size="sm"
           onClick={() => handleToolbar("heading")}
-          title="Heading"
+          title={t("readme.tool_heading")}
         >
           H
         </Button>
@@ -236,7 +239,7 @@ export function ReadmeEditor({
           variant="ghost"
           size="sm"
           onClick={() => handleToolbar("link")}
-          title="Link"
+          title={t("readme.tool_link")}
         >
           🔗
         </Button>
@@ -244,7 +247,7 @@ export function ReadmeEditor({
           variant="ghost"
           size="sm"
           onClick={() => handleToolbar("code")}
-          title="Inline code"
+          title={t("readme.tool_code")}
         >
           {"</>"}
         </Button>
@@ -252,7 +255,7 @@ export function ReadmeEditor({
           variant="ghost"
           size="sm"
           onClick={() => handleToolbar("codeblock")}
-          title="Code block"
+          title={t("readme.tool_codeblock")}
         >
           {"```"}
         </Button>
@@ -260,15 +263,15 @@ export function ReadmeEditor({
           variant="ghost"
           size="sm"
           onClick={() => handleToolbar("list")}
-          title="List"
+          title={t("readme.tool_list")}
         >
-          • List
+          • {t("readme.list_label")}
         </Button>
         <Button
           variant="ghost"
           size="sm"
           onClick={() => handleToolbar("quote")}
-          title="Quote"
+          title={t("readme.tool_quote")}
         >
           ❝
         </Button>
@@ -277,24 +280,27 @@ export function ReadmeEditor({
           variant="ghost"
           size="sm"
           onClick={() => setShowResetDialog(true)}
-          title="Reset to scaffold"
+          title={t("readme.tool_reset")}
         >
-          Reset
+          {t("readme.reset")}
         </Button>
       </div>
       <Textarea
         ref={textareaRef}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="Write your README in Markdown..."
+        placeholder={t("readme.placeholder")}
         className="min-h-[300px] font-mono text-sm"
         rows={16}
       />
       <div
         className={`text-xs ${overCap ? "text-destructive font-medium" : "text-muted-foreground"}`}
       >
-        {bytes.toLocaleString()} / {README_MAX_BYTES.toLocaleString()} bytes
-        {overCap && " — exceeds 64 KiB cap"}
+        {t("readme.byte_count", {
+          used: bytes.toLocaleString(currentLanguage()),
+          max: README_MAX_BYTES.toLocaleString(currentLanguage()),
+        })}
+        {overCap && t("readme.over_cap")}
       </div>
     </div>
   );
@@ -306,8 +312,8 @@ export function ReadmeEditor({
       <div>
         <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
           <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="edit">Edit</TabsTrigger>
-            <TabsTrigger value="preview">Preview</TabsTrigger>
+            <TabsTrigger value="edit">{t("readme.edit")}</TabsTrigger>
+            <TabsTrigger value="preview">{t("readme.preview")}</TabsTrigger>
           </TabsList>
           <div className="mt-4">{tab === "edit" ? editor : preview}</div>
         </Tabs>
@@ -316,18 +322,17 @@ export function ReadmeEditor({
       <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Reset README to scaffold?</DialogTitle>
+            <DialogTitle>{t("readme.reset_title")}</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            This will replace the current README with the default scaffold. This
-            cannot be undone.
+            {t("readme.reset_body")}
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowResetDialog(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="destructive" onClick={handleReset}>
-              Reset
+              {t("readme.reset")}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -132,15 +132,11 @@ The `server/` share service is built, tested and drift-checked by CI
 (`server-check`, `server-image`) but **not** deployed by any workflow.
 It is deployed by hand, see section 7.
 
-## Hardware checklist
-
-Before publishing, run [`docs/HARDWARE_CHECKLIST.md`](HARDWARE_CHECKLIST.md) on
-the Windows machine with the printers attached. CI mocks the wire and the IPP
-responses; real printers, the Windows spooler and USB are only exercised there.
-
 ## 5. Publish
 
 Open the draft release on GitHub. If you sign locally, replace the unsigned files with your signed builds, then publish.
+
+The app surfaces new releases itself: on boot it compares its version with the latest GitHub Release and shows an "Update vX.Y.Z" badge in the top bar linking to the release page, where users download and update by hand. There is no auto-update path to maintain.
 
 ## 6. Architecture targets summary
 

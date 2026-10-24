@@ -184,24 +184,26 @@ export function renderTemplate(
   return wrapDocument(renderBody(html, data), css, compiledCss);
 }
 
+export { resolvePaper } from "./printLayout";
+
 /**
- * Render one page per record: a single object renders one page, an array
- * renders one page per element joined with a page break, wrapped once.
- * Mirrors the print pipeline (print.rs step 2), so the preview shows
- * exactly what will print.
+ * Render one complete design document per record. Each document is laid out
+ * exactly like the Designer canvas — no paper size, no margins, no scaling —
+ * so it can be shown in a frame of the design's own size and then placed on
+ * the sheet by `computePrintLayout`. A single object renders one page, an
+ * array renders one page per element (the print pipeline does the same, see
+ * print.rs step 2), so the preview shows what will print.
  */
-export function renderRecords(
+export function renderDesignPages(
   html: string,
   css: string,
-  data: unknown,
+  records: unknown[],
   /** The template's compiled Tailwind CSS; the shared bundle is used if blank. */
   compiledCss?: string | null,
-): string {
-  const records = Array.isArray(data) ? data : [data];
-  const body = records
-    .map((record) => renderBody(html, record))
-    .join('\n<div style="break-before:page"></div>\n');
-  return wrapDocument(body, css, compiledCss);
+): string[] {
+  return records.map((record) =>
+    wrapDocument(renderBody(html, record), css, compiledCss),
+  );
 }
 
 /**

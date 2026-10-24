@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { TriangleAlert } from "lucide-react";
 import { extractClasses } from "@/lib/templates/extractClasses";
 
@@ -14,6 +15,7 @@ const MAX_LISTED = 5;
  * Renders nothing when the template is fine.
  */
 export function ClassWarnings({ html }: { html: string }) {
+  const { t } = useTranslation();
   const { warnings } = useMemo(() => extractClasses(html), [html]);
   if (warnings.length === 0) return null;
 
@@ -31,18 +33,23 @@ export function ClassWarnings({ html }: { html: string }) {
         <div className="min-w-0 space-y-1.5">
           <p className="font-medium">
             {warnings.length === 1
-              ? "1 class name is built from data and won't be styled"
-              : `${warnings.length} class names are built from data and won't be styled`}
+              ? t("designer.glue_single")
+              : t("designer.glue_many", { count: warnings.length })}
           </p>
           <ul className="space-y-0.5 font-mono">
             {listed.map((w) => (
               <li key={w.index} className="break-all">
-                Line {w.line}: <code>{w.snippet}</code>
+                {t("designer.glue_line", { line: w.line })}{" "}
+                <code>{w.snippet}</code>
               </li>
             ))}
-            {more > 0 && <li className="font-sans">…and {more} more</li>}
+            {more > 0 && (
+              <li className="font-sans">
+                {t("designer.glue_more", { count: more })}
+              </li>
+            )}
           </ul>
-          <p>{warnings[0].message}</p>
+          <p>{t(warnings[0].messageKey)}</p>
         </div>
       </div>
     </div>

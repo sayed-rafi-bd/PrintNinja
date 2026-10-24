@@ -243,9 +243,11 @@ describe("History page", () => {
     fireEvent.click(screen.getByRole("button", { name: "View job 1" }));
     const dialog = await screen.findByRole("dialog");
     const breakdown = within(dialog).getByTestId("timing-breakdown");
-    expect(within(breakdown).getByText("820 ms")).toBeInTheDocument();
-    expect(within(breakdown).getByText("140 ms")).toBeInTheDocument();
-    expect(within(breakdown).getByText("970 ms")).toBeInTheDocument();
+    expect(within(breakdown).getByText("0.820 s")).toBeInTheDocument();
+    expect(within(breakdown).getByText("0.140 s")).toBeInTheDocument();
+    expect(within(breakdown).getByText("0.970 s")).toBeInTheDocument();
+    expect(within(breakdown).getByText("85%")).toBeInTheDocument();
+    expect(within(breakdown).getByText("14%")).toBeInTheDocument();
   });
 
   it("says so in the details dialog when a job has no timing breakdown", async () => {

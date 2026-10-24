@@ -1,0 +1,364 @@
+{
+  "cases": [
+    {
+      "name": "102x102 on A4 portrait, 5mm margins, actual",
+      "fit_mode": "actual",
+      "design": [102, 102],
+      "paper": [210, 297],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 1,
+        "content": [5, 5, 200, 287],
+        "placements": [[0, 0]]
+      }
+    },
+    {
+      "name": "102x102 on A4 portrait, 5mm margins, fit-width",
+      "fit_mode": "fit-width",
+      "design": [102, 102],
+      "paper": [210, 297],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 1.9608,
+        "content": [5, 5, 200, 287],
+        "placements": [[0, 0]]
+      }
+    },
+    {
+      "name": "102x102 on A4 portrait, 5mm margins, fit-page",
+      "fit_mode": "fit-page",
+      "design": [102, 102],
+      "paper": [210, 297],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 1.9608,
+        "content": [5, 5, 200, 287],
+        "placements": [[0, 43.5]]
+      }
+    },
+    {
+      "name": "102x102 on A4 portrait, 5mm margins, shrink",
+      "fit_mode": "shrink",
+      "design": [102, 102],
+      "paper": [210, 297],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 1,
+        "content": [5, 5, 200, 287],
+        "placements": [[49, 92.5]]
+      }
+    },
+    {
+      "name": "102x102 on A4 portrait, 5mm margins, fill",
+      "fit_mode": "fill",
+      "design": [102, 102],
+      "paper": [210, 297],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 2.8137,
+        "content": [5, 5, 200, 287],
+        "placements": [[-43.5, 0]]
+      }
+    },
+    {
+      "name": "102x102 on A4 landscape, 5mm margins, actual",
+      "fit_mode": "actual",
+      "design": [102, 102],
+      "paper": [297, 210],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 1,
+        "content": [5, 5, 287, 200],
+        "placements": [[0, 0]]
+      }
+    },
+    {
+      "name": "102x102 on A4 landscape, 5mm margins, fit-width",
+      "fit_mode": "fit-width",
+      "design": [102, 102],
+      "paper": [297, 210],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 2.8137,
+        "content": [5, 5, 287, 200],
+        "placements": [[0, 0], [0, -200]]
+      }
+    },
+    {
+      "name": "102x102 on A4 landscape, 5mm margins, fit-page",
+      "fit_mode": "fit-page",
+      "design": [102, 102],
+      "paper": [297, 210],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 1.9608,
+        "content": [5, 5, 287, 200],
+        "placements": [[43.5, 0]]
+      }
+    },
+    {
+      "name": "102x102 on A4 landscape, 5mm margins, shrink",
+      "fit_mode": "shrink",
+      "design": [102, 102],
+      "paper": [297, 210],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 1,
+        "content": [5, 5, 287, 200],
+        "placements": [[92.5, 49]]
+      }
+    },
+    {
+      "name": "102x102 on A4 landscape, 5mm margins, fill",
+      "fit_mode": "fill",
+      "design": [102, 102],
+      "paper": [297, 210],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 2.8137,
+        "content": [5, 5, 287, 200],
+        "placements": [[0, -43.5]]
+      }
+    },
+    {
+      "name": "80x200 on A4, asymmetric margins, actual",
+      "fit_mode": "actual",
+      "design": [80, 200],
+      "paper": [210, 297],
+      "margins": { "top": 10, "right": 20, "bottom": 30, "left": 40 },
+      "expect": {
+        "scale": 1,
+        "content": [40, 10, 150, 257],
+        "placements": [[0, 0]]
+      }
+    },
+    {
+      "name": "80x200 on A4, asymmetric margins, fit-width",
+      "fit_mode": "fit-width",
+      "design": [80, 200],
+      "paper": [210, 297],
+      "margins": { "top": 10, "right": 20, "bottom": 30, "left": 40 },
+      "expect": {
+        "scale": 1.875,
+        "content": [40, 10, 150, 257],
+        "placements": [[0, 0], [0, -257]]
+      }
+    },
+    {
+      "name": "80x200 on A4, asymmetric margins, fit-page",
+      "fit_mode": "fit-page",
+      "design": [80, 200],
+      "paper": [210, 297],
+      "margins": { "top": 10, "right": 20, "bottom": 30, "left": 40 },
+      "expect": {
+        "scale": 1.285,
+        "content": [40, 10, 150, 257],
+        "placements": [[23.6, 0]]
+      }
+    },
+    {
+      "name": "80x200 on A4, asymmetric margins, shrink",
+      "fit_mode": "shrink",
+      "design": [80, 200],
+      "paper": [210, 297],
+      "margins": { "top": 10, "right": 20, "bottom": 30, "left": 40 },
+      "expect": {
+        "scale": 1,
+        "content": [40, 10, 150, 257],
+        "placements": [[35, 28.5]]
+      }
+    },
+    {
+      "name": "80x200 on A4, asymmetric margins, fill",
+      "fit_mode": "fill",
+      "design": [80, 200],
+      "paper": [210, 297],
+      "margins": { "top": 10, "right": 20, "bottom": 30, "left": 40 },
+      "expect": {
+        "scale": 1.875,
+        "content": [40, 10, 150, 257],
+        "placements": [[0, -59]]
+      }
+    },
+    {
+      "name": "80x400 tall design on A4, actual",
+      "fit_mode": "actual",
+      "design": [80, 400],
+      "paper": [210, 297],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 1,
+        "content": [5, 5, 200, 287],
+        "placements": [[0, 0], [0, -287]]
+      }
+    },
+    {
+      "name": "80x400 tall design on A4, fit-width",
+      "fit_mode": "fit-width",
+      "design": [80, 400],
+      "paper": [210, 297],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 2.5,
+        "content": [5, 5, 200, 287],
+        "placements": [[0, 0], [0, -287], [0, -574], [0, -861]]
+      }
+    },
+    {
+      "name": "80x400 tall design on A4, fit-page",
+      "fit_mode": "fit-page",
+      "design": [80, 400],
+      "paper": [210, 297],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 0.7175,
+        "content": [5, 5, 200, 287],
+        "placements": [[71.3, 0]]
+      }
+    },
+    {
+      "name": "80x400 tall design on A4, shrink",
+      "fit_mode": "shrink",
+      "design": [80, 400],
+      "paper": [210, 297],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 0.7175,
+        "content": [5, 5, 200, 287],
+        "placements": [[71.3, 0]]
+      }
+    },
+    {
+      "name": "80x400 tall design on A4, fill",
+      "fit_mode": "fill",
+      "design": [80, 400],
+      "paper": [210, 297],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 2.5,
+        "content": [5, 5, 200, 287],
+        "placements": [[0, -356.5]]
+      }
+    },
+    {
+      "name": "300x100 wide design on A4, actual",
+      "fit_mode": "actual",
+      "design": [300, 100],
+      "paper": [210, 297],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 1,
+        "content": [5, 5, 200, 287],
+        "placements": [[0, 0]]
+      }
+    },
+    {
+      "name": "300x100 wide design on A4, fit-width",
+      "fit_mode": "fit-width",
+      "design": [300, 100],
+      "paper": [210, 297],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 0.6667,
+        "content": [5, 5, 200, 287],
+        "placements": [[0, 0]]
+      }
+    },
+    {
+      "name": "300x100 wide design on A4, fit-page",
+      "fit_mode": "fit-page",
+      "design": [300, 100],
+      "paper": [210, 297],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 0.6667,
+        "content": [5, 5, 200, 287],
+        "placements": [[0, 110.1667]]
+      }
+    },
+    {
+      "name": "300x100 wide design on A4, shrink",
+      "fit_mode": "shrink",
+      "design": [300, 100],
+      "paper": [210, 297],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 0.6667,
+        "content": [5, 5, 200, 287],
+        "placements": [[0, 110.1667]]
+      }
+    },
+    {
+      "name": "300x100 wide design on A4, fill",
+      "fit_mode": "fill",
+      "design": [300, 100],
+      "paper": [210, 297],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 2.87,
+        "content": [5, 5, 200, 287],
+        "placements": [[-330.5, 0]]
+      }
+    },
+    {
+      "name": "design equals paper, no margins, fit-width",
+      "fit_mode": "fit-width",
+      "design": [100, 200],
+      "paper": [100, 200],
+      "margins": { "top": 0, "right": 0, "bottom": 0, "left": 0 },
+      "expect": {
+        "scale": 1,
+        "content": [0, 0, 100, 200],
+        "placements": [[0, 0]]
+      }
+    },
+    {
+      "name": "design equals paper, default margins, fit-width",
+      "fit_mode": "fit-width",
+      "design": [100, 200],
+      "paper": [100, 200],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 0.9,
+        "content": [5, 5, 90, 190],
+        "placements": [[0, 0]]
+      }
+    },
+    {
+      "name": "design equals paper, no margins, fit-page",
+      "fit_mode": "fit-page",
+      "design": [100, 200],
+      "paper": [100, 200],
+      "margins": { "top": 0, "right": 0, "bottom": 0, "left": 0 },
+      "expect": {
+        "scale": 1,
+        "content": [0, 0, 100, 200],
+        "placements": [[0, 0]]
+      }
+    },
+    {
+      "name": "design equals paper, default margins, fit-page",
+      "fit_mode": "fit-page",
+      "design": [100, 200],
+      "paper": [100, 200],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 0.9,
+        "content": [5, 5, 90, 190],
+        "placements": [[0, 5]]
+      }
+    },
+    {
+      "name": "unknown mode falls back to fit-width",
+      "fit_mode": "bogus",
+      "design": [102, 102],
+      "paper": [210, 297],
+      "margins": { "top": 5, "right": 5, "bottom": 5, "left": 5 },
+      "expect": {
+        "scale": 1.9608,
+        "content": [5, 5, 200, 287],
+        "placements": [[0, 0]]
+      }
+    }
+  ]
+}

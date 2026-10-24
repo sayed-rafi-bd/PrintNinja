@@ -1,6 +1,13 @@
 import { Command } from "cmdk";
 import { useEffect, useState } from "react";
-import { FilePlus, Printer as PrintIcon, Search } from "lucide-react";
+import {
+  FilePlus,
+  History,
+  Printer as PrintIcon,
+  Printer,
+  Search,
+  Settings2,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   Dialog,
@@ -10,12 +17,41 @@ import {
 } from "@/components/ui/dialog";
 import { NAV_ITEMS } from "@/lib/shell/nav";
 import { agent } from "@/lib/agent/commands";
+import type { HistoryJob, PrinterRow } from "@/lib/agent/types";
+import type { SettingsSection } from "@/lib/setup/checklist";
+
+/** Settings sections, in tab order, reusing the Settings page labels. */
+const SETTING_SECTIONS: SettingsSection[] = [
+  "setup",
+  "general",
+  "background",
+  "share",
+  "api",
+  "data",
+  "retention",
+  "diagnostics",
+];
+
+const SECTION_LABEL_KEYS: Record<SettingsSection, string> = {
+  setup: "settings_page.section_setup",
+  general: "settings_page.section_general",
+  background: "settings_page.section_background",
+  share: "settings_page.section_share",
+  api: "settings_page.section_api",
+  data: "settings_page.section_data",
+  retention: "settings_page.section_retention",
+  diagnostics: "settings_page.section_diagnostics",
+};
+
+const MAX_JOBS = 7;
+const MAX_PRINTERS = 20;
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onNavigate: (path: string) => void;
   onReprintLast: () => void;
+  onReprintJob: (id: number) => void;
 }
 
 const ITEM =
@@ -28,13 +64,18 @@ export function CommandPalette({
   onOpenChange,
   onNavigate,
   onReprintLast,
+  onReprintJob,
 }: Props) {
   const { t } = useTranslation();
   const [templates, setTemplates] = useState<
     Array<{ id: number; name: string }>
   >([]);
+  const [printers, setPrinters] = useState<PrinterRow[]>([]);
+  const [jobs, setJobs] = useState<HistoryJob[]>([]);
 
-  // Templates live in the desktop database, so load them when the palette opens.
+  // Templates, printers and jobs live in the desktop database, so load them
+  // when the palette opens. Every list is optional: one failing call must
+  // not hide the others.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -44,6 +85,22 @@ export function CommandPalette({
       })
       .catch(() => {
         if (!cancelled) setTemplates([]);
+      });
+    agent("list_printers", {})
+      .then((rows) => {
+        if (!cancelled) setPrinters(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setPrinters([]);
+      });
+    agent("list_jobs", {})
+      .then((rows) => {
+        if (!cancelled) {
+          setJobs([...rows].sort((a, b) => b.id - a.id).slice(0, MAX_JOBS));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setJobs([]);
       });
     return () => {
       cancelled = true;
@@ -88,9 +145,30 @@ export function CommandPalette({
                 >
                   <item.icon className="h-4 w-4" aria-hidden="true" />
                   <span className="flex-1">{t(item.labelKey)}</span>
-                  <kbd className="font-mono text-xs text-muted-foreground">
+                  {/* Letter shortcuts are meaningless on touch: hide on coarse pointers. */}
+                  <kbd className="font-mono text-xs text-muted-foreground [@media(pointer:coarse)]:hidden">
                     G {item.shortcut.toUpperCase()}
                   </kbd>
+                </Command.Item>
+              ))}
+            </Command.Group>
+            <Command.Group
+              heading={t("shell.group_settings")}
+              className={GROUP}
+            >
+              {SETTING_SECTIONS.map((section) => (
+                <Command.Item
+                  key={section}
+                  value={`settings ${t(SECTION_LABEL_KEYS[section])}`}
+                  onSelect={() =>
+                    run(() => onNavigate(`/settings?section=${section}`))
+                  }
+                  className={ITEM}
+                >
+                  <Settings2 className="h-4 w-4" aria-hidden="true" />
+                  <span className="flex-1">
+                    {t(SECTION_LABEL_KEYS[section])}
+                  </span>
                 </Command.Item>
               ))}
             </Command.Group>
@@ -112,6 +190,47 @@ export function CommandPalette({
                 {t("shell.reprint_last")}
               </Command.Item>
             </Command.Group>
+            {jobs.length > 0 && (
+              <Command.Group heading={t("shell.group_jobs")} className={GROUP}>
+                {jobs.map((job) => (
+                  <Command.Item
+                    key={job.id}
+                    value={`job ${job.id} ${t(`status.${job.status}`)}`}
+                    onSelect={() => run(() => onReprintJob(job.id))}
+                    className={ITEM}
+                  >
+                    <History className="h-4 w-4" aria-hidden="true" />
+                    <span className="flex-1 truncate">
+                      {t("shell.reprint_job", { id: job.id })}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {t(`status.${job.status}`)}
+                    </span>
+                  </Command.Item>
+                ))}
+              </Command.Group>
+            )}
+            {printers.slice(0, MAX_PRINTERS).length > 0 && (
+              <Command.Group
+                heading={t("shell.group_printers")}
+                className={GROUP}
+              >
+                {printers.slice(0, MAX_PRINTERS).map((p) => (
+                  <Command.Item
+                    key={p.id}
+                    value={`printer ${p.name} ${p.address}`}
+                    onSelect={() => run(() => onNavigate("/printers"))}
+                    className={ITEM}
+                  >
+                    <Printer className="h-4 w-4" aria-hidden="true" />
+                    <span className="flex-1 truncate">{p.name}</span>
+                    <span className="max-w-40 truncate font-mono text-xs text-muted-foreground">
+                      {p.address}
+                    </span>
+                  </Command.Item>
+                ))}
+              </Command.Group>
+            )}
             {templates.length > 0 && (
               <Command.Group
                 heading={t("shell.group_templates")}

@@ -3,6 +3,25 @@ import "@testing-library/jest-dom/vitest";
 // Mock Tauri API for browser tests
 (globalThis as any).__TAURI_INTERNALS__ = undefined;
 
+// cmdk (command palette) needs layout observers jsdom does not provide.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver ??=
+  ResizeObserverStub as unknown as typeof ResizeObserver;
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}
+
+// Unit tests never touch the real network: external calls (share service,
+// GitHub release check) fail fast here, and suites that need them stub
+// `fetch` per file.
+globalThis.fetch = async () => {
+  throw new Error("network disabled in unit tests (stub fetch per file)");
+};
+
 // Mock localStorage
 const localStorageMock = (() => {
   let store: Record<string, string> = {};

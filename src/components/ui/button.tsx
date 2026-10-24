@@ -22,7 +22,7 @@ const buttonVariants = cva(
         default: "h-control px-4 py-2",
         sm: "h-8 rounded-md px-3",
         lg: "h-11 rounded-md px-8",
-        icon: "h-control w-control [@media(pointer:coarse)]:min-w-11",
+        icon: "h-control w-control [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11",
       },
     },
     defaultVariants: {

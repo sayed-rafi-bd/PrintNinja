@@ -149,7 +149,7 @@ function AppContent() {
 
   if (checking && onboardingComplete === null) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="min-h-dvh-safe flex items-center justify-center bg-background">
         <div className="h-6 w-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
       </div>
     );

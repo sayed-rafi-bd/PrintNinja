@@ -1,3 +1,4 @@
+import { describeError, isAlreadyExists } from "@/lib/errors";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { PageHeader } from "@/components/PageHeader";
@@ -36,26 +37,33 @@ import {
   TestTube,
   Scan,
   RefreshCw,
+  MoreHorizontal,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { validatePrinterForm } from "@/lib/printerSchema";
 import type { PrinterRow } from "@/lib/agent/types";
 
 const PRINTER_TYPES = [
-  { value: "ipp", label: "Wi-Fi / LAN (IPP)" },
-  { value: "raw_tcp", label: "Wi-Fi / LAN (Raw TCP 9100)" },
-  { value: "usb", label: "USB" },
-  { value: "bluetooth", label: "Bluetooth" },
-  { value: "system", label: "System" },
+  { value: "ipp", labelKey: "printers.conn_ipp" },
+  { value: "raw_tcp", labelKey: "printers.conn_raw" },
+  { value: "usb", labelKey: "printers.conn_usb" },
+  { value: "bluetooth", labelKey: "printers.conn_bluetooth" },
+  { value: "system", labelKey: "printers.conn_system" },
 ];
 
 const LANGUAGES = [
-  { value: "pdf", label: "PDF" },
-  { value: "escpos", label: "ESC/POS (receipt)" },
-  { value: "tspl", label: "TSPL (label)" },
-  { value: "zpl", label: "ZPL (label)" },
-  { value: "cpcl", label: "CPCL (label)" },
-  { value: "raster", label: "Raster" },
+  { value: "pdf", labelKey: "printers.lang_pdf" },
+  { value: "escpos", labelKey: "printers.lang_escpos" },
+  { value: "tspl", labelKey: "printers.lang_tspl" },
+  { value: "zpl", labelKey: "printers.lang_zpl" },
+  { value: "cpcl", labelKey: "printers.lang_cpcl" },
+  { value: "raster", labelKey: "printers.lang_raster" },
 ];
 
 const PAPERS = [
@@ -75,11 +83,23 @@ interface SystemPrinter {
 
 /** Tabs group printers by how they connect. */
 const GROUPS = [
-  { key: "all", label: "All", types: null as string[] | null },
-  { key: "network", label: "Network", types: ["ipp", "raw_tcp"] },
-  { key: "usb", label: "USB", types: ["usb"] },
-  { key: "bluetooth", label: "Bluetooth", types: ["bluetooth"] },
-  { key: "system", label: "System", types: ["system"] },
+  {
+    key: "all",
+    labelKey: "printers.filter_all",
+    types: null as string[] | null,
+  },
+  {
+    key: "network",
+    labelKey: "printers.filter_network",
+    types: ["ipp", "raw_tcp"],
+  },
+  { key: "usb", labelKey: "printers.filter_usb", types: ["usb"] },
+  {
+    key: "bluetooth",
+    labelKey: "printers.filter_bluetooth",
+    types: ["bluetooth"],
+  },
+  { key: "system", labelKey: "printers.filter_system", types: ["system"] },
 ];
 
 const TYPE_ICONS: Record<string, typeof Printer> = {
@@ -145,7 +165,7 @@ export function PrinterSetupPage() {
       const saved = await agent("list_printers", {});
       setPrinters(saved ?? []);
     } catch (e) {
-      toast.error(`Failed to load printers: ${e}`);
+      toast.error(t("printers.toast_load_failed", { error: describeError(e) }));
     } finally {
       setLoading(false);
     }
@@ -163,9 +183,11 @@ export function PrinterSetupPage() {
     try {
       const list = await agent("enumerate_system_printers", {});
       setSystemPrinters(list ?? []);
-      toast.success(`Found ${list.length} system printer(s)`);
+      toast.success(t("printers.toast_found_system", { count: list.length }));
     } catch (e) {
-      toast.error(`Discovery failed: ${e}`);
+      toast.error(
+        t("printers.toast_discovery_failed", { error: describeError(e) }),
+      );
     }
   };
 
@@ -174,7 +196,7 @@ export function PrinterSetupPage() {
     try {
       const list = await agent("enumerate_system_printers", {});
       if (!list || list.length === 0) {
-        toast.info("No system printers found");
+        toast.info(t("printers.toast_no_system"));
         return;
       }
       let added = 0;
@@ -208,10 +230,10 @@ export function PrinterSetupPage() {
           `Added ${added} system printer(s)${skipped ? `, ${skipped} already existed` : ""}`,
         );
       else if (skipped)
-        toast.info(`All ${skipped} system printer(s) already added`);
-      else toast.info("No new system printers to add");
+        toast.info(t("printers.toast_all_added", { count: skipped }));
+      else toast.info(t("printers.toast_none_new"));
     } catch (e) {
-      toast.error(`Scan failed: ${e}`);
+      toast.error(t("printers.toast_scan_failed", { error: describeError(e) }));
     } finally {
       setScanning(false);
     }
@@ -220,26 +242,28 @@ export function PrinterSetupPage() {
   const addPrinter = async () => {
     const parsed = validatePrinterForm(form);
     if (!parsed.ok) {
-      toast.error(parsed.error);
+      toast.error(t(parsed.messageKey));
       return;
     }
     const req = parsed.req;
     try {
       if (editingId === null) {
         await agent("add_printer", { req });
-        toast.success(`Added "${form.name.trim()}"`);
+        toast.success(t("printers.toast_added", { name: form.name.trim() }));
       } else {
         await agent("update_printer", { id: editingId, req });
-        toast.success(`Saved "${form.name.trim()}"`);
+        toast.success(t("printers.toast_saved", { name: form.name.trim() }));
       }
       setShowAdd(false);
       setEditingId(null);
       setForm(blankForm);
       await load();
     } catch (e) {
-      const msg = String(e);
+      const msg = describeError(e);
       toast.error(
-        msg.includes("already exists") ? msg : `Failed to save printer: ${msg}`,
+        isAlreadyExists(e)
+          ? msg
+          : t("printers.toast_save_failed", { error: msg }),
       );
     }
   };
@@ -248,9 +272,11 @@ export function PrinterSetupPage() {
     try {
       await agent("delete_printer", { id: p.id });
       setPrinters((prev) => prev.filter((x) => x.id !== p.id));
-      toast.success(`Removed "${p.name}"`);
+      toast.success(t("printers.toast_removed", { name: p.name }));
     } catch (e) {
-      toast.error(`Failed to remove: ${e}`);
+      toast.error(
+        t("printers.toast_remove_failed", { error: describeError(e) }),
+      );
     }
   };
 
@@ -258,9 +284,9 @@ export function PrinterSetupPage() {
     setTesting(p.id);
     try {
       await agent("test_printer", { id: p.id });
-      toast.success(`Test page sent to ${p.name}`);
+      toast.success(t("printers.toast_test_sent", { name: p.name }));
     } catch (e) {
-      toast.error(`Test print failed: ${e}`);
+      toast.error(t("printers.toast_test_failed", { error: describeError(e) }));
     } finally {
       setTesting(null);
     }
@@ -309,32 +335,38 @@ export function PrinterSetupPage() {
         header: "Status",
         cell: (c) => {
           const st = c.row.original.status;
+          // Icon + word in both cases; unknown states
+          // read "Not checked" instead of bare muted text.
           if (st === "online" || st === "offline")
             return <StatusBadge status={st} />;
-          return (
-            <span className="text-xs text-muted-foreground">Not checked</span>
-          );
+          return <StatusBadge status="unchecked" />;
         },
       },
       {
         id: "connection",
-        header: "Connection",
+        header: t("printers.col_connection"),
         meta: { className: "hidden md:table-cell" },
-        cell: (c) =>
-          PRINTER_TYPES.find((x) => x.value === c.row.original.printer_type)
-            ?.label ?? c.row.original.printer_type,
+        cell: (c) => {
+          const conn = PRINTER_TYPES.find(
+            (x) => x.value === c.row.original.printer_type,
+          );
+          return conn ? t(conn.labelKey) : c.row.original.printer_type;
+        },
       },
       {
         id: "language",
-        header: "Language",
+        header: t("printers.col_language"),
         meta: { className: "hidden lg:table-cell" },
-        cell: (c) =>
-          LANGUAGES.find((x) => x.value === c.row.original.language)?.label ??
-          c.row.original.language,
+        cell: (c) => {
+          const lang = LANGUAGES.find(
+            (x) => x.value === c.row.original.language,
+          );
+          return lang ? t(lang.labelKey) : c.row.original.language;
+        },
       },
       {
         id: "paper",
-        header: "Paper",
+        header: t("printers.col_paper"),
         meta: { className: "hidden lg:table-cell" },
         cell: (c) =>
           c.row.original.paper_width_mm
@@ -343,7 +375,7 @@ export function PrinterSetupPage() {
       },
       {
         id: "actions",
-        header: () => <span className="sr-only">Actions</span>,
+        header: () => <span className="sr-only">{t("common.actions")}</span>,
         meta: { className: "text-right" },
         cell: (c) => {
           const p = c.row.original;
@@ -352,8 +384,8 @@ export function PrinterSetupPage() {
               <Button
                 variant="ghost"
                 size="icon"
-                aria-label={`Edit ${p.name}`}
-                title="Edit"
+                aria-label={t("printers.edit_printer", { name: p.name })}
+                title={t("common.edit")}
                 onClick={() => openEdit(p)}
               >
                 <Pencil className="h-4 w-4" />
@@ -363,20 +395,22 @@ export function PrinterSetupPage() {
                 size="sm"
                 disabled={testing === p.id}
                 onClick={() => testPrinter(p)}
-                aria-label={`Test print on ${p.name}`}
+                aria-label={t("printers.test_action", { name: p.name })}
                 title={t("printers.test_print")}
               >
                 <TestTube className="h-4 w-4" aria-hidden="true" />
                 {/* Icon-only on phones so the row fits; the aria-label keeps it named. */}
                 <span className="hidden sm:inline">
-                  {testing === p.id ? "Testing…" : t("printers.test_print")}
+                  {testing === p.id
+                    ? t("printers.testing")
+                    : t("printers.test_print")}
                 </span>
               </Button>
               <Button
                 variant="ghost"
                 size="icon"
-                aria-label={`Remove ${p.name}`}
-                title="Remove"
+                aria-label={t("printers.remove_printer", { name: p.name })}
+                title={t("printers.remove_action")}
                 onClick={() => setRemoveTarget(p)}
               >
                 <Trash2 className="h-4 w-4" />
@@ -390,28 +424,105 @@ export function PrinterSetupPage() {
     [testing, t],
   );
 
+  // Phone card: name + address, status chip, a primary
+  // Test print button, and a ⋯ menu holding Edit and Delete (Delete confirms
+  // via the same dialog as the table).
+  const printerCard = (p: PrinterRow) => {
+    const st = p.status;
+    const Icon = TYPE_ICONS[p.printer_type] ?? Printer;
+    return (
+      <div className="space-y-2">
+        <div className="flex items-start gap-2">
+          <Icon
+            className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-medium">{p.name}</p>
+            <p
+              className="truncate font-mono text-xs text-muted-foreground"
+              title={p.address}
+            >
+              {p.address}
+            </p>
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={t("common.actions_for", { name: p.name })}
+              >
+                <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => openEdit(p)}>
+                <Pencil className="h-4 w-4" aria-hidden="true" />
+                {t("printers.edit_printer", { name: p.name })}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => setRemoveTarget(p)}
+                className="text-danger focus:text-danger"
+              >
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+                {t("printers.remove_printer", { name: p.name })}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {st === "online" || st === "offline" ? (
+            <StatusBadge status={st} />
+          ) : (
+            <StatusBadge status="unchecked" />
+          )}
+          <span className="text-xs text-muted-foreground">
+            {(() => {
+              const conn = PRINTER_TYPES.find(
+                (x) => x.value === p.printer_type,
+              );
+              return conn ? t(conn.labelKey) : p.printer_type;
+            })()}
+            {p.paper_width_mm ? ` · ${p.paper_width_mm} mm` : ""}
+          </span>
+        </div>
+        <Button
+          size="sm"
+          className="w-full"
+          disabled={testing === p.id}
+          onClick={() => testPrinter(p)}
+          aria-label={t("printers.test_action", { name: p.name })}
+        >
+          <TestTube className="h-4 w-4" aria-hidden="true" />
+          {testing === p.id ? t("printers.testing") : t("printers.test_print")}
+        </Button>
+      </div>
+    );
+  };
+
   const field = "space-y-1.5";
-  const addressLabel =
+  const addressLabelKey =
     form.printer_type === "system"
-      ? "Printer name"
+      ? "printers.address_name"
       : form.printer_type === "usb"
-        ? "USB device ID"
+        ? "printers.address_usb"
         : form.printer_type === "bluetooth"
-          ? "Bluetooth MAC or COM port"
-          : "Address";
-  const addressHint =
+          ? "printers.address_bluetooth"
+          : "common.address";
+  const addressHintKey =
     form.printer_type === "ipp"
-      ? "For example http://192.168.1.100"
+      ? "printers.hint_ipp"
       : form.printer_type === "raw_tcp"
-        ? "For example 192.168.1.100:9100"
-        : "";
+        ? "printers.hint_raw"
+        : null;
 
   return (
     <div className="space-y-4">
       <PageHeader title={t("printers.title")} description={t("pages.printers")}>
         <Button variant="outline" size="sm" onClick={load}>
           <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          Refresh
+          {t("printers.refresh")}
         </Button>
         <Button
           variant="outline"
@@ -420,7 +531,7 @@ export function PrinterSetupPage() {
           disabled={scanning}
         >
           <Scan className="h-4 w-4" aria-hidden="true" />
-          {scanning ? "Scanning…" : "Scan system"}
+          {scanning ? t("printers.scanning") : t("printers.scan")}
         </Button>
         <Button size="sm" onClick={openAdd}>
           <Plus className="h-4 w-4" aria-hidden="true" />
@@ -429,10 +540,11 @@ export function PrinterSetupPage() {
       </PageHeader>
 
       <Tabs value={tab} onValueChange={setTab} className="w-full">
-        <TabsList>
+        {/* Edge fade signals the row scrolls on phones. */}
+        <TabsList className="[mask-image:linear-gradient(to_right,black_calc(100%-12px),transparent)]">
           {GROUPS.map((g) => (
             <TabsTrigger key={g.key} value={g.key}>
-              {g.label} ({counts(g.types)})
+              {t(g.labelKey)} ({counts(g.types)})
             </TabsTrigger>
           ))}
         </TabsList>
@@ -444,16 +556,19 @@ export function PrinterSetupPage() {
             data={filtered}
             getRowId={(p) => String(p.id)}
             loading={loading}
+            renderCard={printerCard}
             empty={{
               title:
                 tab === "all"
-                  ? "No printers yet"
-                  : `No ${group.label.toLowerCase()} printers`,
+                  ? t("printers.empty_title")
+                  : t("printers.empty_group", {
+                      group: t(group.labelKey).toLowerCase(),
+                    }),
               description:
                 tab === "all"
-                  ? "Add a printer, or scan this computer for installed printers."
-                  : "Add one, or pick another group.",
-              action: { label: "Add printer", onClick: openAdd },
+                  ? t("printers.empty_hint")
+                  : t("printers.empty_group_hint"),
+              action: { label: t("printers.empty_action"), onClick: openAdd },
             }}
           />
         </TabsContent>
@@ -464,9 +579,13 @@ export function PrinterSetupPage() {
         onOpenChange={(o) => {
           if (!o) setRemoveTarget(null);
         }}
-        title={`Remove “${removeTarget?.name ?? ""}”?`}
-        description="The printer is removed from PrintNinja. Past jobs stay in History."
-        confirmLabel="Remove printer"
+        title={
+          removeTarget
+            ? t("printers.remove_title", { name: removeTarget.name })
+            : ""
+        }
+        description={t("printers.remove_body")}
+        confirmLabel={t("printers.remove_confirm")}
         destructive
         onConfirm={async () => {
           if (removeTarget) await removePrinter(removeTarget);
@@ -488,20 +607,22 @@ export function PrinterSetupPage() {
         <SheetContent className="flex w-full flex-col gap-0 overflow-y-auto p-0 sm:max-w-md">
           <DialogHeader className="border-b p-5 pr-12">
             <DialogTitle>
-              {editingId === null ? "Add printer" : "Edit printer"}
+              {editingId === null
+                ? t("printers.add_title")
+                : t("printers.edit_title")}
             </DialogTitle>
-            <DialogDescription>
-              Connect a printer, then send a test page from the list.
-            </DialogDescription>
+            <DialogDescription>{t("printers.add_hint")}</DialogDescription>
           </DialogHeader>
 
           <div className="flex-1 space-y-4 p-5">
             {systemPrinters.length > 0 && (
               <div className="rounded-md border p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <p className="text-xs font-medium">Found on this computer</p>
+                  <p className="text-xs font-medium">
+                    {t("printers.found_system")}
+                  </p>
                   <Button variant="ghost" size="sm" onClick={refreshSystem}>
-                    Rescan
+                    {t("printers.rescan")}
                   </Button>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -527,11 +648,11 @@ export function PrinterSetupPage() {
             )}
 
             <div className={field}>
-              <Label htmlFor="printer-name">Printer name</Label>
+              <Label htmlFor="printer-name">{t("printers.form_name")}</Label>
               <Input
                 id="printer-name"
                 value={form.name}
-                placeholder="Front desk"
+                placeholder={t("printers.form_name_example")}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, name: e.target.value }))
                 }
@@ -540,7 +661,9 @@ export function PrinterSetupPage() {
 
             <div className="grid grid-cols-2 gap-3">
               <div className={field}>
-                <Label htmlFor="printer-connection">Connection</Label>
+                <Label htmlFor="printer-connection">
+                  {t("printers.form_connection")}
+                </Label>
                 <Select
                   value={form.printer_type}
                   onValueChange={(v) =>
@@ -549,32 +672,37 @@ export function PrinterSetupPage() {
                 >
                   <SelectTrigger
                     id="printer-connection"
-                    aria-label="Connection"
+                    aria-label={t("printers.form_connection")}
                   >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {PRINTER_TYPES.map((x) => (
                       <SelectItem key={x.value} value={x.value}>
-                        {x.label}
+                        {t(x.labelKey)}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className={field}>
-                <Label htmlFor="printer-language">Language</Label>
+                <Label htmlFor="printer-language">
+                  {t("printers.form_language")}
+                </Label>
                 <Select
                   value={form.language}
                   onValueChange={(v) => setForm((f) => ({ ...f, language: v }))}
                 >
-                  <SelectTrigger id="printer-language" aria-label="Language">
+                  <SelectTrigger
+                    id="printer-language"
+                    aria-label={t("printers.form_language")}
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {LANGUAGES.map((x) => (
                       <SelectItem key={x.value} value={x.value}>
-                        {x.label}
+                        {t(x.labelKey)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -583,30 +711,32 @@ export function PrinterSetupPage() {
             </div>
 
             <div className={field}>
-              <Label htmlFor="printer-address">{addressLabel}</Label>
+              <Label htmlFor="printer-address">{t(addressLabelKey)}</Label>
               <Input
                 id="printer-address"
                 value={form.address}
                 aria-describedby={
-                  addressHint ? "printer-address-hint" : undefined
+                  addressHintKey ? "printer-address-hint" : undefined
                 }
                 onChange={(e) =>
                   setForm((f) => ({ ...f, address: e.target.value }))
                 }
               />
-              {addressHint && (
+              {addressHintKey && (
                 <p
                   id="printer-address-hint"
                   className="text-xs text-muted-foreground"
                 >
-                  {addressHint}
+                  {t(addressHintKey)}
                 </p>
               )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className={field}>
-                <Label htmlFor="printer-paper">Paper width (mm)</Label>
+                <Label htmlFor="printer-paper">
+                  {t("printers.paper_width_mm")}
+                </Label>
                 <Input
                   id="printer-paper"
                   type="number"
@@ -627,7 +757,7 @@ export function PrinterSetupPage() {
                 </datalist>
               </div>
               <div className={field}>
-                <Label htmlFor="printer-dpi">DPI</Label>
+                <Label htmlFor="printer-dpi">{t("printers.dpi")}</Label>
                 <Input
                   id="printer-dpi"
                   type="number"
@@ -652,7 +782,7 @@ export function PrinterSetupPage() {
             <Button variant="outline" onClick={() => setShowAdd(false)}>
               Cancel
             </Button>
-            <Button onClick={addPrinter}>Save printer</Button>
+            <Button onClick={addPrinter}>{t("printers.save_action")}</Button>
           </DialogFooter>
         </SheetContent>
       </Sheet>

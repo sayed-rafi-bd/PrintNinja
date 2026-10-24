@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -68,6 +69,7 @@ export function SetupChecklist({
 }) {
   const [status, setStatus] = useState<ChecklistInput>(EMPTY);
   const [loaded, setLoaded] = useState(false);
+  const { t } = useTranslation();
 
   useEffect(() => {
     let cancelled = false;
@@ -82,21 +84,24 @@ export function SetupChecklist({
     };
   }, []);
 
-  const items = buildChecklist(status);
+  const items = buildChecklist(status, t);
   const sum = summarize(items);
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Setup checklist</CardTitle>
+        <CardTitle className="text-base">{t("checklist.title")}</CardTitle>
         <p role="status" className="text-sm text-muted-foreground">
           {!loaded
-            ? "Checking this workstation…"
+            ? t("checklist.checking")
             : sum.unknown
-              ? "Some steps can't be checked in the browser preview. Open the desktop app to see their status."
+              ? t("checklist.browser_preview")
               : sum.complete
-                ? "All required steps are done."
-                : `${sum.requiredDone} of ${sum.requiredTotal} required steps done.`}
+                ? t("checklist.all_done")
+                : t("checklist.progress", {
+                    done: sum.requiredDone,
+                    total: sum.requiredTotal,
+                  })}
         </p>
       </CardHeader>
       <CardContent>
@@ -111,7 +116,7 @@ export function SetupChecklist({
                   {item.title}
                   {!item.required && (
                     <span className="ml-2 text-xs font-normal text-muted-foreground">
-                      Optional
+                      {t("checklist.optional")}
                     </span>
                   )}
                 </p>
@@ -122,14 +127,14 @@ export function SetupChecklist({
               </div>
               <div className="flex shrink-0 items-center gap-3">
                 {loaded && item.done === true && (
-                  <StatusBadge status="success" label="Done" />
+                  <StatusBadge status="success" label={t("checklist.done")} />
                 )}
                 {loaded && item.done === false && item.required && (
-                  <StatusBadge status="queued" label="To do" />
+                  <StatusBadge status="queued" label={t("checklist.todo")} />
                 )}
                 {loaded && item.done === null && (
                   <span className="text-xs text-muted-foreground">
-                    Not checked
+                    {t("checklist.unchecked")}
                   </span>
                 )}
                 {item.target.kind === "page" ? (

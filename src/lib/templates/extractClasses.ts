@@ -26,7 +26,8 @@ export interface ClassWarning {
   line: number;
   /** The fragment as written, e.g. `bg-{{color}}-500`. */
   snippet: string;
-  message: string;
+  /** i18n key for the explanation, rendered by the caller with t(). */
+  messageKey: string;
 }
 
 export interface ClassScan {
@@ -136,11 +137,7 @@ function lineOf(html: string, index: number): number {
   return line;
 }
 
-const GLUE_MESSAGE =
-  "Class names built from data at render time are not compiled. Write each " +
-  "full class name in every branch, e.g. " +
-  "{{#if x}}bg-red-600{{else}}bg-green-600{{/if}}, or use a CSS variable " +
-  'like style="--c:{{color}}" class="bg-[var(--c)]".';
+const GLUE_MESSAGE_KEY = "designer.glue_message";
 
 export function extractClasses(html: string): ClassScan {
   const candidates = new Set<string>();
@@ -154,7 +151,7 @@ export function extractClasses(html: string): ClassScan {
       index,
       line: lineOf(html, index),
       snippet,
-      message: GLUE_MESSAGE,
+      messageKey: GLUE_MESSAGE_KEY,
     });
   };
 
