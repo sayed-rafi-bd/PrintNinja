@@ -1,276 +1,191 @@
 # Print Architecture
 
-How data becomes dots on paper in PrintNinja: from the Print page (or API,
-deep link, reprint) through template rendering, raster/PDF generation, and
-delivery to the printer over IPP, raw TCP, the OS spooler, USB, or Bluetooth.
+How data becomes dots on paper in PrintNinja. This document explains the
+ideas; it deliberately contains no code and no file references.
 
 ## The pipeline at a glance
 
+Printing is a chain of transformations. Raw business data goes in one end,
+printer-specific bytes come out the other, and every step in between exists
+to answer one question: what should each dot on the paper be?
+
 ```
-Data source ──┐
-              ├─► Template render (Handlebars + helpers) ─► Layout (@page, fit, margins)
-Template ─────┘                                                        │
-                                                                       ▼
-                                              ┌─ PDF language ──► html_to_pdf (Edge/Chromium)
-                                              │                          │
-                                              └─ label languages ─► html_to_raster (screenshot)
-                                                                         │ threshold 128
-                                                                         ▼
-                                                              encode_for_language
-                                              (ESC/POS GSv0 · TSPL BITMAP · ZPL ^GFA · CPCL · bare dots)
-                                                                         │
-                                                                         ▼
-                                              Transport: IPP / Raw TCP / System spooler / USB / BT
-                                                                         │
-                                                                         ▼
-                                                              print_jobs row → success|failed
+Data  +  Template  →  Pages  →  Layout  →  Image or PDF  →  Printer language  →  Wire  →  Paper
 ```
 
-Every stage is timed into `StageTimings`
-(`fetch, template, layout, render, send, history, total_ms`), returned to the
-caller and stored as `timings_json` on the job row.
+Each stage is timed, so a slow print can be traced to the exact step that
+caused it — fetching data, rendering the template, laying out pages,
+producing the image, sending it, or recording history.
 
-## 1. Entry points
+## 1. Where a print can start
 
-All entries converge on one backend function,
-`run_print_with()` in `src-tauri/src/commands/print.rs:390`.
+A print can be triggered from many places — the Print page, a test button in
+the Designer, the local REST API, a deep link from another app, or by
+reprinting an old job from history. But all of them converge on a single
+pipeline. This is deliberate: there is exactly one place where pages are
+rendered and sent, so a fix or improvement applies to every entry point at
+once.
 
-| Entry | What it does |
-|---|---|
-| Print page (`src/pages/Print.tsx`) | Collects printer, template, data source, page geometry, copies; calls `print_html`. |
-| Designer test print | Same `print_html` command with `source: "test"` and inline mock data. |
-| Local REST API (`POST /v1/print`, `src-tauri/src/api/routes.rs:164`) | Builds the same `PrintRequest` with `source: "api"`; honors `Idempotency-Key`. |
-| Deep link (`printninja://print?...`) | Same request with `source: "deeplink"`; untrusted sources pause at a confirmation sheet. |
-| Reprint (`history.rs:54`) / Retry (`history.rs:67`) | Clones a job row as `queued` (reprint) or re-queues `failed`/`cancelled` rows (retry), then wakes the background worker. Batch/API prints go through `batches`. |
+Each job remembers how it entered the system: through the UI, the API, a
+deep link, a multi-row batch run, or as a test. Deep links from untrusted
+sources pause at a confirmation sheet before anything renders, and every
+reprint of a physical page asks for confirmation first — printing costs paper
+and toner, so destructive actions are never one click.
 
-## 2. Frontend: gathering data and previewing
+## 2. Gathering the data and previewing
 
-State lives in `usePrintStore` (`src/lib/store/printStore.ts:18`):
-printer, template, `dataUrl` + `httpMethod` (GET/POST), orientation, four
-margins, `fitMode` (`actual | fit-width | fit-page | shrink | fill`), copies,
-`records` (clamped 1–500), test-data toggle, page range, grayscale.
+A print needs three things: a printer, a template, and data.
 
-**Data resolution** (`src/pages/Print.tsx:105`):
+Data arrives in one of two ways. In test mode the app uses built-in mock
+data shaped like a small shop — a store, a customer, an order with line
+items — so layouts can be designed without a backend. In a real print the
+user gives a data URL; the app fetches it (plain GET, or POST with an empty
+JSON body) and the result becomes the data. If the fetch fails, the preview
+falls back to the mock data and says so, rather than showing a blank page.
 
-- Test-data mode → `DEFAULT_MOCK_DATA`
-  (`src/lib/templates/defaultTemplate.ts:50`: a shop/order/customer object).
-- Otherwise the `dataUrl` is fetched client-side (`GET`, or `POST` with body
-  `"{}"`) for the preview; on failure the preview falls back to mock data.
-- Arrays print one record per page; a single object repeats for `records` pages
-  (preview shows the first 10).
+The preview is a real render, not a mock-up: the same template engine that
+the backend uses runs in the browser, one record per page, so what you see
+is what prints. A list of records prints one page each; a single object
+repeats for as many copies or records as requested, with the preview capped
+to the first few pages so a thousand-record run doesn't freeze the screen.
 
-**Template rendering** (`src/lib/render/renderTemplate.ts:114`):
+Templates are HTML with placeholders. A template engine merges each data
+record into the HTML, producing finished pages. Small helpers format values
+— currency, dates, upper/lower case, padded numbers — and two special
+helpers draw barcodes and QR codes as inline vector graphics, either from a
+fixed value or from a data field (so every label and every CSV row can carry
+its own code). Styling comes in three layers: a base stylesheet, compiled
+utility classes detected in the template, and the author's own CSS.
 
-1. `Handlebars.compile(html)(record)` per record, pages joined with
-   `break-before: page`; render errors become an escaped `<pre>` instead of a
-   crash. Output is sanitized (scripts/event handlers stripped) and shown in a
-   sandboxed `iframe srcdoc`.
-2. Helpers mirror the backend one-for-one: `currency, date, upper, lower,
-   number, padLeft, barcode, qrcode` (`renderTemplate.ts:20`).
-3. Barcodes render to inline SVG via bwip-js
-   (`src/lib/utils/barcode.ts:35`); `PRINT_SYMBOLOGIES` covers code128, code39,
-   code93, ean13, ean8, upca, itf, codabar. Fixed values and data-field
-   references (`{{barcode "code128" order.id}}`) both work.
-4. CSS: Tailwind classes used by the template are compiled ahead of time
-   (`compileTemplateCss`, memoized) and layered as base + compiled + author CSS
-   (`src/lib/templates/templateCss.ts:46`).
+When the user presses Print, the app sends the printer name, the template,
+the page geometry (size, orientation, margins, fit mode), the copy count,
+and either the data itself (test mode) or the data URL (real prints — the
+backend re-fetches it, so the preview fetch is never trusted for output).
 
-**Submit** (`src/pages/Print.tsx:218` → `agent("print_html")`): sends a
-`PrintHtmlReq` (`src/lib/agent/types.ts:137`) with printer name, template id,
-page size, orientation, copies, records, margins, fit mode, page range,
-grayscale, plus **either** inline `data` (test mode) **or** `data_url` +
-`http_method` (real prints — the backend re-fetches, so the preview fetch is
-never trusted for output).
+## 3. The backend pipeline
 
-## 3. Backend: `run_stages` (`src-tauri/src/commands/print.rs:597`)
+The backend works through the same stages for every job:
 
-1. **Resolve content** (`:531`): loads the template row from SQLite
-   (`html, css, compiled_css, page size`) and rebuilds the CSS cascade; raw-HTML
-   API prints default to 210×297 mm.
-2. **Begin job** (`:1073`): INSERTs a `print_jobs` row in `printing` state with
-   `settings_json`, `data_json`, `started_at`. The `idempotency_key` column is
-   UNIQUE — a duplicate key returns the existing job id instead of printing
+1. **Resolve content.** Load the template and rebuild its full stylesheet
+   from the three layers. Raw HTML sent via the API defaults to A4.
+2. **Open a job record.** A row is written to the jobs database in the
+   *printing* state, stamped with the settings, the data, and the start
+   time. It carries an idempotency key stored under a uniqueness constraint:
+   retrying the same request returns the existing job instead of printing
    twice.
-3. **Fetch** (`:629`): server-side `DataFetcher` pulls `data_url` (15 s
-   timeout, 5 MB cap); allowed domains and private-IP blocking apply.
-4. **Template** (`:673`, `render/handlebars.rs`): the Rust engine renders one
-   page per record (or one object × `records`), same helper set as the preview
-   so WYSIWYG holds.
-5. **Layout** (`:223`): injects `@page { size; margin }`, the fit-mode scaling,
-   `print-color-adjust: exact`, and optional grayscale.
-6. **Render dispatch** (`:779`): looks up the printer, parses its language
-   (default 203 dpi, clamped 1–1200):
-   - `Pdf` → `PdfRenderer::html_to_pdf` (`render/mod.rs:49`) via a persistent
-     Edge CDP session on Windows (`render/cdp.rs`, warmed up at startup) or
-     one-shot headless Edge; Chromium (`PRINTNINJA_CHROMIUM_BIN`,
-     `chromium/chrome/edge` candidates, `--no-sandbox` retry for root) on
-     Linux. Other OSes report “no renderer”.
-   - Label languages → `html_to_raster` (`render/mod.rs:190`): headless
-     `--screenshot` at `dots_for_mm(size, dpi)`, then `png_to_raster`
-     (luminance threshold 128; optional Floyd–Steinberg dither) into packed
-     `RasterImage` dots (`render/raster.rs`).
-7. **Encode** (`transport/mod.rs:54`): raster → printer language —
-   ESC/POS (`GS v 0`), TSPL (`SIZE/GAP/BITMAP`), ZPL (`^XA…^GFA`), CPCL
-   (`!…PRINT`), or bare dots for `raster`.
-8. **Send** (`:880`): takes the per-printer queue permit and calls
-   `TransportRegistry::send_to(type, …)` once per copy:
-   - **IPP** (`transport/ipp.rs`): bare addresses default to `:631/ipp/print`;
-     sends an RFC 8011 Print-Job (`application/ipp`, with `copies`), 30 s
-     timeout, then parses the response status, `job-state` (3/4/5/9 = done)
-     and `printer-state-reasons` for the error message.
-   - **Raw TCP** (`transport/raw_tcp.rs`): `host:port` (default 9100), 10 s
-     connect / 30 s send; optional pre-send probe per dialect (ESC/POS
-     `DLE EOT`, ZPL `~HS`, TSPL `ESC !?`), throttled and skipped for PDF/
-     raster/CPCL.
-   - **System** (`transport/cups.rs`, `windows_spooler.rs`): CUPS
-     `CUPS-Get-Printers` over IPP `localhost:631` on Linux; Win32
-     `OpenPrinter → StartDocPrinter(RAW) → WritePrinter → EndDoc` on Windows.
-   - **USB** (`transport/windows_usb.rs`, Windows): rusb bulk write by
-     VID/PID, spooler fallback. **Bluetooth** (`windows_bluetooth.rs`,
-     Windows): serial-port (COM) write, spooler fallback. Off Windows these
-     report “not supported on this platform”.
-9. **Close** (`:1161`): UPDATEs the row to `success`/`failed` with the error,
-   redacted `rendered_html`, `finished_at`/`duration_ms` — guarded by
-   `WHERE status='printing'` so a cancelled job is never resurrected —
-   bumps metrics and persists `timings_json`.
+3. **Fetch the data.** The backend pulls the data URL itself, with a timeout
+   and a size cap. Domain allow-lists and private-network blocking apply, so
+   a template can't be tricked into reading internal services.
+4. **Render the template.** The backend engine merges data into pages exactly
+   as the preview did — same placeholders, same helpers — so the preview
+   guarantee holds.
+5. **Lay out the pages.** Page size, margins, scaling behavior (actual size,
+   fit to width, fit to page, fill, shrink), exact color reproduction, and an
+   optional grayscale conversion are applied.
+6. **Produce output.** Either a PDF document or a bitmap image, depending on
+   the printer's language (see §5).
+7. **Send.** The finished bytes go to the printer through the transport
+   matching its type (see §4), once per copy, holding that printer's turn so
+   two jobs never interleave on the same machine.
+8. **Close the job.** The row flips to *success* or *failed* with the error,
+   the rendered output (redacted where sensitive), and the finish time. The
+   update only applies while the job is still *printing*, so a cancelled job
+   can never be resurrected as successful.
 
-## 4. Printers
+## 4. How the bytes reach the printer
 
-Configured in PrinterSetup and stored in the `printers` table (`type` /
-`language` CHECK-constrained in `db/mod.rs:744`); the frontend mirrors the
-enums in `src/lib/printerSchema.ts:9`.
+Printers are configured with a type (how to reach them) and a language (what
+they understand):
 
-| Type | Address | Languages | Platform |
-|---|---|---|---|
-| `ipp` | `http(s)://host[:port]/…` | pdf | all |
-| `raw_tcp` | `host:port` (default 9100) | escpos, tspl, zpl, cpcl, raster | all |
-| `usb` | VID/PID | label languages | Windows (rusb) |
-| `bluetooth` | COM port | label languages | Windows (serial) |
-| `system` | OS queue name | pdf | Windows spooler / Linux CUPS |
+- **Network printers** are reached over the office protocol IPP
+  (Print-Job requests, default port 631) or over a raw TCP socket (default
+  port 9100 — bytes in, paper out). Before sending, the app can probe the
+  printer in its own dialect to catch an offline or faulted machine early.
+- **System printers** go through the operating system: the Windows spooler on
+  Windows, CUPS on Linux. The app hands over finished bytes and lets the OS
+  queue them.
+- **USB and Bluetooth label printers** are spoken to directly on Windows;
+  elsewhere the app reports them as unsupported instead of failing silently.
 
-Discovery: `enumerate_system_printers` lists OS queues (CUPS on Linux,
-`EnumPrintersA` on Windows); `test_printer` sends a probe page. `Test print`
-on the Print page (`spike_test_print`) exercises the whole path with mock
-data.
+Discovery lists the machine's OS queues; a test print runs the entire
+pipeline end to end with mock data to prove a new printer works.
 
 ## 5. Printing across printer languages
 
-The printer row's `language` decides what bytes leave the machine
-(`transport/mod.rs:37`; unknown printer → `Pdf`). DPI defaults to 203 — the
-common thermal head — clamped 1–1200. There are two fundamentally different
-paths (`commands/print.rs:795`).
+The printer's language decides what the backend produces. There are two
+fundamentally different paths.
 
-**PDF path** — for `Pdf` printers (office printers over IPP, OS queues).
-`PdfRenderer` renders at the real page size in millimetres and the bytes go
-out untouched as `application/pdf`: no screenshot, no encoding. IPP
-advertises the MIME as the document format; the Win32 spooler and CUPS pass
-it through as RAW/a PDF queue job.
+**The PDF path** is for office printers: the page is rendered at its real
+size in millimetres and the resulting document is sent untouched. No
+screenshot, no translation — the printer's own PDF interpreter does the
+work.
 
-**Raster path** — for every label/receipt language. The page is screenshotted
-at exactly `dots_for_mm(size, dpi)` pixels, so 1 CSS px = 1 printer dot and
-nothing is resampled on the way to the head. Luminance threshold 128 packs it
-into a 1-bit `RasterImage` (rows padded to whole bytes; optional
-Floyd–Steinberg dither in `render/raster.rs`). `encode_for_language`
-(`transport/mod.rs:54`) then wraps those dots per language, all sent as
-`application/octet-stream`:
+**The bitmap path** is for receipt and label printers, which understand small
+command languages rather than documents. The page is photographed at exactly
+the printer's dot density — one screen pixel per printer dot, so nothing is
+resampled or blurred — reduced to pure black and white, and packed into bits.
+Those bits are then wrapped in the printer's dialect:
 
-| Language | Typical printer | Bytes on the wire |
-|---|---|---|
-| `Escpos` | Receipt printers | `ESC @` init + `GS v 0` (mode: normal) raster graphics (`transport/escpos.rs:6,33`) |
-| `Tspl` | TSC / Godex label printers | `SIZE w mm,h mm` · `GAP 2 mm,0 mm` (repo default — the printers table has no gap column) · `DIRECTION 1` · `REFERENCE 0,0` · `CLS` · `BITMAP 0,0,row_bytes,height,0` + raw dots · `PRINT 1` |
-| `Zpl` | Zebra | `^XA` `^MMT` `^PR6` `^FO0,0^GFA,total,total,row_bytes,` + dots as **hex ASCII** (doubles the payload vs raw) + `^FS` `^XZ` |
-| `Cpcl` | Mobile / Comtec printers | `! 0 200 200 height 1` · `CG width_dots row_bytes 0 0` · one hex-ASCII line per row · `PRINT` |
-| `Raster` | Spoolers / bridges that bitmap themselves | Bare packed dots, no command language at all |
+- **Receipt printers** get an initialize command followed by a raster-graphics
+  command carrying the raw bitmap.
+- **TSPL label printers** get a short script: label size, gap size, direction
+  and origin, a clear command, the bitmap, and a print command.
+- **Zebra printers** get a format frame with the bitmap encoded as
+  hexadecimal text (readable, but roughly twice the size of raw bytes).
+- **Mobile CPCL printers** get a compact header, one hex line per row, and a
+  print command.
+- **Bare-bitmap devices** (some spoolers and bridges) receive just the packed
+  dots with no command language at all.
 
-Notes:
-
-- Label dimensions in the TSPL/ZPL/CPCL headers come from the template's
-  page size (`w_mm`/`h_mm` flow from the request into the encoder), so a
-  wrong page size in Designer mis-sizes the label even when the artwork looks
-  right in preview.
-- Hex-ASCII encodings (ZPL, CPCL) are ~2× the raw bitmap; raw-binary ones
-  (ESC/POS, TSPL) send the dots as-is.
-- Copies are a send loop, not a language feature: the transport sends the
-  finished payload once per copy (`RenderedJob { copies: 1 }` per send), and
-  IPP additionally declares `copies` in the Print-Job attributes.
+Two details matter in practice. First, the label dimensions in those headers
+come from the template's page size — a wrong page size in the Designer
+produces a mis-sized label even when the preview looks perfect. Second,
+copies are a send loop, not a language feature: the finished payload is
+transmitted once per copy.
 
 ## 6. Printing across operating systems
 
-The request pipeline (§3) is identical everywhere; what changes per OS is
-how pages are rendered to bytes and which transports exist.
+The pipeline is identical on every OS; what changes is how pages become
+bytes and which transports exist.
 
-| | Windows | Linux | Android | macOS |
-|---|---|---|---|---|
-| PDF render | Persistent Edge CDP session (warmed up at startup, `render/cdp.rs`), one-shot headless Edge fallback (`render/edge.rs`) | Headless Chromium (`chromium`/`chrome`/`edge` candidates, `PRINTNINJA_CHROMIUM_BIN` override; `--no-sandbox` retry when running as root) | System WebView via the `android-print` plugin (`htmlToPdf`) | No renderer — reports “no renderer” |
-| Raster render | Headless Edge screenshot | Headless Chromium screenshot | Same WebView path | Unsupported |
-| IPP / Raw TCP | ✅ | ✅ | ✅ (printers found via `NsdManager` `_ipp._tcp` discovery) | — |
-| System spooler | ✅ Win32 spooler (`OpenPrinter → WritePrinter`, RAW) | ✅ CUPS (`CUPS-Get-Printers` over IPP `localhost:631`) | — (system printing goes through the plugin) | — |
-| USB / Bluetooth | ✅ rusb bulk write / COM serial (spooler fallback) | ❌ reports “not supported on this platform” | ✅ USB host API enumeration | — |
-| Printer discovery | `EnumPrintersA` | CUPS printer list | mDNS + USB host API | — |
-
-macOS is not a print target: rendering errors out and every transport
-constructor returns `None`, so sends fail loudly instead of silently.
-
-On Android the queue additionally survives the app being swiped away: the
-`PrintNinjaService` background service (see Settings → Background) keeps the
-worker draining, and the app asks for a battery-optimization exemption so
-Doze doesn't defer prints.
+- **Windows** renders PDFs through the built-in browser engine (kept warm in
+  the background for speed) and reaches printers via network protocols, the
+  system spooler, USB, or Bluetooth serial.
+- **Linux** renders through headless Chromium and reaches printers via
+  network protocols or CUPS. USB and Bluetooth label printers are not
+  supported — the app says so plainly.
+- **Android** renders through the system WebView, discovers network printers
+  over local-network discovery and USB printers through the USB host API. A
+  background service keeps the print queue draining even after the app is
+  swiped away, and the app requests exemption from battery optimization so
+  the system doesn't defer prints.
+- **macOS** is not a print target: rendering and delivery both report
+  unsupported rather than failing mysteriously.
 
 ## 7. Printing across app modes
 
-| Mode | What works | What doesn't |
-|---|---|---|
-| Desktop app, online | Everything: local prints, share sync, remote `data_url` fetches, update checks. | — |
-| Desktop app, offline | Local printing works fully — the backend, templates, and printers live on the machine. | Remote `data_url`s, share sync, release checks. (The “Working offline” banner refers to the *share server*, not printing.) |
-| Web / browser preview | Client-side preview renders (Handlebars + helpers run in the browser); settings fall back to localStorage. | No printing: `agent()` calls need the Tauri backend, so submit fails. ApiExplorer says so explicitly. |
-| Test print (`source: "test"`, `is_test`) | Full pipeline with mock data (`spike_test_print`, Designer test print, Print-page test toggle). | Test jobs are flagged and can be hidden in History (`Hide test`). |
+- **Desktop app, online.** Everything works: local prints, shared templates,
+  remote data, update checks.
+- **Desktop app, offline.** Local printing works completely — the engine,
+  templates, and printers all live on the machine. Only remote data sources,
+  cloud sync, and release checks degrade. (The "working offline" banner
+  refers to the sharing service, not to printing.)
+- **Web preview.** The design surface and preview render in the browser, but
+  nothing can print: there is no local backend to receive the job.
+- **Test vs real.** Test prints run the full pipeline on mock data and are
+  flagged in history, where they can be hidden to keep the log clean.
 
-Within a real print, `source` records *how* the job entered (`ui`, `api`,
-`deeplink`, `batch`, `test`). Batch runs stamp `batch_id`/`record_index` so
-one multi-row submission is traceable per row. Deep links from untrusted
-sources pause at a confirmation sheet before anything renders.
+## 8. Queue, memory, and history
 
-## 8. Queue, worker, and history
+Printers print one thing at a time, so each printer has its own turn-taking
+lock and every copy is sent individually — jobs to the same machine never
+interleave. A background worker drains queued jobs a few at a time; if the
+app crashes mid-print, rows stuck in *printing* are marked failed on the next
+start, then queued rows resume. Cancelling a job is terminal: the close-out
+guard guarantees a cancelled job can never flip to successful later.
 
-- `PrintQueue` (`worker.rs` + `print.rs:880`): per-printer permits serialize
-  sends; each copy is sent individually.
-- Background `Worker::drain` (`worker.rs:161`, ≤4 in flight, 5 s sweep):
-  on startup, rows stuck in `printing` become `failed` (crash recovery);
-  then it atomically claims `queued → printing` rows and replays them through
-  `run_stages` (reusing stored `rendered_html` when present, else re-rendering
-  from the row).
-- Cancel sets `cancelled`; the `close_job` guard keeps terminal states
-  terminal.
-- `print_jobs` (`db/schema.sql:55`): full settings/data/error/duration/timings
-  per job, indexed by status, printer, template, batch, creation time.
-- Retention (`history.rs:116`): `purge_old_jobs` enforces `retention_days` /
-  `max_records` from Settings at startup and daily.
-
-## 9. Android specifics
-
-The Android-only pieces behind the rows above: PDF rendering goes through the
-Android WebView (`htmlToPdf` in the `android-print` plugin), USB discovery
-through the USB host API, and the service keeps the queue alive after the app
-is swiped away (see the Background section in Settings). Off
-Windows/Linux the desktop raster renderer and USB/Bluetooth transports are
-stubs that report “unsupported” instead of failing silently.
-
-## Key files
-
-| Area | File |
-|---|---|
-| Print page + submit | `src/pages/Print.tsx` |
-| Request/response shapes | `src/lib/agent/types.ts:79`, `:137` |
-| Command surface | `src/lib/agent/commands.ts:123`, `:172` |
-| Preview renderer + helpers | `src/lib/render/renderTemplate.ts` |
-| Barcodes | `src/lib/utils/barcode.ts` |
-| CSS compile | `src/lib/templates/compileTemplateCss.ts`, `extractClasses.ts` |
-| Job history UI | `src/pages/History.tsx`, `src/lib/store/historyStore.ts` |
-| Print command + stages | `src-tauri/src/commands/print.rs` |
-| History commands | `src-tauri/src/commands/history.rs` |
-| Rust template engine | `src-tauri/src/render/handlebars.rs` |
-| PDF/raster renderers | `src-tauri/src/render/mod.rs`, `cdp.rs`, `edge.rs`, `raster.rs` |
-| Transports | `src-tauri/src/transport/` (`ipp.rs`, `raw_tcp.rs`, `cups.rs`, `windows_*.rs`, `label_langs/`) |
-| Queue worker | `src-tauri/src/worker.rs` |
-| Schema | `src-tauri/src/db/schema.sql` |
-| REST print route | `src-tauri/src/api/routes.rs:164` |
+Every job is remembered: settings, data, outcome, error, duration, and
+per-stage timings, indexed for the history views. Old jobs are purged
+automatically under the retention limits from Settings, and history can be
+exported as a spreadsheet. Reprinting clones an old row and wakes the
+worker; retrying re-queues only jobs that ended in failure or cancellation.
