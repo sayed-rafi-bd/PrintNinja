@@ -68,6 +68,28 @@
   }
 }
 
+@layer utilities {
+  /* 100dvh tracks the collapsing mobile URL bar; 100vh is the fallback for
+     browsers without dynamic viewport units. Used for the app shell and the
+     full-screen gates so the bottom nav never hides under browser chrome. */
+  .h-dvh-safe {
+    height: 100vh;
+  }
+  @supports (height: 100dvh) {
+    .h-dvh-safe {
+      height: 100dvh;
+    }
+  }
+  .min-h-dvh-safe {
+    min-height: 100vh;
+  }
+  @supports (min-height: 100dvh) {
+    .min-h-dvh-safe {
+      min-height: 100dvh;
+    }
+  }
+}
+
 @layer base {
   * {
     @apply border-border;

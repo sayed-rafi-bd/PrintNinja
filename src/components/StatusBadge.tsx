@@ -68,10 +68,20 @@ interface StatusBadgeProps {
   status: StatusKey;
   /** Overrides the translated label, for example "Yours" on a published template. */
   label?: string;
+  /**
+   * Phone header mode: keeps the icon (and its tone) at every width but only
+   * shows the word from `sm` up, so the top bar fits on a 360–390px screen.
+   */
+  compact?: boolean;
   className?: string;
 }
 
-export function StatusBadge({ status, label, className }: StatusBadgeProps) {
+export function StatusBadge({
+  status,
+  label,
+  compact = false,
+  className,
+}: StatusBadgeProps) {
   const { t } = useTranslation();
   const def = STATUS[status] as {
     tone: StatusTone;
@@ -80,11 +90,13 @@ export function StatusBadge({ status, label, className }: StatusBadgeProps) {
     spin?: boolean;
   };
   const Icon = def.icon;
+  const text = label ?? t(`status.${status}`, { defaultValue: def.label });
   return (
     <span
       data-status={status}
       className={cn(
         "inline-flex items-center gap-1 whitespace-nowrap rounded-sm px-2 py-0.5 text-xs font-medium",
+        compact && "px-1.5 sm:px-2",
         TONE_CLASS[def.tone],
         className,
       )}
@@ -96,7 +108,9 @@ export function StatusBadge({ status, label, className }: StatusBadgeProps) {
           "spin" in def && def.spin && "motion-safe:animate-spin",
         )}
       />
-      {label ?? t(`status.${status}`, { defaultValue: def.label })}
+      {/* Compact keeps the icon at every width and only shows the word from
+          sm up; the default renders the bare text node as before. */}
+      {compact ? <span className="hidden sm:inline">{text}</span> : text}
     </span>
   );
 }

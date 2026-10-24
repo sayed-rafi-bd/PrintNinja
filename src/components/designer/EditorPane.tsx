@@ -176,7 +176,7 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
         <div className="flex shrink-0 items-center justify-between gap-2 border-b px-3 py-1.5">
           <TabsList
             aria-label="Editor files"
-            className="h-8 w-max gap-0.5 p-0.5"
+            className="min-h-8 w-max gap-0.5 p-0.5"
           >
             <TabsTrigger value="html" className="h-7 px-3 text-xs">
               HTML

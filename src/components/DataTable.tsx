@@ -187,7 +187,7 @@ export function DataTable<T>({
                         <button
                           type="button"
                           onClick={header.column.getToggleSortingHandler()}
-                          className="inline-flex min-h-9 items-center gap-1 rounded-sm hover:text-foreground"
+                          className="inline-flex min-h-9 items-center gap-1 rounded-sm hover:text-foreground [@media(pointer:coarse)]:min-h-11"
                           aria-label={t("common.sort_by", {
                             column:
                               typeof header.column.columnDef.header === "string"

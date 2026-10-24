@@ -18,6 +18,7 @@ import { Printer, Zap, CheckCircle2, XCircle, ChevronDown } from "lucide-react";
 import { TimingBreakdown } from "@/components/TimingBreakdown";
 import { cn } from "@/lib/utils";
 import { useSystemPrinters } from "@/lib/hooks/useSystemPrinters";
+import { PHONE_QUERY, useMediaQuery } from "@/lib/hooks/useMediaQuery";
 import { toast } from "sonner";
 import { usePrintStore } from "@/lib/store/printStore";
 import { DEFAULT_MOCK_DATA } from "@/lib/templates/defaultTemplate";
@@ -41,6 +42,9 @@ export function PrintPage() {
   // every render of the same template.
   const cssBackfilled = useRef<Set<number>>(new Set());
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // Phone-only layout: the sticky action bar below. Desktop keeps the single
+  // in-card Print button (jsdom has no matchMedia, so tests see that one too).
+  const isPhone = useMediaQuery(PHONE_QUERY);
 
   // Fetch printers + templates fresh every time (mount, sync pull,
   // window focus) so a height saved in Designer is visible here.
@@ -301,6 +305,80 @@ export function PrintPage() {
             : "";
   const field = "space-y-1.5";
 
+  // Data URL / Method / Copies / Pages live in the main card for live-data
+  // jobs, and move into Advanced options while "Use test data" is on — the
+  // operator changing repeat jobs never touches them (PLAN.md phase 1).
+  const dataFields = (
+    <>
+      <div className={field}>
+        <Label htmlFor="data-url">{t("print.data_url")}</Label>
+        <Input
+          id="data-url"
+          placeholder="https://api.example.com/orders/123"
+          value={store.dataUrl}
+          onChange={(e) => store.setDataUrl(e.target.value)}
+          disabled={store.useTestData}
+        />
+        <div className="flex items-center gap-2 pt-1">
+          <Label
+            htmlFor="http-method"
+            className="text-xs text-muted-foreground"
+          >
+            Method
+          </Label>
+          <Select
+            value={store.httpMethod}
+            onValueChange={(v: "GET" | "POST") => store.setHttpMethod(v)}
+            disabled={store.useTestData}
+          >
+            <SelectTrigger
+              id="http-method"
+              aria-label="HTTP method"
+              className="h-7 w-[5.5rem] text-xs"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="GET">GET</SelectItem>
+              <SelectItem value="POST">POST</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="grid max-w-[16rem] grid-cols-2 gap-3">
+        <div className={field}>
+          <Label htmlFor="copies">{t("print.copies")}</Label>
+          <Input
+            id="copies"
+            type="number"
+            min="1"
+            value={store.copies}
+            onChange={(e) =>
+              store.setCopies(
+                Math.max(1, Math.floor(Number(e.target.value) || 1)),
+              )
+            }
+          />
+        </div>
+        <div className={field}>
+          <Label htmlFor="pages">Pages</Label>
+          <Input
+            id="pages"
+            type="number"
+            min="1"
+            max="500"
+            value={store.records}
+            onChange={(e) => store.setRecords(Number(e.target.value))}
+          />
+        </div>
+      </div>
+      <p className="-mt-2 text-xs text-muted-foreground">
+        Pages repeats one object per page (an array prints its own length);
+        Copies re-sends the whole job.
+      </p>
+    </>
+  );
+
   return (
     <div className="space-y-4">
       <PageHeader title={t("print.title")} description={t("pages.print")}>
@@ -434,109 +512,46 @@ export function PrintPage() {
                 </Select>
               </div>
 
-              <div className={field}>
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="data-url">{t("print.data_url")}</Label>
-                  <div className="flex items-center gap-2">
-                    <Label
-                      htmlFor="test-data"
-                      className="text-xs font-normal text-muted-foreground"
-                    >
-                      Use test data
-                    </Label>
-                    <Switch
-                      id="test-data"
-                      checked={store.useTestData}
-                      onCheckedChange={store.setUseTestData}
-                    />
-                  </div>
-                </div>
-                <Input
-                  id="data-url"
-                  placeholder="https://api.example.com/orders/123"
-                  value={store.dataUrl}
-                  onChange={(e) => store.setDataUrl(e.target.value)}
-                  disabled={store.useTestData}
+              {/* "Use test data" stays put; the fields it replaces move into
+                  Advanced options so the first screen stays short (PLAN.md 1). */}
+              <div className="flex items-center justify-between">
+                <Label htmlFor="test-data" className="font-normal">
+                  Use test data
+                </Label>
+                <Switch
+                  id="test-data"
+                  checked={store.useTestData}
+                  onCheckedChange={store.setUseTestData}
                 />
-                <div className="flex items-center gap-2 pt-1">
-                  <Label
-                    htmlFor="http-method"
-                    className="text-xs text-muted-foreground"
-                  >
-                    Method
-                  </Label>
-                  <Select
-                    value={store.httpMethod}
-                    onValueChange={(v: "GET" | "POST") =>
-                      store.setHttpMethod(v)
-                    }
-                    disabled={store.useTestData}
-                  >
-                    <SelectTrigger
-                      id="http-method"
-                      aria-label="HTTP method"
-                      className="h-7 w-[5.5rem] text-xs"
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="GET">GET</SelectItem>
-                      <SelectItem value="POST">POST</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {store.useTestData && (
-                  <p className="text-xs text-muted-foreground">
-                    Sample data: {DEFAULT_MOCK_DATA.store.name}, order #
-                    {DEFAULT_MOCK_DATA.order.id}
-                  </p>
-                )}
               </div>
-
-              <div className="grid max-w-[16rem] grid-cols-2 gap-3">
-                <div className={field}>
-                  <Label htmlFor="copies">{t("print.copies")}</Label>
-                  <Input
-                    id="copies"
-                    type="number"
-                    min="1"
-                    value={store.copies}
-                    onChange={(e) =>
-                      store.setCopies(
-                        Math.max(1, Math.floor(Number(e.target.value) || 1)),
-                      )
-                    }
-                  />
-                </div>
-                <div className={field}>
-                  <Label htmlFor="pages">Pages</Label>
-                  <Input
-                    id="pages"
-                    type="number"
-                    min="1"
-                    max="500"
-                    value={store.records}
-                    onChange={(e) => store.setRecords(Number(e.target.value))}
-                  />
-                </div>
-              </div>
-              <p className="-mt-2 text-xs text-muted-foreground">
-                Pages repeats one object per page (an array prints its own
-                length); Copies re-sends the whole job.
-              </p>
+              {store.useTestData && (
+                <p className="text-xs text-muted-foreground">
+                  Sample data: {DEFAULT_MOCK_DATA.store.name}, order #
+                  {DEFAULT_MOCK_DATA.order.id}. Data URL, method, copies and
+                  pages are under Advanced options.
+                </p>
+              )}
+              {!store.useTestData && dataFields}
 
               <div className="space-y-2 pt-1">
-                <Button
-                  size="lg"
-                  className="w-full"
-                  onClick={handlePrint}
-                  disabled={!canPrint}
-                  title={blocker || undefined}
-                  aria-describedby={blocker ? "print-blocker" : undefined}
-                >
-                  <Printer className="h-5 w-5" aria-hidden="true" />
-                  {store.status === "printing" ? "Printing…" : t("print.print")}
-                </Button>
+                {/* Phone: the sticky bar owns the Print button (below). Two
+                    buttons with the same name would break the tests' single
+                    "Print" lookup, so this one is desktop/tablet only. */}
+                {!isPhone && (
+                  <Button
+                    size="lg"
+                    className="w-full"
+                    onClick={handlePrint}
+                    disabled={!canPrint}
+                    title={blocker || undefined}
+                    aria-describedby={blocker ? "print-blocker" : undefined}
+                  >
+                    <Printer className="h-5 w-5" aria-hidden="true" />
+                    {store.status === "printing"
+                      ? "Printing…"
+                      : t("print.print")}
+                  </Button>
+                )}
                 {blocker && (
                   <p
                     id="print-blocker"
@@ -572,6 +587,9 @@ export function PrintPage() {
                 id="print-advanced"
                 className="space-y-4 border-t pt-4"
               >
+                {/* While test data is on these live here instead of the main
+                    card; disabled fields still show their current values. */}
+                {store.useTestData && dataFields}
                 <div className="grid grid-cols-2 gap-3">
                   <div className={field}>
                     <Label htmlFor="print-orientation">
@@ -773,6 +791,57 @@ export function PrintPage() {
           </Card>
         </div>
       </div>
+
+      {/* Sticky action bar on phones: printer + Print always a thumb-reach
+          away, above the bottom nav (PLAN.md phase 1). */}
+      {isPhone && (
+        <div
+          className="sticky bottom-0 z-10 -mx-4 border-t bg-card/95 px-4 pb-[env(safe-area-inset-bottom)] pt-2 backdrop-blur md:hidden"
+          data-testid="print-action-bar"
+        >
+          <div className="flex items-center gap-2">
+            <Select value={store.printerId} onValueChange={store.setPrinterId}>
+              <SelectTrigger
+                aria-label="Printer"
+                className="min-h-11 min-w-0 flex-1"
+              >
+                <SelectValue placeholder="Select printer" />
+              </SelectTrigger>
+              <SelectContent>
+                {printers.length === 0 && (
+                  <SelectItem value="none" disabled>
+                    No printers found
+                  </SelectItem>
+                )}
+                {printers.map((p) => (
+                  <SelectItem key={p.id} value={p.name}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              size="lg"
+              className="min-h-11 shrink-0"
+              onClick={handlePrint}
+              disabled={!canPrint}
+              title={blocker || undefined}
+              aria-describedby={blocker ? "print-blocker-phone" : undefined}
+            >
+              <Printer className="h-5 w-5" aria-hidden="true" />
+              {store.status === "printing" ? "Printing…" : t("print.print")}
+            </Button>
+          </div>
+          {blocker && (
+            <p
+              id="print-blocker-phone"
+              className="mt-1 text-xs text-muted-foreground"
+            >
+              {blocker}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

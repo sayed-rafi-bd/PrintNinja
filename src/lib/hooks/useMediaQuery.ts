@@ -6,6 +6,9 @@ export const DESKTOP_QUERY = "(min-width: 1024px)";
 /** Wide enough to show the Designer's controls column at full width; narrower desktops get the icon rail. */
 export const WIDE_QUERY = "(min-width: 1440px)";
 
+/** Below Tailwind's `md`: phone portrait, where the shell uses the bottom bar. */
+export const PHONE_QUERY = "(max-width: 767px)";
+
 const read = (query: string) =>
   typeof window !== "undefined" && typeof window.matchMedia === "function"
     ? window.matchMedia(query).matches

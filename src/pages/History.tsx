@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
   Bookmark,
@@ -51,6 +51,8 @@ import {
   type HistoryJob,
 } from "@/lib/store/historyStore";
 import { parseTimings } from "@/lib/timings";
+import { PHONE_QUERY, useMediaQuery } from "@/lib/hooks/useMediaQuery";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 
 interface PrinterOption {
   id: number;
@@ -100,8 +102,10 @@ export function HistoryPage() {
     | null
   >(null);
   const [busy, setBusy] = useState(false);
-  // Phones: only Search is shown until this is opened (md and up always shows everything).
+  // Phone: the six filter controls live in a bottom sheet, opened here.
+  // (md and up keeps them inline; jsdom reports no phone, so tests see that.)
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const isPhone = useMediaQuery(PHONE_QUERY);
 
   useEffect(() => {
     let cancelled = false;
@@ -515,6 +519,196 @@ export function HistoryPage() {
     !!f.search;
   const job = store.selectedJob;
 
+  // The six filter controls, shared by the inline bar (md and up) and the
+  // phone bottom sheet. `labeled` adds a visible label above each control;
+  // the inline bar stays compact and relies on aria-labels. The Saved-filters
+  // menu stays inline-only: it is a desktop workflow.
+  const filterFields = (labeled: boolean) => {
+    const wrap = (id: string, label: string, control: React.ReactNode) =>
+      labeled ? (
+        <div key={id} className="space-y-1.5">
+          <Label htmlFor={id}>{label}</Label>
+          {control}
+        </div>
+      ) : (
+        <Fragment key={id}>{control}</Fragment>
+      );
+    return [
+      wrap(
+        "history-filter-status",
+        t("common.status"),
+        <Select
+          value={f.status}
+          onValueChange={(v) => store.setFilter({ status: v })}
+        >
+          <SelectTrigger
+            id="history-filter-status"
+            aria-label="Filter by status"
+            className="w-full sm:w-[140px]"
+          >
+            <SelectValue placeholder={t("history.filter_status")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("common.all")}</SelectItem>
+            <SelectItem value="success">{t("status.success")}</SelectItem>
+            <SelectItem value="failed">{t("status.failed")}</SelectItem>
+            <SelectItem value="queued">{t("status.queued")}</SelectItem>
+            <SelectItem value="printing">{t("status.printing")}</SelectItem>
+            <SelectItem value="cancelled">{t("status.cancelled")}</SelectItem>
+          </SelectContent>
+        </Select>,
+      ),
+      wrap(
+        "history-filter-source",
+        t("history.filter_source"),
+        <Select
+          value={f.source}
+          onValueChange={(v) => store.setFilter({ source: v })}
+        >
+          <SelectTrigger
+            id="history-filter-source"
+            aria-label="Filter by source"
+            className="w-full sm:w-[130px]"
+          >
+            <SelectValue placeholder={t("history.source")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("common.all")}</SelectItem>
+            <SelectItem value="ui">UI</SelectItem>
+            <SelectItem value="api">API</SelectItem>
+            <SelectItem value="deeplink">Deep link</SelectItem>
+            <SelectItem value="batch">Batch</SelectItem>
+            <SelectItem value="test">Test</SelectItem>
+          </SelectContent>
+        </Select>,
+      ),
+      wrap(
+        "history-filter-test",
+        t("history.filter_test"),
+        <Select
+          value={f.isTest === null ? "all" : f.isTest ? "yes" : "no"}
+          onValueChange={(v) =>
+            store.setFilter({
+              isTest: v === "all" ? null : v === "yes",
+            })
+          }
+        >
+          <SelectTrigger
+            id="history-filter-test"
+            aria-label="Filter test jobs"
+            className="w-full sm:w-[130px]"
+          >
+            <SelectValue placeholder={t("history.filter_test")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All jobs</SelectItem>
+            <SelectItem value="yes">{t("history.test_only")}</SelectItem>
+            <SelectItem value="no">{t("history.hide_test")}</SelectItem>
+          </SelectContent>
+        </Select>,
+      ),
+      wrap(
+        "history-filter-printer",
+        t("print.printer"),
+        <Select
+          value={f.printer}
+          onValueChange={(v) => store.setFilter({ printer: v })}
+        >
+          <SelectTrigger
+            id="history-filter-printer"
+            aria-label="Filter by printer"
+            className="w-full sm:w-[160px]"
+          >
+            <SelectValue placeholder={t("history.filter_printer")} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("common.all")}</SelectItem>
+            {[
+              ...new Set(
+                store.jobs
+                  .map((j) => j.printer_id)
+                  .filter((x): x is number => x != null),
+              ),
+            ]
+              .sort((a, b) => a - b)
+              .map((id) => (
+                <SelectItem key={id} value={String(id)}>
+                  {printerName(id)}
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>,
+      ),
+      wrap(
+        "history-filter-from",
+        t("history.filter_from"),
+        <Input
+          id="history-filter-from"
+          type="date"
+          aria-label="From date"
+          className="w-full sm:w-[150px]"
+          value={f.dateFrom}
+          onChange={(e) => store.setFilter({ dateFrom: e.target.value })}
+        />,
+      ),
+      wrap(
+        "history-filter-to",
+        t("history.filter_to"),
+        <Input
+          id="history-filter-to"
+          type="date"
+          aria-label="To date"
+          className="w-full sm:w-[150px]"
+          value={f.dateTo}
+          onChange={(e) => store.setFilter({ dateTo: e.target.value })}
+        />,
+      ),
+    ];
+  };
+
+  // One removable chip per active non-search filter, under the search box.
+  const activeChips: Array<{
+    key: string;
+    label: string;
+    clear: () => void;
+  }> = [];
+  if (f.status !== "all")
+    activeChips.push({
+      key: "status",
+      label: t(`status.${f.status}`, { defaultValue: f.status }),
+      clear: () => store.setFilter({ status: "all" }),
+    });
+  if (f.source !== "all")
+    activeChips.push({
+      key: "source",
+      label: f.source,
+      clear: () => store.setFilter({ source: "all" }),
+    });
+  if (f.isTest !== null)
+    activeChips.push({
+      key: "isTest",
+      label: f.isTest ? t("history.test_only") : t("history.hide_test"),
+      clear: () => store.setFilter({ isTest: null }),
+    });
+  if (f.printer !== "all")
+    activeChips.push({
+      key: "printer",
+      label: printerName(Number(f.printer)),
+      clear: () => store.setFilter({ printer: "all" }),
+    });
+  if (f.dateFrom)
+    activeChips.push({
+      key: "dateFrom",
+      label: `${t("history.filter_from")} ${f.dateFrom}`,
+      clear: () => store.setFilter({ dateFrom: "" }),
+    });
+  if (f.dateTo)
+    activeChips.push({
+      key: "dateTo",
+      label: `${t("history.filter_to")} ${f.dateTo}`,
+      clear: () => store.setFilter({ dateTo: "" }),
+    });
+
   return (
     <div className="space-y-4">
       <PageHeader title={t("history.title")} description={t("pages.history")}>
@@ -525,7 +719,8 @@ export function HistoryPage() {
       </PageHeader>
 
       {/* Filter bar stays visible while the table scrolls, but only from tablet width up:
-          on a phone it stacks to ~500px tall and would cover most of the screen. */}
+          on a phone the six controls move into the bottom sheet below, leaving
+          Search, the Filters button, and removable chips here. */}
       <div
         className="-mx-1 rounded-lg border bg-card p-3 shadow-[0_1px_0_hsl(var(--border))] md:sticky md:top-0 md:z-20"
         role="search"
@@ -550,159 +745,60 @@ export function HistoryPage() {
             size="sm"
             className="h-control md:hidden"
             aria-expanded={filtersOpen}
-            aria-controls="history-more-filters"
-            onClick={() => setFiltersOpen((v) => !v)}
+            aria-haspopup="dialog"
+            onClick={() => setFiltersOpen(true)}
           >
             <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
-            Filters{moreFiltersActive > 0 ? ` (${moreFiltersActive})` : ""}
+            {t("history.filters")}
+            {moreFiltersActive > 0 ? ` (${moreFiltersActive})` : ""}
           </Button>
-          <div
-            id="history-more-filters"
-            className={`${filtersOpen ? "contents" : "hidden"} md:contents`}
-          >
-            <Select
-              value={f.status}
-              onValueChange={(v) => store.setFilter({ status: v })}
-            >
-              <SelectTrigger
-                aria-label="Filter by status"
-                className="w-full sm:w-[140px]"
-              >
-                <SelectValue placeholder={t("history.filter_status")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("common.all")}</SelectItem>
-                <SelectItem value="success">{t("status.success")}</SelectItem>
-                <SelectItem value="failed">{t("status.failed")}</SelectItem>
-                <SelectItem value="queued">{t("status.queued")}</SelectItem>
-                <SelectItem value="printing">{t("status.printing")}</SelectItem>
-                <SelectItem value="cancelled">
-                  {t("status.cancelled")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <Select
-              value={f.source}
-              onValueChange={(v) => store.setFilter({ source: v })}
-            >
-              <SelectTrigger
-                aria-label="Filter by source"
-                className="w-full sm:w-[130px]"
-              >
-                <SelectValue placeholder={t("history.source")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("common.all")}</SelectItem>
-                <SelectItem value="ui">UI</SelectItem>
-                <SelectItem value="api">API</SelectItem>
-                <SelectItem value="deeplink">Deep link</SelectItem>
-                <SelectItem value="batch">Batch</SelectItem>
-                <SelectItem value="test">Test</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select
-              value={f.isTest === null ? "all" : f.isTest ? "yes" : "no"}
-              onValueChange={(v) =>
-                store.setFilter({
-                  isTest: v === "all" ? null : v === "yes",
-                })
-              }
-            >
-              <SelectTrigger
-                aria-label="Filter test jobs"
-                className="w-full sm:w-[130px]"
-              >
-                <SelectValue placeholder="Test jobs" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All jobs</SelectItem>
-                <SelectItem value="yes">Test only</SelectItem>
-                <SelectItem value="no">Hide test</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select
-              value={f.printer}
-              onValueChange={(v) => store.setFilter({ printer: v })}
-            >
-              <SelectTrigger
-                aria-label="Filter by printer"
-                className="w-full sm:w-[160px]"
-              >
-                <SelectValue placeholder={t("history.filter_printer")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("common.all")}</SelectItem>
-                {[
-                  ...new Set(
-                    store.jobs
-                      .map((j) => j.printer_id)
-                      .filter((x): x is number => x != null),
-                  ),
-                ]
-                  .sort((a, b) => a - b)
-                  .map((id) => (
-                    <SelectItem key={id} value={String(id)}>
-                      {printerName(id)}
-                    </SelectItem>
+          {/* Inline filters: md and up. On phones they live in the sheet below. */}
+          {!isPhone && (
+            <div id="history-more-filters" className="md:contents">
+              {filterFields(false)}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-control">
+                    <Bookmark className="h-4 w-4" aria-hidden="true" />
+                    Saved filters
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-[200px]">
+                  <DropdownMenuLabel>Saved filters</DropdownMenuLabel>
+                  {saved.length === 0 && (
+                    <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                      None yet
+                    </p>
+                  )}
+                  {saved.map((s) => (
+                    <div key={s.name} className="flex items-center">
+                      <DropdownMenuItem
+                        className="flex-1"
+                        onSelect={() => store.setFilter(s.filter)}
+                      >
+                        {s.name}
+                      </DropdownMenuItem>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Remove saved filter ${s.name}`}
+                        onClick={() => removeSaved(s.name)}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   ))}
-              </SelectContent>
-            </Select>
-            <Input
-              type="date"
-              aria-label="From date"
-              className="w-full sm:w-[150px]"
-              value={f.dateFrom}
-              onChange={(e) => store.setFilter({ dateFrom: e.target.value })}
-            />
-            <Input
-              type="date"
-              aria-label="To date"
-              className="w-full sm:w-[150px]"
-              value={f.dateTo}
-              onChange={(e) => store.setFilter({ dateTo: e.target.value })}
-            />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="h-control">
-                  <Bookmark className="h-4 w-4" aria-hidden="true" />
-                  Saved filters
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-[200px]">
-                <DropdownMenuLabel>Saved filters</DropdownMenuLabel>
-                {saved.length === 0 && (
-                  <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                    None yet
-                  </p>
-                )}
-                {saved.map((s) => (
-                  <div key={s.name} className="flex items-center">
-                    <DropdownMenuItem
-                      className="flex-1"
-                      onSelect={() => store.setFilter(s.filter)}
-                    >
-                      {s.name}
-                    </DropdownMenuItem>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Remove saved filter ${s.name}`}
-                      onClick={() => removeSaved(s.name)}
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                ))}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  disabled={!filtersActive}
-                  onSelect={() => setSaveOpen(true)}
-                >
-                  Save current filters…
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    disabled={!filtersActive}
+                    onSelect={() => setSaveOpen(true)}
+                  >
+                    Save current filters…
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
           {filtersActive && (
             <Button
               variant="ghost"
@@ -710,11 +806,66 @@ export function HistoryPage() {
               className="h-control"
               onClick={store.clearFilter}
             >
-              Clear
+              {t("common.clear")}
             </Button>
           )}
         </div>
+        {/* Active filters as removable chips, under the search box. */}
+        {activeChips.length > 0 && (
+          <ul
+            aria-label={t("history.active_filters")}
+            className="mt-2 flex flex-wrap gap-1.5"
+          >
+            {activeChips.map((chip) => (
+              <li key={chip.key}>
+                <Badge variant="secondary" className="gap-1 py-1 pl-2.5 pr-1">
+                  <span className="max-w-[12rem] truncate">{chip.label}</span>
+                  <button
+                    type="button"
+                    onClick={chip.clear}
+                    aria-label={t("history.remove_filter", {
+                      name: chip.label,
+                    })}
+                    className="flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  >
+                    <X className="h-3 w-3" aria-hidden="true" />
+                  </button>
+                </Badge>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
+
+      {/* Phone: the six controls live in a bottom sheet with labeled fields
+          and an Apply/Reset footer, instead of pushing results off-screen. */}
+      {isPhone && (
+        <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
+          <SheetContent
+            side="bottom"
+            className="flex max-h-[85dvh] w-full flex-col gap-0 p-0 pb-[env(safe-area-inset-bottom)]"
+          >
+            <DialogHeader className="border-b p-5 pr-12">
+              <DialogTitle>{t("history.filters")}</DialogTitle>
+              <DialogDescription>
+                {t("history.filters_description")}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 space-y-4 overflow-y-auto p-5">
+              {filterFields(true)}
+            </div>
+            <DialogFooter className="gap-2 border-t p-5 sm:space-x-0">
+              <Button variant="outline" onClick={() => store.clearFilter()}>
+                {t("common.reset")}
+              </Button>
+              <Button onClick={() => setFiltersOpen(false)}>
+                {t("common.apply")}
+                {moreFiltersActive > 0 ? ` (${moreFiltersActive})` : ""}
+              </Button>
+            </DialogFooter>
+          </SheetContent>
+        </Sheet>
+      )}
 
       {selected.size > 0 && (
         <div

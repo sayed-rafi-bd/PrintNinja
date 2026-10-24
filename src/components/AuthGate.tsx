@@ -105,7 +105,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         <div
           role="status"
           aria-label={t("auth.checking")}
-          className="flex min-h-screen items-center justify-center bg-background"
+          className="flex min-h-dvh-safe items-center justify-center bg-background"
         >
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
         </div>

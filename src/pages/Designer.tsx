@@ -962,7 +962,7 @@ export function DesignerPage() {
             <div className="min-w-0 overflow-x-auto">
               <TabsList
                 aria-label="Designer views"
-                className="h-8 w-max gap-0.5 p-0.5"
+                className="min-h-8 w-max gap-0.5 p-0.5"
               >
                 <TabsTrigger value="canvas" className="h-7 px-3 text-xs">
                   {t("designer.canvas")}

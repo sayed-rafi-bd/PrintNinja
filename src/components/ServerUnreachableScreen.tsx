@@ -23,7 +23,7 @@ export function ServerUnreachableScreen({
   return (
     <main
       data-testid="gate-unreachable"
-      className="flex min-h-screen items-center justify-center bg-background p-4"
+      className="flex min-h-dvh-safe items-center justify-center bg-background p-4"
     >
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-3">
