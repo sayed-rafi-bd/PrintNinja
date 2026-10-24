@@ -431,7 +431,7 @@ export function PrintPage() {
           </Select>
         </div>
       </div>
-      <div className="grid max-w-[16rem] grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-3">
         <div className={field}>
           <Label htmlFor="copies">{t("print.copies")}</Label>
           <Input
