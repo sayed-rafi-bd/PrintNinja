@@ -272,10 +272,10 @@ describe("Print page", () => {
     expect(await screen.findByText("Print sent")).toBeInTheDocument();
     expect(screen.queryByText("Printer is ready")).toBeNull();
     const timing = screen.getByTestId("timing-breakdown");
-    expect(timing).toHaveTextContent("Total 120 ms");
-    expect(timing).toHaveTextContent("Render 90 ms");
-    expect(timing).toHaveTextContent("Send 25 ms");
-    expect(timing).toHaveTextContent("History write 4 ms");
+    expect(timing).toHaveTextContent("Total 0.120 s");
+    expect(timing).toHaveTextContent("Render 0.090 s (75%)");
+    expect(timing).toHaveTextContent("Send 0.025 s (21%)");
+    expect(timing).toHaveTextContent("History write 0.004 s (3%)");
     expect(toast.success).not.toHaveBeenCalled();
     expect(toast.error).not.toHaveBeenCalled();
   });

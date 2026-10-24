@@ -10,8 +10,14 @@ printer-specific bytes come out the other, and every step in between exists
 to answer one question: what should each dot on the paper be?
 
 ```
-Data  +  Template  →  Pages  →  Layout  →  Image or PDF  →  Printer language  →  Wire  →  Paper
+Data  +  Template  →  Design pages  →  Sheets  →  Image or PDF  →  Printer language  →  Wire  →  Paper
 ```
+
+The middle of that chain is the part to hold in your head. A template is
+rendered into *design pages* exactly as it looks in the Designer, with no
+knowledge of any paper. Only afterwards are those finished pages *placed* on
+physical *sheets*. Rendering and placement are separate steps, and nothing
+about the paper ever feeds back into the template.
 
 Each stage is timed, so a slow print can be traced to the exact step that
 caused it — fetching data, rendering the template, laying out pages,
@@ -44,10 +50,17 @@ JSON body) and the result becomes the data. If the fetch fails, the preview
 falls back to the mock data and says so, rather than showing a blank page.
 
 The preview is a real render, not a mock-up: the same template engine that
-the backend uses runs in the browser, one record per page, so what you see
-is what prints. A list of records prints one page each; a single object
-repeats for as many copies or records as requested, with the preview capped
-to the first few pages so a thousand-record run doesn't freeze the screen.
+the backend uses runs in the browser, one record per page, and the same
+placement rules put each page on a drawn sheet of the chosen paper — so what
+you see is what prints. A list of records prints one page each; a single
+object repeats for as many copies or records as requested, with the preview
+capped to the first few pages, and to a fixed number of drawn sheets, so a
+thousand-record run or a very tall design doesn't freeze the screen.
+
+Because the template is rendered only once per record, changing the paper,
+orientation, margins, fit mode, or grayscale never re-renders anything. The
+preview simply redraws the same finished pages in a new position and scale,
+which is why those controls respond instantly.
 
 Templates are HTML with placeholders. A template engine merges each data
 record into the HTML, producing finished pages. Small helpers format values
@@ -72,8 +85,46 @@ physical sheet it lands on, chosen per print and never written back to the
 template. The preview draws the paper sheet and maps the design onto it,
 exactly as the backend will — a mapping label under the preview spells it
 out ("design 80×200 mm → paper 210×297 mm"), and the orientation selector
-swaps the paper, never the design. When the two sizes match, the mapping is
-the identity and the output is byte-for-byte what the old pipeline made.
+swaps the paper, never the design.
+
+The central rule is that **a design is never re-laid out for the paper.**
+Each record is rendered once, at exactly the design size, inside its own
+frame — the same way the Designer canvas shows it. That finished frame is
+then scaled, as a picture would be, and positioned on the sheet. Line
+breaks, wrapping, and aspect ratio therefore stay exactly as designed;
+only where the finished page lands on the paper changes. Scaling is always
+uniform on both axes, so a design is never stretched.
+
+### Placement: how a design lands on a sheet
+
+Placement happens inside the *printable area*: the paper minus its margins.
+Margins belong to the paper alone; they are carved out of the sheet, never
+out of the design. The fit mode then decides the scale and position:
+
+- **Actual size** — one design millimetre is one paper millimetre, anchored
+  at the top-left. A design taller than the printable area continues on the
+  next sheet.
+- **Fit to width** (the default) — scaled so the design spans the printable
+  width, anchored at the top-left, continuing onto further sheets when it is
+  taller than one.
+- **Fit to page** — the largest scale at which the whole design fits,
+  centred.
+- **Shrink only** — like fit to page, but never enlarges, centred.
+- **Fill** — the smallest scale that covers the whole printable area,
+  centred and cropped to it.
+
+A design that continues across sheets is sliced by simply moving it up by
+one printable height per sheet; a design that lands exactly on a sheet
+boundary uses one sheet, not two, and a hard cap stops a pathologically tall
+design from producing an unbounded document. When design and paper are the
+same size and margins are zero, the scale is exactly one and the design sits
+precisely where it was authored.
+
+Placement is the one piece of logic that exists twice — once in the browser
+for the preview and once in the backend for the real output. Both are pinned
+to a single shared table of expected results, so a change to one that isn't
+mirrored in the other fails a test instead of silently making the preview
+lie.
 
 ## 3. The backend pipeline
 
@@ -94,17 +145,28 @@ The backend works through the same stages for every job:
 3. **Fetch the data.** The backend pulls the data URL itself, with a timeout
    and a size cap. Domain allow-lists and private-network blocking apply, so
    a template can't be tricked into reading internal services.
-4. **Render the template.** The backend engine merges data into pages exactly
-   as the preview did — same placeholders, same helpers — so the preview
-   guarantee holds.
-5. **Lay out the pages.** The page box is the paper: size, margins, and a
-   design→paper scale derived from the fit mode (actual size, fit to width,
-   fit to page, fill, shrink) — the design is proportionally zoomed onto the
-   paper content box, with no scaling at all when the two match. Exact color
-   reproduction and an optional grayscale conversion are applied on top.
+4. **Render the design pages.** The backend engine merges data into one
+   page per record exactly as the preview did — same placeholders, same
+   helpers. Each record becomes its own complete document at the design
+   size, carrying the template's styling and nothing about paper. Any page
+   size or margin the template's own CSS tries to declare is stripped, so
+   the template cannot fight the layout step. Pages are joined with a fixed
+   separator, and the stored job keeps that separator so a replayed job
+   splits back into the same pages.
+5. **Place the pages on sheets.** The backend builds one printable document
+   made of *sheets*, each exactly the paper size. Every design page is
+   dropped into a frame of its own design size, scaled and positioned by the
+   placement rules above, inside a printable-area box that clips whatever
+   the fit mode pushes outside it (fill's crop, the next sheet's slice). The
+   document's own page margin is deliberately zero: margins are applied by
+   the printable-area box alone, so the browser's handling of page margins
+   can never disagree with the preview. Exact color reproduction and an
+   optional grayscale conversion are applied on top.
 6. **Produce output.** Either a PDF document or a bitmap image, depending on
-   the printer's language (see §5) — always rendered at the paper size, so
-   the file's page box and the printed sheet agree.
+   the printer's language (see §5) — always at the paper size, so the file's
+   page box and the printed sheet agree. Before capturing, the renderer waits
+   for web fonts to finish loading in every design frame, not just the outer
+   document; otherwise a label could print in a fallback font.
 7. **Send.** The finished bytes go to the printer through the transport
    matching its type (see §4), once per copy, holding that printer's turn so
    two jobs never interleave on the same machine.
@@ -142,9 +204,14 @@ screenshot, no translation — the printer's own PDF interpreter does the
 work.
 
 **The bitmap path** is for receipt and label printers, which understand small
-command languages rather than documents. The page is photographed at exactly
+command languages rather than documents. The sheet is photographed at exactly
 the printer's dot density — one screen pixel per printer dot, so nothing is
-resampled or blurred — reduced to pure black and white, and packed into bits.
+resampled or blurred. Sheets are laid out in millimetres, so before the
+photograph the whole sheet is scaled so the paper's width spans exactly the
+printer's dot width: one millimetre of design becomes one millimetre of label
+at that printer's resolution, rather than a small sheet floating in a large
+capture area. The result is reduced to pure black and white and packed into
+bits.
 Those bits are then wrapped in the printer's dialect:
 
 - **Receipt printers** get an initialize command followed by a raster-graphics
@@ -210,5 +277,7 @@ guard guarantees a cancelled job can never flip to successful later.
 Every job is remembered: settings, data, outcome, error, duration, and
 per-stage timings, indexed for the history views. Old jobs are purged
 automatically under the retention limits from Settings, and history can be
-exported as a spreadsheet. Reprinting clones an old row and wakes the
-worker; retrying re-queues only jobs that ended in failure or cancellation.
+exported as a spreadsheet. The stored job keeps the design pages as rendered
+— before any paper is involved — so a reprint is placed on sheets again from
+those same pages using the job's saved settings. Reprinting
+clones an old row and wakes the worker; retrying re-queues only jobs that ended in failure or cancellation.

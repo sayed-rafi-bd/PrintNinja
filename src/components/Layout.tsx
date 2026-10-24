@@ -99,7 +99,10 @@ function ShareIndicator() {
   };
   return (
     <span className="inline-flex items-center gap-2">
-      <span title={t("shell.share_online", { handle: status.handle })}>
+      <span
+        className="inline-flex items-center"
+        title={t("shell.share_online", { handle: status.handle })}
+      >
         <StatusBadge
           status="online"
           label={status.handle || t("status.online")}

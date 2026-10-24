@@ -328,7 +328,7 @@ const ja: Translation = {
     ready_detail: "{{printer}}で印刷できます。",
     ready_empty: "プリンターとテンプレートを選択して開始してください。",
     sent: "印刷を送信しました",
-    finished: "{{ms}} ms で完了しました。",
+    finished: "{{seconds}}で完了しました。",
     failed_title: "印刷に失敗しました",
     unknown_error: "不明なエラー",
     retry: "もう一度試す",

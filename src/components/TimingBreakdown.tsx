@@ -1,5 +1,10 @@
 import { useTranslation } from "react-i18next";
-import { TIMING_STAGES } from "@/lib/timings";
+import {
+  TIMING_STAGES,
+  formatPercent,
+  formatSeconds,
+  timingDenominator,
+} from "@/lib/timings";
 import type { StageTimings } from "@/lib/agent/types";
 import { cn } from "@/lib/utils";
 
@@ -19,11 +24,7 @@ export function TimingBreakdown({
 }) {
   const { t } = useTranslation();
   if (variant === "list") {
-    const denom = Math.max(
-      timings.total_ms,
-      TIMING_STAGES.reduce((sum, s) => sum + timings[s.key], 0),
-      1,
-    );
+    const denom = timingDenominator(timings);
     return (
       <div
         className={cn("space-y-1.5", className)}
@@ -34,7 +35,7 @@ export function TimingBreakdown({
           return (
             <div
               key={s.key}
-              className="grid grid-cols-[7rem_1fr_4.5rem] items-center gap-2 text-sm"
+              className="grid grid-cols-[7rem_1fr_4.5rem_3rem] items-center gap-2 text-sm"
             >
               <span className="text-muted-foreground">{t(s.labelKey)}</span>
               <div
@@ -46,19 +47,28 @@ export function TimingBreakdown({
                   style={{ width: `${Math.min(100, (value / denom) * 100)}%` }}
                 />
               </div>
-              <span className="text-right tabular-nums">{value} ms</span>
+              <span className="text-right tabular-nums">
+                {formatSeconds(value)}
+              </span>
+              <span className="text-right tabular-nums text-muted-foreground">
+                {formatPercent(value, denom)}
+              </span>
             </div>
           );
         })}
-        <div className="grid grid-cols-[7rem_1fr_4.5rem] items-center gap-2 border-t pt-1.5 text-sm font-medium">
+        <div className="grid grid-cols-[7rem_1fr_4.5rem_3rem] items-center gap-2 border-t pt-1.5 text-sm font-medium">
           <span>{t("common.total")}</span>
           <span />
-          <span className="text-right tabular-nums">{timings.total_ms} ms</span>
+          <span className="text-right tabular-nums">
+            {formatSeconds(timings.total_ms)}
+          </span>
+          <span />
         </div>
       </div>
     );
   }
 
+  const denom = timingDenominator(timings);
   return (
     <p
       className={cn(
@@ -68,11 +78,14 @@ export function TimingBreakdown({
       data-testid="timing-breakdown"
     >
       <span className="font-medium">
-        {t("common.total")} {timings.total_ms} ms
+        {t("common.total")} {formatSeconds(timings.total_ms)}
       </span>
       {TIMING_STAGES.map((s) => (
         <span key={s.key}>
-          {t(s.labelKey)} {timings[s.key]} ms
+          {t(s.labelKey)} {formatSeconds(timings[s.key])}{" "}
+          <span className="opacity-70">
+            ({formatPercent(timings[s.key], denom)})
+          </span>
         </span>
       ))}
     </p>

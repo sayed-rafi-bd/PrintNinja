@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select";
 import { Printer, Zap, CheckCircle2, XCircle, ChevronDown } from "lucide-react";
 import { TimingBreakdown } from "@/components/TimingBreakdown";
+import { formatSeconds } from "@/lib/timings";
 import { cn } from "@/lib/utils";
 import { useSystemPrinters } from "@/lib/hooks/useSystemPrinters";
 import { PHONE_QUERY, useMediaQuery } from "@/lib/hooks/useMediaQuery";
@@ -472,7 +473,9 @@ export function PrintPage() {
               <TimingBreakdown timings={store.timings} />
             ) : (
               <p className="text-xs">
-                {t("print.finished", { ms: store.durationMs })}
+                {t("print.finished", {
+                  seconds: formatSeconds(store.durationMs),
+                })}
               </p>
             )}
           </div>

@@ -318,7 +318,7 @@ const en = {
     ready_detail: "Ready to print on {{printer}}.",
     ready_empty: "Choose a printer and a template to start.",
     sent: "Print sent",
-    finished: "Finished in {{ms}} ms.",
+    finished: "Finished in {{seconds}}.",
     failed_title: "Print failed",
     unknown_error: "Unknown error",
     retry: "Try again",
