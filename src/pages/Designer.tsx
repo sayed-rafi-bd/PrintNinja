@@ -91,12 +91,12 @@ import {
 } from "@/lib/share/save";
 
 const PAGE_PRESETS = [
-  { label: "A4", width: 210, height: 297 },
-  { label: "A5", width: 148, height: 210 },
-  { label: "Letter", width: 216, height: 279 },
-  { label: "80mm Roll", width: 80, height: 200 },
-  { label: "58mm Roll", width: 58, height: 200 },
-  { label: "4x6 Label", width: 102, height: 152 },
+  { labelKey: "designer.preset_a4", width: 210, height: 297 },
+  { labelKey: "designer.preset_a5", width: 148, height: 210 },
+  { labelKey: "designer.preset_letter", width: 216, height: 279 },
+  { labelKey: "designer.preset_roll80", width: 80, height: 200 },
+  { labelKey: "designer.preset_roll58", width: 58, height: 200 },
+  { labelKey: "designer.preset_label4x6", width: 102, height: 152 },
 ];
 
 /** Which sync action is running. */
@@ -319,7 +319,7 @@ export function DesignerPage() {
       })();
     }
     // Content now lives on the template row itself; nothing more to load.
-    toast.success(`Loaded "${tpl.name}"`);
+    toast.success(t("designer.toast_loaded", { name: tpl.name }));
   };
 
   /**
@@ -344,18 +344,18 @@ export function DesignerPage() {
 
   const handleSave = async () => {
     if (!currentTemplateDbId) {
-      toast.error("No template selected");
+      toast.error(t("designer.toast_no_template"));
       return;
     }
     if (offline) {
-      toast.error("Offline — connect to save this template to the server");
+      toast.error(t("designer.toast_offline_save"));
       return;
     }
     setPending("save");
     try {
       const row = await getLocalTemplate(currentTemplateDbId);
       if (isReadOnly(row)) {
-        toast.error("A saved copy from Community can’t be changed");
+        toast.error(t("designer.toast_readonly"));
         return;
       }
       const content = await buildContent();
@@ -441,11 +441,11 @@ export function DesignerPage() {
       if (makePublic) {
         const remote = await share.publishRemoteTemplate(id);
         setPublishedAt(remote.published_at ?? remote.updated_at ?? null);
-        toast.success("Template is now public");
+        toast.success(t("designer.toast_now_public"));
       } else {
         await share.unpublishRemoteTemplate(id);
         setPublishedAt(null);
-        toast.success("Template is now private");
+        toast.success(t("designer.toast_now_private"));
       }
       window.dispatchEvent(new Event("sync:pulled"));
     } catch (e) {
@@ -471,7 +471,7 @@ export function DesignerPage() {
       setRemoteId(conflict.serverId);
       setPublishedAt(taken.updatedAt);
       setConflict(null);
-      toast.success("Loaded the server copy");
+      toast.success(t("designer.toast_server_copy"));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -490,10 +490,10 @@ export function DesignerPage() {
       setRemoteId(result.remoteId);
       setPublishedAt(result.published ? result.updatedAt : null);
       setConflict(null);
-      toast.success("Overwrote the server copy");
+      toast.success(t("designer.toast_overwrote"));
     } catch (e) {
       if (e instanceof TemplateConflictError) {
-        toast.error("The server copy moved again — reload and try once more");
+        toast.error(t("designer.toast_moved_again"));
         return;
       }
       toast.error(e instanceof Error ? e.message : String(e));
@@ -505,17 +505,17 @@ export function DesignerPage() {
   const createNewTemplate = async () => {
     const name = newTemplateName.trim();
     if (!name) {
-      toast.error("Template name required");
+      toast.error(t("designer.toast_name_required"));
       return;
     }
     if (templates.some((t) => t.name.toLowerCase() === name.toLowerCase())) {
-      toast.error("Template already exists");
+      toast.error(t("designer.toast_name_exists"));
       return;
     }
     // Server-first: the server owns the copies, so a new template starts
     // there and is cached locally synced. Offline there is no creation.
     if (offline) {
-      toast.error("Offline — connect to create a template on the server");
+      toast.error(t("designer.toast_offline_create"));
       return;
     }
     try {
@@ -540,7 +540,7 @@ export function DesignerPage() {
       setTemplates((prev) => [...prev, tpl]);
       loadTemplate(tpl);
       setCurrentTemplateDbId(tpl.id);
-      toast.success(`Template "${name}" created on the server`);
+      toast.success(t("designer.toast_created_server", { name }));
     } catch {
       // Web mode / DB unavailable — keep in-memory fallback so UI stays usable.
       const id = templates.length
@@ -559,7 +559,7 @@ export function DesignerPage() {
       setTemplates((prev) => [...prev, tpl]);
       loadTemplate(tpl);
       setCurrentTemplateDbId(tpl.id);
-      toast.success(`Template "${name}" created locally`);
+      toast.success(t("designer.toast_created_local", { name }));
     } finally {
       setNewTemplateName("");
       setShowNewTemplateDialog(false);
@@ -720,7 +720,12 @@ export function DesignerPage() {
       barcodeFromData && isHelperSymbology(barcodeType),
     );
     if (!snippet.ok) {
-      setBarcodeError(snippet.error);
+      setBarcodeError(
+        t(
+          snippet.messageKey,
+          snippet.messageParams as Record<string, string> | undefined,
+        ),
+      );
       return;
     }
     insertHelper(
@@ -729,7 +734,7 @@ export function DesignerPage() {
     setShowBarcodeDialog(false);
     setBarcodeValue("");
     setBarcodeError(null);
-    toast.success(`${barcodeType} barcode inserted`);
+    toast.success(t("designer.toast_barcode_inserted", { type: barcodeType }));
   };
 
   const sampleData = useMemo<Record<string, unknown>>(() => {
@@ -745,12 +750,12 @@ export function DesignerPage() {
 
   const handleSaveReadme = async () => {
     if (!currentTemplateDbId) {
-      toast.error("No template selected");
+      toast.error(t("designer.toast_no_template"));
       return;
     }
     const bytes = new TextEncoder().encode(readme).length;
     if (bytes > 64 * 1024) {
-      toast.error("README exceeds 64 KiB");
+      toast.error(t("designer.toast_readme_too_big"));
       return;
     }
     setReadmeSaving(true);
@@ -759,7 +764,7 @@ export function DesignerPage() {
         req: { id: currentTemplateDbId, readme },
       });
       // The README rides along with the next Save; nothing to send here.
-      toast.success("README saved locally — Save sends it to the server");
+      toast.success(t("designer.toast_readme_saved"));
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -769,7 +774,7 @@ export function DesignerPage() {
 
   const handleShowCanvas = () => {
     setActiveTab("canvas");
-    toast.success("Showing the canvas");
+    toast.success(t("designer.toast_showing_canvas"));
   };
 
   const sampleDataPanel = (
@@ -798,9 +803,11 @@ export function DesignerPage() {
             if (selectedDatasetName === ds.name) {
               setSelectedDatasetName(visibleDatasets[0]?.name ?? "");
             }
-            toast.success("Dataset deleted");
+            toast.success(t("designer.toast_dataset_deleted"));
           } catch (e) {
-            toast.error(`Delete failed: ${e}`);
+            toast.error(
+              t("designer.toast_delete_failed", { error: String(e) }),
+            );
           }
         })();
       }}
@@ -889,18 +896,18 @@ export function DesignerPage() {
         <div className="flex min-h-0 flex-1 gap-4">
           {controlsExpanded ? (
             <aside
-              aria-label="Designer controls"
+              aria-label={t("designer.controls_expanded")}
               className="flex w-[280px] shrink-0 flex-col gap-2 overflow-y-auto"
             >
               <button
                 type="button"
-                aria-label="Collapse controls"
-                title="Collapse controls"
+                aria-label={t("designer.collapse_controls")}
+                title={t("designer.collapse_controls")}
                 onClick={() => setControlsExpanded(false)}
                 className="flex h-7 shrink-0 items-center gap-1.5 self-start rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <PanelLeftClose className="h-3.5 w-3.5" aria-hidden="true" />
-                Collapse
+                {t("designer.collapse_short")}
               </button>
               <ControlsAccordion
                 {...controls}
@@ -981,7 +988,9 @@ export function DesignerPage() {
                 />
               </div>
               <DialogFooter className="gap-2 border-t p-5 sm:space-x-0">
-                <Button onClick={() => setControlsOpen(false)}>Done</Button>
+                <Button onClick={() => setControlsOpen(false)}>
+                  {t("designer.sheet_done")}
+                </Button>
               </DialogFooter>
             </SheetContent>
           </Sheet>
@@ -998,7 +1007,7 @@ export function DesignerPage() {
               <div className="flex items-center gap-2">
                 <div className="min-w-0 flex-1 overflow-x-auto">
                   <TabsList
-                    aria-label="Designer views"
+                    aria-label={t("designer.views_aria")}
                     className="min-h-8 w-max gap-0.5 p-0.5"
                   >
                     <TabsTrigger value="canvas" className="h-7 px-3 text-xs">
@@ -1026,7 +1035,7 @@ export function DesignerPage() {
                     disabled={offline || pending != null}
                   >
                     <Save className="h-4 w-4" aria-hidden="true" />
-                    Save
+                    {t("common.save")}
                   </Button>
                 )}
               </div>
@@ -1064,7 +1073,9 @@ export function DesignerPage() {
                   <CardContent className="space-y-4 pt-5">
                     {sampleDataPanel}
                     <div className="space-y-2 border-t pt-3">
-                      <h3 className="text-xs font-semibold">Helpers</h3>
+                      <h3 className="text-xs font-semibold">
+                        {t("designer.helpers")}
+                      </h3>
                       <HelpersPanel />
                     </div>
                   </CardContent>
@@ -1081,11 +1092,11 @@ export function DesignerPage() {
       <Dialog open={showBarcodeDialog} onOpenChange={setShowBarcodeDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Insert Barcode</DialogTitle>
+            <DialogTitle>{t("designer.barcode_title")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
-              <Label htmlFor="barcode-type">Type</Label>
+              <Label htmlFor="barcode-type">{t("designer.barcode_type")}</Label>
               <Select value={barcodeType} onValueChange={setBarcodeType}>
                 <SelectTrigger id="barcode-type">
                   <SelectValue />
@@ -1101,7 +1112,7 @@ export function DesignerPage() {
             </div>
             <div className="flex items-center justify-between gap-3">
               <Label htmlFor="barcode-from-data" className="text-sm">
-                Read the value from a data field
+                {t("designer.barcode_from_data")}
               </Label>
               <Switch
                 id="barcode-from-data"
@@ -1116,15 +1127,15 @@ export function DesignerPage() {
             <div className="space-y-1">
               <Label htmlFor="barcode-value">
                 {barcodeFromData && isHelperSymbology(barcodeType)
-                  ? "Data field"
-                  : "Value"}
+                  ? t("designer.barcode_field")
+                  : t("designer.barcode_value")}
               </Label>
               <Input
                 id="barcode-value"
                 placeholder={
                   barcodeFromData && isHelperSymbology(barcodeType)
-                    ? "order.id"
-                    : "Enter barcode value"
+                    ? t("designer.barcode_field_example")
+                    : t("designer.barcode_value_hint")
                 }
                 value={barcodeValue}
                 onChange={(e) => {
@@ -1134,10 +1145,10 @@ export function DesignerPage() {
               />
               <p className="text-xs text-muted-foreground">
                 {!isHelperSymbology(barcodeType)
-                  ? "This type is inserted with a fixed value."
+                  ? t("designer.barcode_fixed_hint")
                   : barcodeFromData
-                    ? "Each print and each CSV row gets its own code."
-                    : "The same code on every print."}
+                    ? t("designer.barcode_per_print")
+                    : t("designer.barcode_same")}
               </p>
               {barcodeError && (
                 <p
@@ -1155,7 +1166,7 @@ export function DesignerPage() {
               variant="outline"
               onClick={() => setShowBarcodeDialog(false)}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               id="barcode-insert"
@@ -1163,7 +1174,7 @@ export function DesignerPage() {
               disabled={!barcodeValue}
             >
               <QrCode className="h-4 w-4" />
-              Insert
+              {t("designer.barcode_insert")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1173,19 +1184,19 @@ export function DesignerPage() {
       <Dialog open={showDatasetDialog} onOpenChange={setShowDatasetDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add Dataset</DialogTitle>
+            <DialogTitle>{t("designer.sample_add_title")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
-              <Label>Name</Label>
+              <Label>{t("common.name")}</Label>
               <Input
                 value={datasetName}
                 onChange={(e) => setDatasetName(e.target.value)}
-                placeholder="e.g. Empty Order"
+                placeholder={t("designer.sample_name_example")}
               />
             </div>
             <div className="space-y-1">
-              <Label>JSON data</Label>
+              <Label>{t("designer.sample_json_label")}</Label>
               <div className="rounded-md border overflow-hidden">
                 <CodeMirror
                   value={datasetJson}
@@ -1215,18 +1226,18 @@ export function DesignerPage() {
               variant="outline"
               onClick={() => setShowDatasetDialog(false)}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={() => {
                 if (!datasetName.trim()) {
-                  toast.error("Dataset name required");
+                  toast.error(t("designer.toast_dataset_name_required"));
                   return;
                 }
                 try {
                   JSON.parse(datasetJson);
                 } catch {
-                  toast.error("Invalid JSON");
+                  toast.error(t("designer.toast_invalid_json"));
                   return;
                 }
                 void (async () => {
@@ -1236,14 +1247,18 @@ export function DesignerPage() {
                     });
                     await loadDatasets();
                     setShowDatasetDialog(false);
-                    toast.success(`Dataset "${datasetName}" added`);
+                    toast.success(
+                      t("designer.toast_dataset_added", { name: datasetName }),
+                    );
                   } catch (e) {
-                    toast.error(`Add failed: ${e}`);
+                    toast.error(
+                      t("designer.toast_add_failed", { error: String(e) }),
+                    );
                   }
                 })();
               }}
             >
-              Add
+              {t("common.add")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1253,7 +1268,9 @@ export function DesignerPage() {
       <Dialog open={showEditDataset} onOpenChange={setShowEditDataset}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit Dataset: {editingDataset}</DialogTitle>
+            <DialogTitle>
+              {t("designer.sample_edit_title", { name: editingDataset })}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="rounded-md border overflow-hidden">
@@ -1280,14 +1297,14 @@ export function DesignerPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEditDataset(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               onClick={() => {
                 try {
                   JSON.parse(editJson);
                 } catch {
-                  toast.error("Invalid JSON");
+                  toast.error(t("designer.toast_invalid_json"));
                   return;
                 }
                 void (async () => {
@@ -1302,14 +1319,16 @@ export function DesignerPage() {
                     });
                     await loadDatasets();
                     setShowEditDataset(false);
-                    toast.success("Dataset updated");
+                    toast.success(t("designer.toast_dataset_updated"));
                   } catch (e) {
-                    toast.error(`Save failed: ${e}`);
+                    toast.error(
+                      t("designer.toast_save_failed", { error: String(e) }),
+                    );
                   }
                 })();
               }}
             >
-              Save
+              {t("designer.sample_save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1322,13 +1341,13 @@ export function DesignerPage() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>New Template</DialogTitle>
+            <DialogTitle>{t("designer.newTemplate")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
-              <Label>Template Name</Label>
+              <Label>{t("designer.template_name")}</Label>
               <Input
-                placeholder="My Template"
+                placeholder={t("designer.new_name_example")}
                 value={newTemplateName}
                 onChange={(e) => setNewTemplateName(e.target.value)}
               />
@@ -1339,9 +1358,11 @@ export function DesignerPage() {
               variant="outline"
               onClick={() => setShowNewTemplateDialog(false)}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
-            <Button onClick={createNewTemplate}>Create</Button>
+            <Button onClick={createNewTemplate}>
+              {t("designer.new_create")}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1357,12 +1378,10 @@ export function DesignerPage() {
       >
         <DialogContent data-testid="save-conflict-dialog">
           <DialogHeader>
-            <DialogTitle>This template changed on the server</DialogTitle>
+            <DialogTitle>{t("designer.conflict_title")}</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Someone else saved it after the copy on this computer was made. Take
-            the server copy and lose your unsaved edits here, or overwrite the
-            server with what’s in the editor.
+            {t("designer.conflict_body")}
           </p>
           <DialogFooter className="flex-col gap-2 sm:flex-col">
             <Button
@@ -1370,7 +1389,9 @@ export function DesignerPage() {
               onClick={() => void resolveOverwrite()}
               disabled={pending !== null}
             >
-              {pending === "save" ? "Overwriting…" : "Overwrite with mine"}
+              {pending === "save"
+                ? t("designer.conflict_overwriting")
+                : t("designer.conflict_overwrite")}
             </Button>
             <Button
               data-testid="save-conflict-take-server"
@@ -1378,7 +1399,9 @@ export function DesignerPage() {
               onClick={() => void resolveTakeServer()}
               disabled={pending !== null}
             >
-              {pending === "save" ? "Loading…" : "Take server copy"}
+              {pending === "save"
+                ? t("designer.conflict_loading")
+                : t("designer.conflict_take_server")}
             </Button>
           </DialogFooter>
         </DialogContent>

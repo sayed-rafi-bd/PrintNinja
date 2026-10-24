@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { renderTemplate } from "@/lib/render/renderTemplate";
 
 interface Props {
@@ -24,6 +25,7 @@ export function CanvasPane({
   height,
   zoom = 1,
 }: Props) {
+  const { t } = useTranslation();
   return (
     // The outer box takes the scaled size so scrolling matches what is drawn.
     <div
@@ -42,7 +44,7 @@ export function CanvasPane({
           srcDoc={renderTemplate(html, css, data, compiledCss)}
           sandbox=""
           className="pointer-events-none"
-          title="Canvas preview"
+          title={t("designer.canvas_preview")}
           style={{ width: "100%", height: "100%", border: 0 }}
         />
       </div>

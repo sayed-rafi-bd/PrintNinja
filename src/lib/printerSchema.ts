@@ -33,7 +33,7 @@ function addressError(printerType: string, address: string): string | null {
       } catch {
         /* fall through to the message */
       }
-      return "IPP address must be a full URL starting with http:// or https://";
+      return "printers.err_ipp_url";
     }
     case "raw_tcp": {
       const m = /^(.+):(\d{1,5})$/.exec(address);
@@ -45,7 +45,7 @@ function addressError(printerType: string, address: string): string | null {
         port < 1 ||
         port > 65535
       ) {
-        return "Raw TCP address must be host:port, e.g. 192.168.1.50:9100";
+        return "printers.err_raw_tcp";
       }
       return null;
     }
@@ -55,31 +55,52 @@ function addressError(printerType: string, address: string): string | null {
   }
 }
 
-const finitePositiveInt = (label: string, min: number, max: number) =>
+const finitePositiveInt = (
+  notNumberKey: string,
+  notIntKey: string,
+  minKey: string,
+  maxKey: string,
+  min: number,
+  max: number,
+) =>
   z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : Number(v)),
     z
-      .number({ invalid_type_error: `${label} must be a number` })
-      .int(`${label} must be a whole number`)
-      .min(min, `${label} must be at least ${min}`)
-      .max(max, `${label} must be at most ${max}`)
+      .number({ invalid_type_error: notNumberKey })
+      .int(notIntKey)
+      .min(min, minKey)
+      .max(max, maxKey)
       .refine((n) => Number.isFinite(n), {
-        message: `${label} must be a number`,
+        message: notNumberKey,
       }),
   );
 
 export const printerFormSchema = z
   .object({
-    name: z.string().trim().min(1, "Printer name is required"),
+    name: z.string().trim().min(1, "printers.err_name_required"),
     printer_type: z.enum(PRINTER_TYPES, {
-      errorMap: () => ({ message: "Unknown printer type" }),
+      errorMap: () => ({ message: "printers.err_unknown_type" }),
     }),
-    address: z.string().trim().min(1, "Address is required"),
+    address: z.string().trim().min(1, "printers.err_address_required"),
     language: z.enum(PRINTER_LANGUAGES, {
-      errorMap: () => ({ message: "Unknown printer language" }),
+      errorMap: () => ({ message: "printers.err_unknown_language" }),
     }),
-    paper_width_mm: finitePositiveInt("Paper width", 1, 1000),
-    dpi: finitePositiveInt("DPI", 50, 2400),
+    paper_width_mm: finitePositiveInt(
+      "printers.err_paper_number",
+      "printers.err_paper_int",
+      "printers.err_paper_min",
+      "printers.err_paper_max",
+      1,
+      1000,
+    ),
+    dpi: finitePositiveInt(
+      "printers.err_dpi_number",
+      "printers.err_dpi_int",
+      "printers.err_dpi_min",
+      "printers.err_dpi_max",
+      50,
+      2400,
+    ),
   })
   .superRefine((form, ctx) => {
     const err = addressError(form.printer_type, form.address);
@@ -105,14 +126,14 @@ export interface LoosePrinterForm {
   dpi: string;
 }
 
-/** One friendly message for the toast: the first failing field. */
+/** One friendly message for the toast: the first failing field, as an i18n key. */
 export function validatePrinterForm(
   form: LoosePrinterForm,
-): { ok: true; req: ValidPrinterReq } | { ok: false; error: string } {
+): { ok: true; req: ValidPrinterReq } | { ok: false; messageKey: string } {
   const parsed = printerFormSchema.safeParse(form);
   if (parsed.success) return { ok: true, req: parsed.data };
   return {
     ok: false,
-    error: parsed.error.issues[0]?.message ?? "Invalid printer",
+    messageKey: parsed.error.issues[0]?.message ?? "printers.err_invalid",
   };
 }

@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { t } from "i18next";
+import "@/lib/i18n";
 import {
   validateBarcode,
   generateBarcodeSvg,
@@ -143,7 +145,9 @@ describe("buildBarcodeHtml", () => {
 describe("validateBarcode", () => {
   it("rejects empty values for every type", () => {
     for (const { value: type } of BARCODE_TYPES) {
-      expect(validateBarcode(type, ""), type).toBe("Value is required");
+      expect(t(validateBarcode(type, "") ?? ""), type).toBe(
+        "Value is required",
+      );
     }
   });
 
@@ -152,24 +156,28 @@ describe("validateBarcode", () => {
   });
 
   it("rejects an EAN-13 with a wrong check digit", () => {
-    expect(validateBarcode("ean13", "4006381333932")).toContain("check digit");
+    expect(t(validateBarcode("ean13", "4006381333932") ?? "")).toContain(
+      "check digit",
+    );
   });
 
   it("enforces exact digit counts for EAN/UPC", () => {
-    expect(validateBarcode("ean13", "123")).toContain("13 digits");
-    expect(validateBarcode("ean8", "123")).toContain("8 digits");
-    expect(validateBarcode("upca", "123")).toContain("12 digits");
+    expect(t(validateBarcode("ean13", "123") ?? "")).toContain("13 digits");
+    expect(t(validateBarcode("ean8", "123") ?? "")).toContain("8 digits");
+    expect(t(validateBarcode("upca", "123") ?? "")).toContain("12 digits");
   });
 
   it("enforces Code 39's restricted charset", () => {
     expect(validateBarcode("code39", "ABC-123")).toBeNull();
-    expect(validateBarcode("code39", "hello@world")).toContain("only supports");
+    expect(t(validateBarcode("code39", "hello@world") ?? "")).toContain(
+      "only supports",
+    );
   });
 
   it("requires ITF values to have an even number of digits", () => {
     expect(validateBarcode("itf", "1234")).toBeNull();
-    expect(validateBarcode("itf", "123")).toContain("even number");
-    expect(validateBarcode("itf", "12a4")).toContain("even number");
+    expect(t(validateBarcode("itf", "123") ?? "")).toContain("even number");
+    expect(t(validateBarcode("itf", "12a4") ?? "")).toContain("even number");
   });
 
   it("requires Codabar start/stop letters", () => {
@@ -177,11 +185,15 @@ describe("validateBarcode", () => {
     expect(validateBarcode("codabar", "A12345")).toBeNull();
     expect(validateBarcode("codabar", "12345B")).toBeNull();
     // Neither start nor stop letter is invalid.
-    expect(validateBarcode("codabar", "12345")).toContain("start/stop");
+    expect(t(validateBarcode("codabar", "12345") ?? "")).toContain(
+      "start/stop",
+    );
   });
 
   it("rejects Codabar values outside the symbol set", () => {
-    expect(validateBarcode("codabar", "12#45")).toContain("start/stop");
+    expect(t(validateBarcode("codabar", "12#45") ?? "")).toContain(
+      "start/stop",
+    );
   });
 
   it("accepts arbitrary text for 2D symbologies", () => {
@@ -272,7 +284,10 @@ describe("buildBarcodeSnippet", () => {
   it("refuses a data field for symbologies the print path cannot draw", () => {
     const r = buildBarcodeSnippet("datamatrix", "order.id", true);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toContain("Data Matrix");
+    if (!r.ok) {
+      expect(r.messageKey).toBe("designer.barcode_err_fixed");
+      expect(t(r.messageKey, r.messageParams)).toContain("Data Matrix");
+    }
   });
 
   it("quotes a fixed value and still uses the helper", () => {
@@ -292,7 +307,7 @@ describe("buildBarcodeSnippet", () => {
     const r = buildBarcodeSnippet("ean13", "123", false);
     expect(r).toEqual({
       ok: false,
-      error: "EAN-13 requires exactly 13 digits",
+      messageKey: "designer.barcode_err_ean13_len",
     });
   });
 
@@ -313,7 +328,7 @@ describe("buildBarcodeSnippet", () => {
   it("requires a value", () => {
     expect(buildBarcodeSnippet("code128", "  ", true)).toEqual({
       ok: false,
-      error: "Value is required",
+      messageKey: "designer.barcode_err_required",
     });
   });
 });

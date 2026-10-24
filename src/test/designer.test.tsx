@@ -194,7 +194,7 @@ describe("ControlsAccordion", () => {
     setPageWidth: vi.fn(),
     pageHeight: 200,
     setPageHeight: vi.fn(),
-    presets: [{ label: "A4", width: 210, height: 297 }],
+    presets: [{ labelKey: "designer.preset_a4", width: 210, height: 297 }],
     orientation: "portrait" as const,
     setOrientation: vi.fn(),
   });

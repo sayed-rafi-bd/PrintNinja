@@ -228,7 +228,7 @@ export function TemplatesPage() {
     setSyncing(tpl.id);
     try {
       await saveRowToServer(tpl);
-      toast.success(`Saved “${tpl.name}” to the server`);
+      toast.success(t("templates.toast_saved_server", { name: tpl.name }));
       await loadMine();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -244,7 +244,9 @@ export function TemplatesPage() {
       // Server first, then the cache: offline the button that opens this
       // dialog is disabled, so there is no queue to drain later.
       await deleteTemplateEverywhere(tpl);
-      toast.success(`Deleted “${tpl.name}” everywhere`);
+      toast.success(
+        t("templates.toast_deleted_everywhere", { name: tpl.name }),
+      );
       await loadMine();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
@@ -258,7 +260,7 @@ export function TemplatesPage() {
     setSyncing(tpl.id);
     try {
       const result = await takeServerCopy(tpl);
-      toast.success(`Refreshed “${result.name}” from the server`);
+      toast.success(t("templates.toast_refreshed", { name: result.name }));
       await loadMine();
     } catch (e) {
       // The local copy is untouched when the fetch fails, so it still prints.
@@ -272,12 +274,12 @@ export function TemplatesPage() {
     if (saving.has(serverTpl.id)) return;
     const url = await share.getServiceUrl();
     if (!url) {
-      toast.error("Share service not configured");
+      toast.error(t("templates.toast_share_unconfigured"));
       return;
     }
     const token = await share.getSessionToken();
     if (!token) {
-      toast.error("Sign in to save templates");
+      toast.error(t("templates.toast_signin_required"));
       return;
     }
 
@@ -293,15 +295,18 @@ export function TemplatesPage() {
         serverTpl.owner_handle,
       );
       if (!result.created) {
-        toast.success("Already saved");
+        toast.success(t("templates.toast_already_saved"));
         return;
       }
-      toast.success(`Saved "${serverTpl.name}"`);
+      toast.success(t("templates.toast_saved_local", { name: serverTpl.name }));
       await loadMine();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e), {
-        description: "Tap to retry",
-        action: { label: "Retry", onClick: () => handleSave(serverTpl) },
+        description: t("templates.toast_tap_retry"),
+        action: {
+          label: t("templates.toast_retry"),
+          onClick: () => handleSave(serverTpl),
+        },
       });
     } finally {
       setSaving((s) => {
@@ -329,7 +334,7 @@ export function TemplatesPage() {
       await agent("cache_forget_template", {
         server_id: localTpl.server_id ?? localTpl.remote_id,
       });
-      toast.success("Removed from Saved");
+      toast.success(t("templates.toast_removed_saved"));
       await loadMine();
     } catch (e) {
       toast.error(String(e));
@@ -382,18 +387,25 @@ export function TemplatesPage() {
   // revision it was last synced at.
   const mineStatus = (tpl: TemplateRow) => {
     if (tpl.base_revision == null)
-      return <StatusBadge status="draft" label="Not on the server" />;
+      return (
+        <StatusBadge
+          status="draft"
+          label={t("templates.status_not_on_server")}
+        />
+      );
     if (!tpl.published_at)
-      return <StatusBadge status="draft" label="Private" />;
+      return (
+        <StatusBadge status="draft" label={t("templates.status_private")} />
+      );
     return share.hasUnpublishedChanges(tpl) ? (
-      <StatusBadge status="draft" label="Changes not saved" />
+      <StatusBadge status="draft" label={t("templates.status_changes")} />
     ) : (
       <StatusBadge status="published" />
     );
   };
   const savedStatus = (tpl: TemplateRow) =>
     tpl.withdrawn || gone.has(tpl.id) ? (
-      <StatusBadge status="withdrawn" label="Withdrawn by author" />
+      <StatusBadge status="withdrawn" label={t("templates.status_withdrawn")} />
     ) : (
       <StatusBadge status="saved" />
     );
@@ -430,7 +442,7 @@ export function TemplatesPage() {
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium">{tpl.name}</p>
           <p className="truncate text-xs text-muted-foreground">
-            {tpl.summary || "No summary"}
+            {tpl.summary || t("templates.no_summary")}
           </p>
         </div>
         {cardMenu(
@@ -441,22 +453,22 @@ export function TemplatesPage() {
               onSelect={() => handleSaveToServer(tpl)}
             >
               <CloudUpload className="h-4 w-4" aria-hidden="true" />
-              {`Save ${tpl.name} to the server`}
+              {t("templates.action_save_server", { name: tpl.name })}
             </DropdownMenuItem>
             <DropdownMenuItem
               disabled={syncing != null}
               onSelect={() => setRefreshTarget(tpl)}
             >
               <RefreshCw className="h-4 w-4" aria-hidden="true" />
-              {`Refresh ${tpl.name} from the server`}
+              {t("templates.action_refresh_server", { name: tpl.name })}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => navigate(`/template/${tpl.id}`)}>
               <Pencil className="h-4 w-4" aria-hidden="true" />
-              Edit
+              {t("common.edit")}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => handleUse(tpl, false)}>
               <Printer className="h-4 w-4" aria-hidden="true" />
-              Print
+              {t("templates.action_print")}
             </DropdownMenuItem>
             <DropdownMenuItem
               disabled={syncing != null}
@@ -464,7 +476,7 @@ export function TemplatesPage() {
               className="text-danger focus:text-danger"
             >
               <Trash2 className="h-4 w-4" aria-hidden="true" />
-              {`Delete ${tpl.name} everywhere`}
+              {t("templates.action_delete_everywhere", { name: tpl.name })}
             </DropdownMenuItem>
           </>,
         )}
@@ -472,7 +484,7 @@ export function TemplatesPage() {
       <div className="flex flex-wrap items-center gap-2">
         {mineStatus(tpl)}
         <span className="text-xs text-muted-foreground">
-          {tpl.page_w_mm} × {tpl.page_h_mm} mm
+          {t("templates.page_size", { w: tpl.page_w_mm, h: tpl.page_h_mm })}
         </span>
       </div>
     </div>
@@ -483,7 +495,7 @@ export function TemplatesPage() {
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium">{tpl.name}</p>
           <p className="truncate text-xs text-muted-foreground">
-            {tpl.summary || "No summary"}
+            {tpl.summary || t("templates.no_summary")}
           </p>
         </div>
         {cardMenu(
@@ -494,17 +506,17 @@ export function TemplatesPage() {
               onSelect={() => setRefreshTarget(tpl)}
             >
               <RefreshCw className="h-4 w-4" aria-hidden="true" />
-              {`Refresh ${tpl.name} from the server`}
+              {t("templates.action_refresh_server", { name: tpl.name })}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => handleUse(tpl, true)}>
               <Printer className="h-4 w-4" aria-hidden="true" />
-              Print
+              {t("templates.action_print")}
             </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={() => setRemoveTarget(tpl)}
               className="text-danger focus:text-danger"
             >
-              Remove
+              {t("templates.action_remove")}
             </DropdownMenuItem>
           </>,
         )}
@@ -512,7 +524,9 @@ export function TemplatesPage() {
       <div className="flex flex-wrap items-center gap-2">
         {savedStatus(tpl)}
         <span className="text-xs text-muted-foreground">
-          Saved from {tpl.origin_owner ?? "unknown"}
+          {t("templates.saved_from", {
+            owner: tpl.origin_owner ?? t("templates.unknown_owner"),
+          })}
         </span>
       </div>
     </div>
@@ -527,19 +541,21 @@ export function TemplatesPage() {
     withUpdated: boolean,
   ) => (
     <div className="mb-2 flex items-center justify-end gap-2">
-      <Label htmlFor={id}>Sort</Label>
+      <Label htmlFor={id}>{t("templates.sort_label")}</Label>
       <Select value={sortKey} onValueChange={onSortKey}>
         <SelectTrigger
           id={id}
-          aria-label="Sort templates"
+          aria-label={t("templates.sort_aria")}
           className="w-[170px]"
         >
-          <SelectValue placeholder="Sort" />
+          <SelectValue placeholder={t("templates.sort_placeholder")} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="name">Name (A–Z)</SelectItem>
+          <SelectItem value="name">{t("templates.sort_name")}</SelectItem>
           {withUpdated && (
-            <SelectItem value="updated">Recently updated</SelectItem>
+            <SelectItem value="updated">
+              {t("templates.sort_updated")}
+            </SelectItem>
           )}
         </SelectContent>
       </Select>
@@ -560,33 +576,33 @@ export function TemplatesPage() {
     () => [
       {
         id: "name",
-        header: "Template",
+        header: t("templates.col_template"),
         accessorFn: (r) => r.name.toLowerCase(),
         enableSorting: true,
         cell: (c) => (
           <div className="min-w-0">
             <p className="truncate font-medium">{c.row.original.name}</p>
             <p className="truncate text-xs text-muted-foreground">
-              {c.row.original.summary || "No summary"}
+              {c.row.original.summary || t("templates.no_summary")}
             </p>
           </div>
         ),
       },
       {
         id: "status",
-        header: "Status",
+        header: t("common.status"),
         cell: (c) => mineStatus(c.row.original),
       },
       {
         id: "size",
-        header: "Page size",
+        header: t("templates.col_size"),
         meta: { className: "hidden md:table-cell" },
         cell: (c) =>
           `${c.row.original.page_w_mm} × ${c.row.original.page_h_mm} mm`,
       },
       {
         id: "updated",
-        header: "Updated",
+        header: t("common.updated"),
         accessorFn: (r) => r.updated_at,
         enableSorting: true,
         meta: { className: "hidden md:table-cell" },
@@ -594,7 +610,7 @@ export function TemplatesPage() {
       },
       {
         id: "actions",
-        header: () => <span className="sr-only">Actions</span>,
+        header: () => <span className="sr-only">{t("common.actions")}</span>,
         meta: { className: "text-right" },
         cell: (c) => {
           const tpl = c.row.original;
@@ -607,8 +623,12 @@ export function TemplatesPage() {
               <Button
                 size="icon"
                 variant="ghost"
-                aria-label={`Save ${tpl.name} to the server`}
-                title="Save to the server"
+                aria-label={t("templates.action_save_server", {
+                  name: tpl.name,
+                })}
+                title={t("templates.action_save_server_title", {
+                  name: tpl.name,
+                })}
                 disabled={syncing != null}
                 onClick={() => handleSaveToServer(tpl)}
               >
@@ -617,8 +637,12 @@ export function TemplatesPage() {
               <Button
                 size="icon"
                 variant="ghost"
-                aria-label={`Refresh ${tpl.name} from the server`}
-                title="Refresh from the server"
+                aria-label={t("templates.action_refresh_server", {
+                  name: tpl.name,
+                })}
+                title={t("templates.action_refresh_server_title", {
+                  name: tpl.name,
+                })}
                 disabled={syncing != null}
                 onClick={() => setRefreshTarget(tpl)}
               >
@@ -633,8 +657,10 @@ export function TemplatesPage() {
               <Button
                 size="icon"
                 variant="ghost"
-                aria-label={`Delete ${tpl.name} everywhere`}
-                title="Delete from the server and this computer"
+                aria-label={t("templates.action_delete_everywhere", {
+                  name: tpl.name,
+                })}
+                title={t("templates.action_delete_title", { name: tpl.name })}
                 disabled={syncing != null}
                 onClick={() => setDeleteTarget(tpl)}
                 className="text-danger hover:text-danger"
@@ -647,11 +673,11 @@ export function TemplatesPage() {
                 onClick={() => navigate(`/template/${tpl.id}`)}
               >
                 <Pencil className="h-4 w-4" aria-hidden="true" />
-                Edit
+                {t("common.edit")}
               </Button>
               <Button size="sm" onClick={() => handleUse(tpl, false)}>
                 <Printer className="h-4 w-4" aria-hidden="true" />
-                Print
+                {t("templates.action_print")}
               </Button>
             </div>
           );
@@ -666,32 +692,33 @@ export function TemplatesPage() {
     () => [
       {
         id: "name",
-        header: "Template",
+        header: t("templates.col_template"),
         accessorFn: (r) => r.name.toLowerCase(),
         enableSorting: true,
         cell: (c) => (
           <div className="min-w-0">
             <p className="truncate font-medium">{c.row.original.name}</p>
             <p className="truncate text-xs text-muted-foreground">
-              {c.row.original.summary || "No summary"}
+              {c.row.original.summary || t("templates.no_summary")}
             </p>
           </div>
         ),
       },
       {
         id: "from",
-        header: "Saved from",
+        header: t("templates.saved_from_header"),
         meta: { className: "hidden md:table-cell" },
-        cell: (c) => c.row.original.origin_owner ?? "unknown",
+        cell: (c) =>
+          c.row.original.origin_owner ?? t("templates.unknown_owner"),
       },
       {
         id: "status",
-        header: "Status",
+        header: t("common.status"),
         cell: (c) => savedStatus(c.row.original),
       },
       {
         id: "actions",
-        header: () => <span className="sr-only">Actions</span>,
+        header: () => <span className="sr-only">{t("common.actions")}</span>,
         meta: { className: "text-right" },
         cell: (c) => {
           const tpl = c.row.original;
@@ -704,8 +731,12 @@ export function TemplatesPage() {
               <Button
                 size="icon"
                 variant="ghost"
-                aria-label={`Refresh ${tpl.name} from the server`}
-                title="Refresh from the server"
+                aria-label={t("templates.action_refresh_server", {
+                  name: tpl.name,
+                })}
+                title={t("templates.action_refresh_server_title", {
+                  name: tpl.name,
+                })}
                 disabled={syncing != null}
                 onClick={() => setRefreshTarget(tpl)}
               >
@@ -719,14 +750,14 @@ export function TemplatesPage() {
               </Button>
               <Button size="sm" onClick={() => handleUse(tpl, true)}>
                 <Printer className="h-4 w-4" aria-hidden="true" />
-                Print
+                {t("templates.action_print")}
               </Button>
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => setRemoveTarget(tpl)}
               >
-                Remove
+                {t("templates.action_remove")}
               </Button>
             </div>
           );
@@ -739,18 +770,24 @@ export function TemplatesPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Templates" description={t("pages.templates")}>
+      <PageHeader title={t("nav.templates")} description={t("pages.templates")}>
         <Button variant="outline" onClick={() => setGetOpen(true)}>
           <CloudDownload className="h-4 w-4" aria-hidden="true" />
-          Get from server
+          {t("templates.get_from_server")}
         </Button>
       </PageHeader>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="mine">Mine ({mine.length})</TabsTrigger>
-          <TabsTrigger value="saved">Saved ({saved.length})</TabsTrigger>
-          <TabsTrigger value="community">Community</TabsTrigger>
+          <TabsTrigger value="mine">
+            {t("templates.tab_mine")} ({mine.length})
+          </TabsTrigger>
+          <TabsTrigger value="saved">
+            {t("templates.tab_saved")} ({saved.length})
+          </TabsTrigger>
+          <TabsTrigger value="community">
+            {t("templates.tab_community")}
+          </TabsTrigger>
         </TabsList>
 
         {/* Mine */}
@@ -769,8 +806,8 @@ export function TemplatesPage() {
             >
               <span>
                 {conflicts.length === 1
-                  ? `“${conflicts[0].name}” changed on another PC.`
-                  : `${conflicts.length} templates changed on another PC.`}
+                  ? t("templates.conflict_single", { name: conflicts[0].name })
+                  : t("templates.conflict_many", { count: conflicts.length })}
               </span>
               <Button
                 variant="outline"
@@ -780,7 +817,7 @@ export function TemplatesPage() {
                   setConflictOpen(true);
                 }}
               >
-                Review
+                {t("templates.conflict_review")}
               </Button>
             </div>
           )}
@@ -794,9 +831,12 @@ export function TemplatesPage() {
             onSortingChange={setMineSorting}
             renderCard={mineCard}
             empty={{
-              title: "No templates yet",
-              description: "Create one in Designer.",
-              action: { label: "Open Designer", onClick: () => navigate("/") },
+              title: t("templates.empty_mine_title"),
+              description: t("templates.empty_mine_desc"),
+              action: {
+                label: t("templates.empty_mine_action"),
+                onClick: () => navigate("/"),
+              },
             }}
           />
         </TabsContent>
@@ -819,11 +859,10 @@ export function TemplatesPage() {
             onSortingChange={setSavedSorting}
             renderCard={savedCard}
             empty={{
-              title: "No saved templates",
-              description:
-                "Save a community template to keep a copy that works offline.",
+              title: t("templates.empty_saved_title"),
+              description: t("templates.empty_saved_desc"),
               action: {
-                label: "Browse community",
+                label: t("templates.empty_saved_action"),
                 onClick: () => setActiveTab("community"),
               },
             }}
@@ -834,37 +873,41 @@ export function TemplatesPage() {
         <TabsContent value="community" className="mt-4 space-y-4">
           <div className="flex flex-col gap-2 md:flex-row">
             <Input
-              aria-label="Search templates"
-              placeholder="Search by name"
+              aria-label={t("templates.search_label")}
+              placeholder={t("templates.search_placeholder")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="flex-1"
             />
             <Select value={sort} onValueChange={setSort}>
               <SelectTrigger
-                aria-label="Sort templates"
+                aria-label={t("templates.sort_aria")}
                 className="w-full md:w-[170px]"
               >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="updated">Recently updated</SelectItem>
-                <SelectItem value="used">Most used</SelectItem>
-                <SelectItem value="name">A–Z</SelectItem>
+                <SelectItem value="updated">
+                  {t("templates.sort_updated")}
+                </SelectItem>
+                <SelectItem value="used">{t("templates.sort_used")}</SelectItem>
+                <SelectItem value="name">
+                  {t("templates.sort_alpha")}
+                </SelectItem>
               </SelectContent>
             </Select>
             <Button variant="outline" onClick={loadCommunity}>
-              Refresh
+              {t("templates.refresh")}
             </Button>
           </div>
 
           {!configured ? (
             <Card>
               <EmptyState
-                title="Share service not set up"
-                description="Add a share service address in Settings to browse templates published by others."
+                title={t("templates.no_share_title")}
+                description={t("templates.no_share_hint")}
                 action={{
-                  label: "Open Settings",
+                  label: t("templates.no_share_action"),
                   onClick: () => navigate("/settings"),
                 }}
               />
@@ -872,20 +915,23 @@ export function TemplatesPage() {
           ) : offline ? (
             <Card>
               <EmptyState
-                title="Can’t reach the share service"
-                description="Community needs a network connection. Your saved templates still work offline."
-                action={{ label: "Try again", onClick: loadCommunity }}
+                title={t("templates.offline_title")}
+                description={t("templates.offline_hint")}
+                action={{
+                  label: t("templates.offline_retry"),
+                  onClick: loadCommunity,
+                }}
               />
             </Card>
           ) : communityLoading ? (
             <p className="text-sm text-muted-foreground" role="status">
-              Loading…
+              {t("templates.loading")}
             </p>
           ) : community.length === 0 ? (
             <Card>
               <EmptyState
-                title="No published templates yet"
-                description="Publish one from Designer to see it here."
+                title={t("templates.empty_community_title")}
+                description={t("templates.empty_community_hint")}
               />
             </Card>
           ) : (
@@ -903,17 +949,26 @@ export function TemplatesPage() {
                         <div className="flex items-start justify-between gap-2">
                           <h2 className="truncate font-medium">{tpl.name}</h2>
                           {own ? (
-                            <StatusBadge status="published" label="Yours" />
+                            <StatusBadge
+                              status="published"
+                              label={t("templates.server_mine")}
+                            />
                           ) : (
-                            <Badge variant="outline">Community</Badge>
+                            <Badge variant="outline">
+                              {t("templates.badge_community")}
+                            </Badge>
                           )}
                         </div>
                         <p className="line-clamp-2 text-xs text-muted-foreground">
-                          {tpl.summary || "No summary"}
+                          {tpl.summary || t("templates.no_summary")}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {tpl.owner_handle} · {tpl.use_count} prints ·{" "}
-                          {tpl.page_w_mm}×{tpl.page_h_mm} mm
+                          {t("templates.meta_line", {
+                            owner: tpl.owner_handle,
+                            uses: tpl.use_count,
+                            w: tpl.page_w_mm,
+                            h: tpl.page_h_mm,
+                          })}
                         </p>
                         <div className="flex gap-2 pt-2">
                           {!own && (
@@ -936,10 +991,10 @@ export function TemplatesPage() {
                                 />
                               )}
                               {savingState
-                                ? "Saving…"
+                                ? t("templates.saving")
                                 : savedState
-                                  ? "Saved"
-                                  : "Save"}
+                                  ? t("templates.saved_label")
+                                  : t("templates.save_action")}
                             </Button>
                           )}
                           <Button
@@ -948,7 +1003,7 @@ export function TemplatesPage() {
                             onClick={() => openPreview(tpl)}
                           >
                             <Eye className="h-4 w-4" aria-hidden="true" />
-                            Preview
+                            {t("templates.preview_action")}
                           </Button>
                         </div>
                       </CardContent>
@@ -966,9 +1021,13 @@ export function TemplatesPage() {
         onOpenChange={(o) => {
           if (!o) setDeleteTarget(null);
         }}
-        title={`Delete “${deleteTarget?.name ?? ""}” everywhere?`}
-        description="The server copy and the copy on this computer are both deleted. This cannot be undone."
-        confirmLabel="Delete template"
+        title={
+          deleteTarget
+            ? t("templates.delete_title", { name: deleteTarget.name })
+            : ""
+        }
+        description={t("templates.delete_body")}
+        confirmLabel={t("templates.delete_confirm")}
         destructive
         onConfirm={async () => {
           if (deleteTarget) await handleDelete(deleteTarget);
@@ -981,9 +1040,13 @@ export function TemplatesPage() {
         onOpenChange={(o) => {
           if (!o) setRefreshTarget(null);
         }}
-        title={`Refresh “${refreshTarget?.name ?? ""}” from the server?`}
-        description="The copy on the server replaces the one on this computer, including changes you have not saved."
-        confirmLabel="Refresh template"
+        title={
+          refreshTarget
+            ? t("templates.refresh_title", { name: refreshTarget.name })
+            : ""
+        }
+        description={t("templates.refresh_body")}
+        confirmLabel={t("templates.refresh_confirm")}
         onConfirm={async () => {
           if (refreshTarget) await handleRefresh(refreshTarget);
           setRefreshTarget(null);
@@ -1011,9 +1074,13 @@ export function TemplatesPage() {
         onOpenChange={(o) => {
           if (!o) setRemoveTarget(null);
         }}
-        title={`Remove “${removeTarget?.name ?? ""}” from Saved?`}
-        description="The local copy is deleted. You can save it again from Community."
-        confirmLabel="Remove template"
+        title={
+          removeTarget
+            ? t("templates.remove_title", { name: removeTarget.name })
+            : ""
+        }
+        description={t("templates.remove_body")}
+        confirmLabel={t("templates.remove_confirm")}
         destructive
         onConfirm={async () => {
           if (removeTarget) await handleUnsave(removeTarget);
@@ -1032,7 +1099,10 @@ export function TemplatesPage() {
             <DialogTitle>{previewTpl?.name}</DialogTitle>
             <DialogDescription>
               {previewTpl
-                ? `${previewTpl.page_w_mm} × ${previewTpl.page_h_mm} mm, shown with sample data`
+                ? t("templates.preview_subtitle", {
+                    w: previewTpl.page_w_mm,
+                    h: previewTpl.page_h_mm,
+                  })
                 : ""}
             </DialogDescription>
           </DialogHeader>
@@ -1048,7 +1118,7 @@ export function TemplatesPage() {
               className="max-h-[60vh] overflow-auto rounded-md border bg-muted p-4"
               tabIndex={0}
               role="region"
-              aria-label="Template preview"
+              aria-label={t("templates.preview_region")}
             >
               <div
                 className="mx-auto bg-white shadow-md"
@@ -1062,7 +1132,7 @@ export function TemplatesPage() {
                   sandbox=""
                   className="w-full border-0"
                   style={{ height: (previewTpl?.page_h_mm ?? 200) * 3.7795 }}
-                  title="Template preview"
+                  title={t("templates.preview_region")}
                 />
               </div>
             </div>
@@ -1071,12 +1141,12 @@ export function TemplatesPage() {
               className="py-8 text-center text-sm text-muted-foreground"
               role="status"
             >
-              Loading preview…
+              {t("templates.preview_loading")}
             </p>
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setPreviewTpl(null)}>
-              Close
+              {t("common.close")}
             </Button>
           </DialogFooter>
         </DialogContent>

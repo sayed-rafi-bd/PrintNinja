@@ -289,12 +289,12 @@ export function SettingsPage() {
   ) => {
     const n = Number(value);
     if (!Number.isInteger(n) || n < min) {
-      setErr(`${label} must be a whole number of at least ${min}.`);
+      setErr(t("settings_page.number_error", { label, min }));
       return;
     }
     setErr("");
     await writeSetting(key, String(n));
-    toast.success("Setting saved");
+    toast.success(t("settings_page.toast_saved"));
   };
 
   // One behavior for every background toggle: persist the key, ask the
@@ -312,7 +312,7 @@ export function SettingsPage() {
       // Web preview or an old backend: the stored value still applies
       // at the next launch.
     }
-    toast.success("Background setting saved");
+    toast.success(t("settings_page.toast_bg_saved"));
   };
 
   const startApi = async () => {
@@ -322,12 +322,14 @@ export function SettingsPage() {
         port: Number(apiPort),
         lan_access: lanAccess,
       });
-      toast.success(`API server listening on ${addr}`);
+      toast.success(t("settings_page.toast_api_up", { addr }));
       await writeSetting("api_port", apiPort);
       await writeSetting("api_lan_access", String(lanAccess));
       await loadApiStatus();
     } catch (e) {
-      toast.error(`Failed to start: ${e}`);
+      toast.error(
+        t("settings_page.toast_api_start_failed", { error: String(e) }),
+      );
     } finally {
       setStarting(false);
     }
@@ -336,10 +338,12 @@ export function SettingsPage() {
   const stopApi = async () => {
     try {
       await agent("stop_api_server", {});
-      toast.success("API server stopped");
+      toast.success(t("settings_page.toast_api_down"));
       await loadApiStatus();
     } catch (e) {
-      toast.error(`Failed to stop: ${e}`);
+      toast.error(
+        t("settings_page.toast_api_stop_failed", { error: String(e) }),
+      );
     }
   };
 
@@ -362,7 +366,9 @@ export function SettingsPage() {
         file_data: bytes,
         family: null,
       });
-      toast.success(`Uploaded ${file.name}`);
+      toast.success(
+        t("settings_page.toast_font_uploaded", { name: file.name }),
+      );
       await loadFonts();
       // Stored locally for now; sending fonts to the server gets its own
       // explicit action in phase 2.
@@ -401,12 +407,12 @@ export function SettingsPage() {
     const value = newTrusted.trim();
     if (!value) return;
     if (trusted.includes(value)) {
-      toast.info("That source is already trusted");
+      toast.info(t("settings_page.toast_already_trusted"));
       return;
     }
     await persistTrusted([...trusted, value]);
     setNewTrusted("");
-    toast.success(`Trusted source added`);
+    toast.success(t("settings_page.toast_trusted_added"));
   };
 
   const removeTrusted = async (value: string) => {
@@ -444,19 +450,19 @@ export function SettingsPage() {
     await writeSetting("allowed_domains", normalized);
     if (normalized !== raw) setAllowedDomains(normalized);
     lastSavedDomains.current = normalized;
-    toast.success("Allowed domains updated");
+    toast.success(t("settings_page.toast_domains_updated"));
   };
 
   const saveShareUrl = async () => {
     const typed = shareUrl.trim();
     const next = typed ? normalizeServiceUrl(typed) : null;
     if (typed && !next) {
-      toast.error("Enter the full address, starting with http:// or https://");
+      toast.error(t("settings_page.toast_bad_url"));
       return;
     }
     const current = await share.getServiceUrl();
     if (next === current) {
-      toast.success("Service URL unchanged");
+      toast.success(t("settings_page.toast_url_unchanged"));
       return;
     }
     const hadSession = !!(await share.getSessionToken());
@@ -468,12 +474,12 @@ export function SettingsPage() {
       setShareUser(null);
       await share.endSession("signed_out");
     }
-    toast.success("Service URL saved");
+    toast.success(t("settings_page.toast_url_saved"));
   };
 
   const doRegister = async () => {
     if (!shareUrl.trim() || !shareHandle.trim() || !sharePassword) {
-      toast.error("Service URL, handle and password required");
+      toast.error(t("settings_page.toast_signin_required"));
       return;
     }
     setShareBusy(true);
@@ -481,7 +487,9 @@ export function SettingsPage() {
       const res = await share.register(shareHandle.trim(), sharePassword);
       setShareUser({ handle: res.user.handle });
       setSharePassword("");
-      toast.success(`Registered as ${res.user.handle}`);
+      toast.success(
+        t("settings_page.toast_registered", { handle: res.user.handle }),
+      );
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -491,7 +499,7 @@ export function SettingsPage() {
 
   const doLogin = async () => {
     if (!shareUrl.trim() || !shareHandle.trim() || !sharePassword) {
-      toast.error("Service URL, handle and password required");
+      toast.error(t("settings_page.toast_signin_required"));
       return;
     }
     setShareBusy(true);
@@ -499,7 +507,9 @@ export function SettingsPage() {
       const res = await share.login(shareHandle.trim(), sharePassword);
       setShareUser({ handle: res.user.handle });
       setSharePassword("");
-      toast.success(`Signed in as ${res.user.handle}`);
+      toast.success(
+        t("settings_page.toast_signed_in", { handle: res.user.handle }),
+      );
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -512,7 +522,7 @@ export function SettingsPage() {
     try {
       await share.logout();
       setShareUser(null);
-      toast.success("Signed out");
+      toast.success(t("settings_page.toast_signed_out"));
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -579,7 +589,7 @@ export function SettingsPage() {
             </div>
           ) : (
             <TabsList
-              aria-label="Settings sections"
+              aria-label={t("settings_page.sections_aria")}
               className="h-auto w-full shrink-0 flex-row items-stretch justify-start gap-1 overflow-x-auto bg-transparent p-0 md:w-56 md:flex-col md:overflow-visible"
             >
               {SECTION_META.map((s) => (
@@ -604,12 +614,14 @@ export function SettingsPage() {
               <AppearanceSettings />
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Installed Fonts</CardTitle>
+                  <CardTitle className="text-base">
+                    {t("settings_page.fonts_installed")}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {fonts.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
-                      No custom fonts installed. Noto Sans is bundled.
+                      {t("settings_page.fonts_empty")}
                     </p>
                   ) : (
                     fonts.map((f) => (
@@ -628,7 +640,7 @@ export function SettingsPage() {
                             className="text-xs text-muted-foreground"
                           >
                             {f.state === "ready"
-                              ? "Ready"
+                              ? t("settings_page.font_ready")
                               : f.state === "error"
                                 ? "Download failed — will retry"
                                 : "Downloading…"}
@@ -637,15 +649,25 @@ export function SettingsPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          aria-label={`Remove ${f.family}`}
+                          aria-label={t("settings_page.font_remove", {
+                            name: f.family,
+                          })}
                           data-testid={`font-delete-${f.id}`}
                           onClick={async () => {
                             try {
                               await agent("delete_font", { id: f.id });
                               await loadFonts();
-                              toast.success(`Removed ${f.family}`);
+                              toast.success(
+                                t("settings_page.toast_font_removed", {
+                                  name: f.family,
+                                }),
+                              );
                             } catch (e) {
-                              toast.error(`Failed: ${e}`);
+                              toast.error(
+                                t("settings_page.toast_failed", {
+                                  error: String(e),
+                                }),
+                              );
                             }
                           }}
                         >
@@ -658,7 +680,7 @@ export function SettingsPage() {
                   <input
                     ref={fileRef}
                     type="file"
-                    aria-label="Upload font file"
+                    aria-label={t("settings_page.font_upload_label")}
                     tabIndex={-1}
                     accept=".ttf,.otf,.woff,.woff2"
                     className="hidden"
@@ -674,7 +696,7 @@ export function SettingsPage() {
                     onClick={() => fileRef.current?.click()}
                   >
                     <Upload className="h-4 w-4" />
-                    Upload Font (TTF, OTF, WOFF2)
+                    {t("settings_page.font_upload")}
                   </Button>
                   {fontUploadError && (
                     <p role="alert" className="text-sm text-danger">
@@ -689,12 +711,10 @@ export function SettingsPage() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">
-                    Run in the background
+                    {t("settings_page.background_title")}
                   </CardTitle>
                   <p className="text-xs text-muted-foreground">
-                    Keep the print queue alive without a window in the way.
-                    Applies on desktop; on Android the notification controls
-                    this instead.
+                    {t("settings_page.background_hint")}
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -721,7 +741,9 @@ export function SettingsPage() {
                       try {
                         await bg.requestBatteryExemption();
                         setBatteryExempt(await bg.isBatteryExemptionGranted());
-                        toast.success("Battery setting updated");
+                        toast.success(
+                          t("settings_page.background_toast_updated"),
+                        );
                       } finally {
                         setBgBusy(false);
                       }
@@ -743,7 +765,7 @@ export function SettingsPage() {
                           }
                         />
                         <Label htmlFor="launch-at-startup">
-                          Launch at startup
+                          {t("settings_page.background_launch")}
                         </Label>
                       </div>
                       <div className="flex items-center gap-2">
@@ -761,12 +783,12 @@ export function SettingsPage() {
                           }
                         />
                         <Label htmlFor="start-minimized">
-                          Start minimized in the notification area
+                          {t("settings_page.background_minimized")}
                         </Label>
                       </div>
                       {!launchAtStartup && (
                         <p className="text-xs text-muted-foreground">
-                          Start minimized needs launch at startup.
+                          {t("settings_page.background_minimized_hint")}
                         </p>
                       )}
                       <div className="flex items-center gap-2">
@@ -783,7 +805,7 @@ export function SettingsPage() {
                           }
                         />
                         <Label htmlFor="minimize-to-tray">
-                          Minimizing sends the app to the notification area
+                          {t("settings_page.background_minimize_tray")}
                         </Label>
                       </div>
                       <div className="flex items-center gap-2">
@@ -800,12 +822,12 @@ export function SettingsPage() {
                           }
                         />
                         <Label htmlFor="close-to-tray">
-                          Closing keeps the app in the notification area
+                          {t("settings_page.background_close_tray")}
                         </Label>
                       </div>
                       {!closeToTray && (
                         <p className="text-xs text-warning">
-                          Closing will quit the app and stop the print queue.
+                          {t("settings_page.background_close_warning")}
                         </p>
                       )}
                     </>
@@ -817,20 +839,24 @@ export function SettingsPage() {
             <TabsContent value="share" className="mt-0 space-y-4">
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Share Service</CardTitle>
+                  <CardTitle className="text-base">
+                    {t("settings_page.share_title")}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-1">
-                    <Label htmlFor="share-url">Service URL</Label>
+                    <Label htmlFor="share-url">
+                      {t("settings_page.share_url")}
+                    </Label>
                     <div className="flex gap-2">
                       <Input
                         id="share-url"
-                        placeholder="https://share.printninja.example"
+                        placeholder={t("settings_page.share_url_example")}
                         value={shareUrl}
                         onChange={(e) => setShareUrl(e.target.value)}
                       />
                       <Button variant="outline" onClick={saveShareUrl}>
-                        Save
+                        {t("common.save")}
                       </Button>
                     </div>
                     <p className="text-xs text-muted-foreground">
@@ -842,19 +868,27 @@ export function SettingsPage() {
 
                   {!shareUser ? (
                     <div className="space-y-3 border-t pt-4">
-                      <p className="text-sm font-medium">Sign in to publish</p>
+                      <p className="text-sm font-medium">
+                        {t("settings_page.share_signin_title")}
+                      </p>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div className="space-y-1">
-                          <Label htmlFor="share-handle">Handle</Label>
+                          <Label htmlFor="share-handle">
+                            {t("auth.handle")}
+                          </Label>
                           <Input
                             id="share-handle"
-                            placeholder="alice"
+                            placeholder={t(
+                              "settings_page.share_handle_example",
+                            )}
                             value={shareHandle}
                             onChange={(e) => setShareHandle(e.target.value)}
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label htmlFor="share-password">Password</Label>
+                          <Label htmlFor="share-password">
+                            {t("auth.password")}
+                          </Label>
                           <Input
                             id="share-password"
                             type="password"
@@ -865,26 +899,25 @@ export function SettingsPage() {
                       </div>
                       <div className="flex gap-2">
                         <Button onClick={doLogin} disabled={shareBusy}>
-                          {shareBusy ? "…" : "Sign in"}
+                          {shareBusy ? "…" : t("auth.sign_in")}
                         </Button>
                         <Button
                           variant="outline"
                           onClick={doRegister}
                           disabled={shareBusy}
                         >
-                          {shareBusy ? "…" : "Register"}
+                          {shareBusy ? "…" : t("settings_page.share_register")}
                         </Button>
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        Handle: 1–32 chars, alphanumeric + _ -. Password ≥ 8
-                        chars. Throttled 5/min per handle/IP.
+                        {t("settings_page.share_rules")}
                       </p>
                     </div>
                   ) : (
                     <div className="space-y-3 border-t pt-4">
                       <div className="flex items-center justify-between">
                         <p className="text-sm">
-                          Signed in as{" "}
+                          {t("settings_page.share_signed_in")}{" "}
                           <span className="font-medium">
                             {shareUser.handle}
                           </span>
@@ -895,7 +928,7 @@ export function SettingsPage() {
                           onClick={doLogout}
                           disabled={shareBusy}
                         >
-                          Sign out
+                          {t("settings_page.share_sign_out")}
                         </Button>
                       </div>
                       <ChangePasswordForm
@@ -912,12 +945,16 @@ export function SettingsPage() {
             <TabsContent value="api" className="mt-0 space-y-4">
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Local REST API</CardTitle>
+                  <CardTitle className="text-base">
+                    {t("settings_page.api_title")}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between p-3 rounded-md border">
                     <div>
-                      <p className="text-sm font-medium">Status</p>
+                      <p className="text-sm font-medium">
+                        {t("common.status")}
+                      </p>
                       <p className="text-xs text-muted-foreground">
                         {apiStatus?.running
                           ? `${apiStatus.address}:${apiStatus.port}`
@@ -932,7 +969,9 @@ export function SettingsPage() {
                   </div>
 
                   <div className="space-y-1">
-                    <Label htmlFor="api-port">Port</Label>
+                    <Label htmlFor="api-port">
+                      {t("settings_page.api_port")}
+                    </Label>
                     <Input
                       id="api-port"
                       data-testid="settings-api-port"
@@ -956,23 +995,26 @@ export function SettingsPage() {
                           writeSetting("api_lan_access", String(v));
                         }}
                       />
-                      <Label htmlFor="lan-access">Allow LAN access</Label>
+                      <Label htmlFor="lan-access">
+                        {t("settings_page.api_lan")}
+                      </Label>
                     </div>
                     {apiStatus?.running ? (
                       <Button variant="destructive" onClick={stopApi}>
-                        Stop Server
+                        {t("settings_page.api_stop")}
                       </Button>
                     ) : (
                       <Button onClick={startApi} disabled={starting}>
-                        {starting ? "Starting…" : "Start Server"}
+                        {starting
+                          ? t("settings_page.api_starting")
+                          : t("settings_page.api_start")}
                       </Button>
                     )}
                   </div>
 
                   {lanAccess && (
                     <p className="text-xs text-warning">
-                      LAN access is enabled: anyone on your network can trigger
-                      prints and read templates, jobs and metrics.
+                      {t("settings_page.api_lan_warning")}
                     </p>
                   )}
 
@@ -986,33 +1028,39 @@ export function SettingsPage() {
                       }}
                     />
                     <Label htmlFor="api-autostart">
-                      Start server when the app starts
+                      {t("settings_page.api_autostart")}
                     </Label>
                   </div>
                   <p className="-mt-3 text-xs text-muted-foreground">
-                    Uses the port and LAN choice above.
+                    {t("settings_page.api_autostart_hint")}
                   </p>
 
                   <div className="rounded-md bg-muted p-3">
-                    <p className="text-xs font-medium mb-1">curl example</p>
+                    <p className="text-xs font-medium mb-1">
+                      {t("settings_page.api_curl_title")}
+                    </p>
                     <pre className="text-[11px] overflow-x-auto whitespace-pre-wrap break-all">{`curl -X POST http://127.0.0.1:${apiPort}/v1/print \\
   -H "Content-Type: application/json" \\
   -d '{"template":"Receipt","printer":"Front Desk","data":{"order":1042}}'`}</pre>
                   </div>
 
                   <Button variant="outline" asChild>
-                    <Link to="/api-explorer">Open API Explorer</Link>
+                    <Link to="/api-explorer">
+                      {t("settings_page.api_open_explorer")}
+                    </Link>
                   </Button>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Trusted Sources</CardTitle>
+                  <CardTitle className="text-base">
+                    {t("settings_page.trusted_title")}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <p className="text-sm text-muted-foreground">
-                    Sources listed here skip the print confirmation sheet.
+                    {t("settings_page.trusted_hint")}
                   </p>
                   {trusted.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
@@ -1027,7 +1075,9 @@ export function SettingsPage() {
                       >
                         <span className="text-sm font-mono">{src}</span>
                         <div className="flex items-center gap-2">
-                          <Badge variant="success">Trusted</Badge>
+                          <Badge variant="success">
+                            {t("settings_page.trusted_badge")}
+                          </Badge>
                           <Button
                             variant="ghost"
                             size="sm"
@@ -1043,14 +1093,14 @@ export function SettingsPage() {
 
                   <div className="flex gap-2">
                     <Input
-                      aria-label="Trusted source"
-                      placeholder="pos.local or com.example.app"
+                      aria-label={t("settings_page.trusted_input_aria")}
+                      placeholder={t("settings_page.trusted_input_example")}
                       value={newTrusted}
                       onChange={(e) => setNewTrusted(e.target.value)}
                     />
                     <Button variant="outline" onClick={addTrusted}>
                       <Plus className="h-4 w-4" />
-                      Add
+                      {t("common.add")}
                     </Button>
                   </div>
                 </CardContent>
@@ -1060,7 +1110,9 @@ export function SettingsPage() {
             <TabsContent value="data" className="mt-0 space-y-4">
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Data Sources</CardTitle>
+                  <CardTitle className="text-base">
+                    {t("settings_page.data_title")}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-1">
@@ -1069,7 +1121,7 @@ export function SettingsPage() {
                     </Label>
                     <Input
                       id="allowed-domains"
-                      placeholder="api.example.com, pos.local"
+                      placeholder={t("settings_page.domains_example")}
                       value={allowedDomains}
                       aria-invalid={!!domainsError}
                       aria-describedby={
@@ -1091,7 +1143,7 @@ export function SettingsPage() {
                       </p>
                     )}
                     <p className="text-xs text-muted-foreground">
-                      Comma-separated. Leave empty to allow any domain.
+                      {t("settings_page.domains_hint")}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1104,7 +1156,7 @@ export function SettingsPage() {
                       }}
                     />
                     <Label htmlFor="block-private">
-                      Block private IP ranges
+                      {t("settings_page.block_private")}
                     </Label>
                   </div>
                 </CardContent>
@@ -1121,7 +1173,7 @@ export function SettingsPage() {
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <Label htmlFor="retention-days">
-                      Keep history for (days)
+                      {t("settings_page.retention_days")}
                     </Label>
                     <Input
                       id="retention-days"
@@ -1141,7 +1193,7 @@ export function SettingsPage() {
                           "retention_days",
                           retentionDays,
                           1,
-                          "Keep history for",
+                          t("settings_page.retention_days"),
                           setRetentionError,
                         )
                       }
@@ -1157,7 +1209,9 @@ export function SettingsPage() {
                     )}
                   </div>
                   <div className="space-y-1">
-                    <Label htmlFor="max-records">Max records</Label>
+                    <Label htmlFor="max-records">
+                      {t("settings_page.max_records")}
+                    </Label>
                     <Input
                       id="max-records"
                       type="number"
@@ -1176,7 +1230,7 @@ export function SettingsPage() {
                           "max_records",
                           maxRecords,
                           100,
-                          "Max records",
+                          t("settings_page.max_records"),
                           setMaxError,
                         )
                       }
@@ -1195,7 +1249,9 @@ export function SettingsPage() {
               </Card>
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Reset this PC</CardTitle>
+                  <CardTitle className="text-base">
+                    {t("settings_page.reset_title")}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <p className="text-sm text-muted-foreground">
@@ -1221,24 +1277,26 @@ export function SettingsPage() {
             <TabsContent value="diagnostics" className="mt-0 space-y-4">
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Diagnostics</CardTitle>
+                  <CardTitle className="text-base">
+                    {t("settings_page.diag_title")}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <p className="text-sm text-muted-foreground">
-                    Export application logs and diagnostics for troubleshooting.
+                    {t("settings_page.diag_hint")}
                   </p>
                   <Button
                     variant="outline"
                     onClick={() => {
                       diagnostics.download();
-                      toast.success("Diagnostics exported");
+                      toast.success(t("settings_page.toast_diag_exported"));
                     }}
                   >
                     <Download className="h-4 w-4 mr-2" />
-                    Export Diagnostics
+                    {t("settings_page.diag_export")}
                   </Button>
                   <p className="text-xs text-muted-foreground">
-                    Secrets and API tokens are redacted from the export.
+                    {t("settings_page.diag_note")}
                   </p>
                 </CardContent>
               </Card>
@@ -1251,16 +1309,14 @@ export function SettingsPage() {
       <Dialog open={allowAllOpen} onOpenChange={setAllowAllOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Allow data from any domain?</DialogTitle>
+            <DialogTitle>{t("settings_page.allow_title")}</DialogTitle>
             <DialogDescription>
-              An empty list allows every domain. Live data URLs could then pull
-              content from anywhere — keep at least your own hosts listed unless
-              you mean it.
+              {t("settings_page.allow_hint")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAllowAllOpen(false)}>
-              Keep the list
+              {t("settings_page.allow_keep")}
             </Button>
             <Button
               variant="destructive"
@@ -1269,11 +1325,11 @@ export function SettingsPage() {
                   await writeSetting("allowed_domains", "");
                   lastSavedDomains.current = "";
                   setAllowAllOpen(false);
-                  toast.success("Allowed domains cleared — any domain allowed");
+                  toast.success(t("settings_page.toast_allow_all"));
                 })();
               }}
             >
-              Allow all
+              {t("settings_page.allow_all")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1283,11 +1339,9 @@ export function SettingsPage() {
       <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Erase everything on this PC?</DialogTitle>
+            <DialogTitle>{t("settings_page.reset_confirm_title")}</DialogTitle>
             <DialogDescription>
-              Templates, print history, printers, fonts, datasets, profiles and
-              all settings will be permanently deleted from this PC. The server
-              keeps the account — sign back in to pull it down again.
+              {t("settings_page.reset_body")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1307,11 +1361,19 @@ export function SettingsPage() {
                   try {
                     const report = await agent("reset_database", {});
                     toast.success(
-                      `Cleared ${report.templates} templates, ${report.print_jobs} jobs and ${report.fonts} fonts`,
+                      t("settings_page.toast_reset_done", {
+                        templates: report.templates,
+                        jobs: report.print_jobs,
+                        fonts: report.fonts,
+                      }),
                     );
                     window.location.reload();
                   } catch (e) {
-                    toast.error(`Reset failed: ${e}`);
+                    toast.error(
+                      t("settings_page.toast_reset_failed", {
+                        error: String(e),
+                      }),
+                    );
                   } finally {
                     setResetBusy(false);
                     setShowResetDialog(false);
@@ -1319,7 +1381,9 @@ export function SettingsPage() {
                 })();
               }}
             >
-              {resetBusy ? "Erasing…" : "Erase everything"}
+              {resetBusy
+                ? t("settings_page.reset_erasing")
+                : t("settings_page.reset_confirm")}
             </Button>
           </DialogFooter>
         </DialogContent>

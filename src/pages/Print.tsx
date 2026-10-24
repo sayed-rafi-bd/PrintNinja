@@ -116,9 +116,7 @@ export function PrintPage() {
         if (!html.trim()) {
           if (!cancelled) {
             setPreviewHtml("");
-            setPreviewError(
-              "This template is empty. Open it in Designer and save it.",
-            );
+            setPreviewError(t("print.preview_empty_template"));
           }
           return;
         }
@@ -162,7 +160,7 @@ export function PrintPage() {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             data = await res.json();
           } catch (e) {
-            notice = `Could not load data from the URL (${e}); showing sample data.`;
+            notice = t("print.preview_data_failed", { error: String(e) });
             data = DEFAULT_MOCK_DATA;
           }
         }
@@ -170,7 +168,7 @@ export function PrintPage() {
         if (Array.isArray(data) && data.length === 0) {
           if (!cancelled) {
             setPreviewHtml("");
-            setPreviewError("The data is an empty array: nothing to print.");
+            setPreviewError(t("print.preview_empty_data"));
             setPreviewNotice(notice);
           }
           return;
@@ -183,7 +181,7 @@ export function PrintPage() {
           ? data.slice(0, PREVIEW_PAGE_CAP)
           : Array<unknown>(Math.min(pageCount, PREVIEW_PAGE_CAP)).fill(data);
         if (totalPages > shownData.length) {
-          notice += `${notice ? " " : ""}Showing first ${shownData.length} of ${totalPages} pages — the print has them all.`;
+          notice += `${notice ? " " : ""}${t("print.preview_truncated", { shown: shownData.length, total: totalPages })}`;
         }
 
         if (!cancelled) {
@@ -194,7 +192,7 @@ export function PrintPage() {
       } catch (e) {
         if (!cancelled) {
           setPreviewHtml("");
-          setPreviewError(`Preview unavailable: ${e}`);
+          setPreviewError(t("print.preview_unavailable", { error: String(e) }));
         }
       }
     })();
@@ -298,20 +296,20 @@ export function PrintPage() {
     store.status !== "printing" &&
     !loading;
   const blocker = !store.printerId
-    ? "Choose a printer to enable printing."
+    ? t("print.blocker_printer")
     : !store.templateId
-      ? "Choose a template to enable printing."
+      ? t("print.blocker_template")
       : store.status === "printing"
-        ? "A print is already running."
+        ? t("print.blocker_running")
         : store.copies < 1
-          ? "Copies must be at least 1."
+          ? t("print.blocker_copies")
           : loading
-            ? "Loading printers and templates…"
+            ? t("print.blocker_loading")
             : "";
   const field = "space-y-1.5";
 
   // Data URL / Method / Copies / Pages live in the main card for live-data
-  // jobs, and move into Advanced options while "Use test data" is on — the
+  // jobs, and move into {t("print.advanced")} while "Use test data" is on — the
   // operator changing repeat jobs never touches them.
   const dataFields = (
     <>
@@ -319,7 +317,7 @@ export function PrintPage() {
         <Label htmlFor="data-url">{t("print.data_url")}</Label>
         <Input
           id="data-url"
-          placeholder="https://api.example.com/orders/123"
+          placeholder={t("print.data_url_example")}
           value={store.dataUrl}
           onChange={(e) => store.setDataUrl(e.target.value)}
           disabled={store.useTestData}
@@ -329,7 +327,7 @@ export function PrintPage() {
             htmlFor="http-method"
             className="text-xs text-muted-foreground"
           >
-            Method
+            {t("print.method_label")}
           </Label>
           <Select
             value={store.httpMethod}
@@ -338,7 +336,7 @@ export function PrintPage() {
           >
             <SelectTrigger
               id="http-method"
-              aria-label="HTTP method"
+              aria-label={t("print.method_aria")}
               className="h-7 w-[5.5rem] text-xs"
             >
               <SelectValue />
@@ -366,7 +364,7 @@ export function PrintPage() {
           />
         </div>
         <div className={field}>
-          <Label htmlFor="pages">Pages</Label>
+          <Label htmlFor="pages">{t("print.pages")}</Label>
           <Input
             id="pages"
             type="number"
@@ -378,8 +376,7 @@ export function PrintPage() {
         </div>
       </div>
       <p className="-mt-2 text-xs text-muted-foreground">
-        Pages repeats one object per page (an array prints its own length);
-        Copies re-sends the whole job.
+        {t("print.pages_hint")}
       </p>
     </>
   );
@@ -388,7 +385,7 @@ export function PrintPage() {
     <div className="space-y-4">
       <PageHeader title={t("print.title")} description={t("pages.print")}>
         <Button variant="outline" size="sm" onClick={loadPrinters}>
-          Refresh printers
+          {t("print.refresh")}
         </Button>
       </PageHeader>
 
@@ -401,11 +398,11 @@ export function PrintPage() {
         >
           <CheckCircle2 className="h-5 w-5 shrink-0" aria-hidden="true" />
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium">Printer is ready</p>
+            <p className="text-sm font-medium">{t("print.ready_title")}</p>
             <p className="break-words text-xs">
               {store.printerId
-                ? `Ready to print on ${store.printerId}.`
-                : "Choose a printer and a template to start."}
+                ? t("print.ready_detail", { printer: store.printerId })
+                : t("print.ready_empty")}
             </p>
           </div>
         </div>
@@ -417,11 +414,13 @@ export function PrintPage() {
         >
           <CheckCircle2 className="h-5 w-5 shrink-0" aria-hidden="true" />
           <div className="min-w-0 flex-1 space-y-1">
-            <p className="text-sm font-medium">Print sent</p>
+            <p className="text-sm font-medium">{t("print.sent")}</p>
             {store.timings ? (
               <TimingBreakdown timings={store.timings} />
             ) : (
-              <p className="text-xs">Finished in {store.durationMs} ms.</p>
+              <p className="text-xs">
+                {t("print.finished", { ms: store.durationMs })}
+              </p>
             )}
           </div>
         </div>
@@ -433,9 +432,9 @@ export function PrintPage() {
         >
           <XCircle className="h-5 w-5 shrink-0" aria-hidden="true" />
           <div className="min-w-0 flex-1 space-y-1">
-            <p className="text-sm font-medium">Print failed</p>
+            <p className="text-sm font-medium">{t("print.failed_title")}</p>
             <p className="break-words text-xs">
-              {store.error || "Unknown error"}
+              {store.error || t("print.unknown_error")}
             </p>
             {store.timings && <TimingBreakdown timings={store.timings} />}
           </div>
@@ -445,7 +444,7 @@ export function PrintPage() {
             onClick={handlePrint}
             disabled={!canPrint}
           >
-            Try again
+            {t("print.retry")}
           </Button>
         </div>
       )}
@@ -458,7 +457,7 @@ export function PrintPage() {
             className="h-5 w-5 rounded-full border-2 border-current border-t-transparent motion-safe:animate-spin"
             aria-hidden="true"
           />
-          <p className="text-sm font-medium">Printing…</p>
+          <p className="text-sm font-medium">{t("print.printing")}</p>
         </div>
       )}
 
@@ -467,7 +466,7 @@ export function PrintPage() {
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Print job</CardTitle>
+              <CardTitle>{t("print.job_title")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className={field}>
@@ -476,13 +475,16 @@ export function PrintPage() {
                   value={store.printerId}
                   onValueChange={store.setPrinterId}
                 >
-                  <SelectTrigger id="print-printer" aria-label="Printer">
-                    <SelectValue placeholder="Select printer" />
+                  <SelectTrigger
+                    id="print-printer"
+                    aria-label={t("print.printer")}
+                  >
+                    <SelectValue placeholder={t("print.printer_placeholder")} />
                   </SelectTrigger>
                   <SelectContent>
                     {printers.length === 0 && (
                       <SelectItem value="none" disabled>
-                        No printers found
+                        {t("print.no_printers")}
                       </SelectItem>
                     )}
                     {printers.map((p) => (
@@ -499,13 +501,18 @@ export function PrintPage() {
                   value={store.templateId}
                   onValueChange={store.setTemplateId}
                 >
-                  <SelectTrigger id="print-template" aria-label="Template">
-                    <SelectValue placeholder="Select template" />
+                  <SelectTrigger
+                    id="print-template"
+                    aria-label={t("print.template")}
+                  >
+                    <SelectValue
+                      placeholder={t("print.template_placeholder")}
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     {templates.length === 0 && (
                       <SelectItem value="none" disabled>
-                        No templates. Create one in Designer.
+                        {t("print.no_templates")}
                       </SelectItem>
                     )}
                     {templates.map((x) => (
@@ -518,10 +525,10 @@ export function PrintPage() {
               </div>
 
               {/* "Use test data" stays put; the fields it replaces move into
-                  Advanced options so the first screen stays short. */}
+                  {t("print.advanced")} so the first screen stays short. */}
               <div className="flex items-center justify-between">
                 <Label htmlFor="test-data" className="font-normal">
-                  Use test data
+                  {t("print.test_data")}
                 </Label>
                 <Switch
                   id="test-data"
@@ -531,9 +538,10 @@ export function PrintPage() {
               </div>
               {store.useTestData && (
                 <p className="text-xs text-muted-foreground">
-                  Sample data: {DEFAULT_MOCK_DATA.store.name}, order #
-                  {DEFAULT_MOCK_DATA.order.id}. Data URL, method, copies and
-                  pages are under Advanced options.
+                  {t("print.sample_note", {
+                    store: DEFAULT_MOCK_DATA.store.name,
+                    order: DEFAULT_MOCK_DATA.order.id,
+                  })}
                 </p>
               )}
               {!store.useTestData && dataFields}
@@ -553,7 +561,7 @@ export function PrintPage() {
                   >
                     <Printer className="h-5 w-5" aria-hidden="true" />
                     {store.status === "printing"
-                      ? "Printing…"
+                      ? t("print.printing")
                       : t("print.print")}
                   </Button>
                 )}
@@ -569,7 +577,7 @@ export function PrintPage() {
             </CardContent>
           </Card>
 
-          {/* Advanced options stay out of the way until needed */}
+          {/* {t("print.advanced")} stay out of the way until needed */}
           <Card>
             <button
               type="button"
@@ -578,7 +586,7 @@ export function PrintPage() {
               aria-controls="print-advanced"
               onClick={() => setShowAdvanced((v) => !v)}
             >
-              Advanced options
+              {t("print.advanced")}
               <ChevronDown
                 className={cn(
                   "h-4 w-4 transition-transform",
@@ -608,13 +616,17 @@ export function PrintPage() {
                     >
                       <SelectTrigger
                         id="print-orientation"
-                        aria-label="Orientation"
+                        aria-label={t("print.orientation")}
                       >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="portrait">Portrait</SelectItem>
-                        <SelectItem value="landscape">Landscape</SelectItem>
+                        <SelectItem value="portrait">
+                          {t("designer.portrait")}
+                        </SelectItem>
+                        <SelectItem value="landscape">
+                          {t("designer.landscape")}
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -633,7 +645,10 @@ export function PrintPage() {
                         )
                       }
                     >
-                      <SelectTrigger id="print-fit" aria-label="Fit mode">
+                      <SelectTrigger
+                        id="print-fit"
+                        aria-label={t("print.fit_mode")}
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -657,10 +672,10 @@ export function PrintPage() {
                   </div>
                 </div>
                 <div className={field}>
-                  <Label htmlFor="page-range">Page range</Label>
+                  <Label htmlFor="page-range">{t("print.page_range")}</Label>
                   <Input
                     id="page-range"
-                    placeholder="e.g. 1-5"
+                    placeholder={t("print.page_range_example")}
                     value={store.pageRange}
                     onChange={(e) => store.setPageRange(e.target.value)}
                   />
@@ -722,12 +737,12 @@ export function PrintPage() {
                     onCheckedChange={store.setGrayscale}
                   />
                   <Label htmlFor="grayscale" className="font-normal">
-                    Grayscale
+                    {t("print.grayscale")}
                   </Label>
                 </div>
                 <div className="border-t pt-3">
                   <p className="mb-2 text-xs text-muted-foreground">
-                    Prints a built-in page to check the printer pipeline.
+                    {t("print.test_hint")}
                   </p>
                   <Button
                     variant="outline"
@@ -736,7 +751,7 @@ export function PrintPage() {
                     disabled={store.status === "printing"}
                   >
                     <Zap className="h-4 w-4" aria-hidden="true" />
-                    Send test page
+                    {t("print.send_test")}
                   </Button>
                 </div>
               </CardContent>
@@ -749,11 +764,20 @@ export function PrintPage() {
           <Card>
             <CardHeader className="flex-row items-center justify-between space-y-0">
               <div className="space-y-1">
-                <CardTitle>Preview</CardTitle>
+                <CardTitle>{t("print.preview")}</CardTitle>
                 <p className="text-xs text-muted-foreground">
                   {selectedTemplate
-                    ? `${selectedTemplate.name}, ${selectedTemplate.page_w_mm} × ${selectedTemplate.page_h_mm} mm, ${useTestData || !dataUrl.trim() ? "sample data" : "live data URL"}`
-                    : "Choose a template to see a preview."}
+                    ? t("print.preview_subtitle", {
+                        name: selectedTemplate.name,
+                        w: selectedTemplate.page_w_mm,
+                        h: selectedTemplate.page_h_mm,
+                        source: t(
+                          useTestData || !dataUrl.trim()
+                            ? "print.preview_sample"
+                            : "print.preview_live",
+                        ),
+                      })
+                    : t("print.preview_empty")}
                 </p>
               </div>
               {isPhone && (
@@ -763,7 +787,11 @@ export function PrintPage() {
                   size="icon"
                   aria-expanded={previewOpen}
                   aria-controls="print-preview-body"
-                  aria-label={previewOpen ? "Collapse preview" : "Show preview"}
+                  aria-label={
+                    previewOpen
+                      ? t("print.preview_collapse")
+                      : t("print.preview_expand")
+                  }
                   onClick={() => setPreviewOpen((v) => !v)}
                 >
                   <ChevronDown
@@ -802,7 +830,7 @@ export function PrintPage() {
                   )}
                   tabIndex={0}
                   role="region"
-                  aria-label="Print preview"
+                  aria-label={t("print.preview_region")}
                 >
                   <div
                     className="mx-auto bg-white shadow-md"
@@ -818,13 +846,13 @@ export function PrintPage() {
                       style={{
                         height: (selectedTemplate?.page_h_mm ?? 200) * MM_TO_PX,
                       }}
-                      title="Print preview"
+                      title={t("print.preview_region")}
                     />
                   </div>
                 </div>
               ) : (
                 <p className="py-10 text-center text-sm text-muted-foreground">
-                  No preview yet.
+                  {t("print.no_preview")}
                 </p>
               )}
               {isPhone && previewHtml && !previewError && (
@@ -835,7 +863,9 @@ export function PrintPage() {
                   aria-pressed={previewExpanded}
                   onClick={() => setPreviewExpanded((v) => !v)}
                 >
-                  {previewExpanded ? "Show less" : "Tap to expand"}
+                  {previewExpanded
+                    ? t("print.preview_less")
+                    : t("print.tap_expand")}
                 </Button>
               )}
             </CardContent>
@@ -853,10 +883,10 @@ export function PrintPage() {
           <div className="flex items-center gap-2">
             <Select value={store.printerId} onValueChange={store.setPrinterId}>
               <SelectTrigger
-                aria-label="Printer"
+                aria-label={t("print.printer")}
                 className="min-h-11 min-w-0 flex-1"
               >
-                <SelectValue placeholder="Select printer" />
+                <SelectValue placeholder={t("print.printer_placeholder")} />
               </SelectTrigger>
               <SelectContent>
                 {printers.length === 0 && (
@@ -880,7 +910,9 @@ export function PrintPage() {
               aria-describedby={blocker ? "print-blocker-phone" : undefined}
             >
               <Printer className="h-5 w-5" aria-hidden="true" />
-              {store.status === "printing" ? "Printing…" : t("print.print")}
+              {store.status === "printing"
+                ? t("print.printing")
+                : t("print.print")}
             </Button>
           </div>
           {blocker && (

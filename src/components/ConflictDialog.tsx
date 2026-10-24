@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -40,6 +41,7 @@ export function ConflictDialog({
   onOpenChange: (open: boolean) => void;
   onResolved: () => void;
 }) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -138,14 +140,15 @@ export function ConflictDialog({
       <DialogContent data-testid="conflict-dialog">
         <DialogHeader>
           <DialogTitle>
-            “{conflict?.name}” changed on another PC
-            {position && position.total > 1
-              ? ` (${position.index + 1} of ${position.total})`
+            {conflict
+              ? t("templates.conflict_dialog_title", { name: conflict.name }) +
+                (position && position.total > 1
+                  ? ` ${t("templates.conflict_dialog_position", { index: position.index + 1, total: position.total })}`
+                  : "")
               : ""}
           </DialogTitle>
           <DialogDescription>
-            Your edits and the server copy disagree. Take the server copy, keep
-            pushing yours, or keep both.
+            {t("templates.conflict_dialog_body")}
           </DialogDescription>
         </DialogHeader>
         {error && (
@@ -159,7 +162,9 @@ export function ConflictDialog({
             onClick={keepMine}
             disabled={busy !== null}
           >
-            {busy === "mine" ? "Keeping…" : "Keep mine"}
+            {busy === "mine"
+              ? t("templates.conflict_applying_mine")
+              : t("templates.conflict_keep_mine")}
           </Button>
           <Button
             data-testid="conflict-take-server"
@@ -167,7 +172,9 @@ export function ConflictDialog({
             onClick={takeServer}
             disabled={busy !== null}
           >
-            {busy === "theirs" ? "Applying…" : "Take server"}
+            {busy === "theirs"
+              ? t("templates.conflict_applying_server")
+              : t("templates.conflict_take_server")}
           </Button>
           <Button
             data-testid="conflict-keep-both"
@@ -175,7 +182,9 @@ export function ConflictDialog({
             onClick={keepBoth}
             disabled={busy !== null}
           >
-            {busy === "both" ? "Copying…" : "Keep both"}
+            {busy === "both"
+              ? t("templates.conflict_copying")
+              : t("templates.conflict_keep_both")}
           </Button>
         </DialogFooter>
       </DialogContent>

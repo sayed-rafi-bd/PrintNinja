@@ -83,7 +83,7 @@ export function DataTable<T>({
   data,
   getRowId,
   loading = false,
-  empty = { title: "Nothing to show" },
+  empty,
   onRowActivate,
   selectedRowId,
   selection,
@@ -95,6 +95,8 @@ export function DataTable<T>({
   onSortingChange: onSortingChangeProp,
 }: DataTableProps<T>) {
   const { t } = useTranslation();
+  // Default empty title, overridable per table.
+  const emptyState = { title: t("common.empty"), ...empty };
   // Uncontrolled by default; pages with a phone sort dropdown pass these in.
   const [internalSorting, setInternalSorting] = useState<SortingState>([]);
   const sorting = sortingProp ?? internalSorting;
@@ -205,7 +207,7 @@ export function DataTable<T>({
           </div>
         ) : rows.length === 0 ? (
           <div className="rounded-lg border bg-card">
-            <EmptyState {...empty} className="py-10" />
+            <EmptyState {...emptyState} className="py-10" />
           </div>
         ) : (
           <ul
@@ -382,7 +384,7 @@ export function DataTable<T>({
             ) : rows.length === 0 ? (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={colCount}>
-                  <EmptyState {...empty} className="py-10" />
+                  <EmptyState {...emptyState} className="py-10" />
                 </TableCell>
               </TableRow>
             ) : (

@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { t } from "i18next";
+import "@/lib/i18n";
 import { extractClasses } from "@/lib/templates/extractClasses";
 import { STARTER_TEMPLATES } from "@/lib/templates/defaultTemplate";
 
@@ -192,8 +194,9 @@ describe("extractClasses: classes built from data", () => {
 
   it("points at the fix in the message", () => {
     const { warnings } = extractClasses(`<b class="bg-{{c}}">x</b>`);
-    expect(warnings[0].message).toContain("{{#if x}}bg-red-600");
-    expect(warnings[0].message).toContain("var(--c)");
+    expect(warnings[0].messageKey).toBe("designer.glue_message");
+    expect(t(warnings[0].messageKey)).toContain("{{#if x}}bg-red-600");
+    expect(t(warnings[0].messageKey)).toContain("var(--c)");
   });
 });
 

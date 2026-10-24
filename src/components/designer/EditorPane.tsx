@@ -5,6 +5,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useTranslation } from "react-i18next";
 import CodeMirror, {
   type EditorView,
   type ReactCodeMirrorRef,
@@ -45,6 +46,7 @@ export function CodeEditors({
   onHtmlChange,
   onCssChange,
 }: CodeProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
@@ -55,13 +57,15 @@ export function CodeEditors({
             (document.activeElement as HTMLElement | null)?.blur?.()
           }
         >
-          Done
+          {t("designer.editor_done")}
         </Button>
       </div>
       <div className="grid grid-cols-1 gap-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">HTML — {templateName}</CardTitle>
+            <CardTitle className="text-sm">
+              {t("designer.editor_html_title", { name: templateName })}
+            </CardTitle>
           </CardHeader>
           <CardContent className="overflow-hidden rounded-md border p-0">
             <CodeMirror
@@ -72,13 +76,15 @@ export function CodeEditors({
               theme="dark"
               style={{ fontSize: "13px", maxHeight: "60vh" }}
               basicSetup={BASIC_SETUP}
-              aria-label="HTML editor"
+              aria-label={t("designer.editor_html_label")}
             />
           </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">CSS</CardTitle>
+            <CardTitle className="text-sm">
+              {t("designer.editor_css")}
+            </CardTitle>
           </CardHeader>
           <CardContent className="overflow-hidden rounded-md border p-0">
             <CodeMirror
@@ -89,7 +95,7 @@ export function CodeEditors({
               theme="dark"
               style={{ fontSize: "13px", maxHeight: "60vh" }}
               basicSetup={BASIC_SETUP}
-              aria-label="CSS editor"
+              aria-label={t("designer.editor_css_label")}
             />
           </CardContent>
         </Card>
@@ -146,6 +152,7 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
     },
     ref,
   ) {
+    const { t } = useTranslation();
     const htmlEditor = useRef<ReactCodeMirrorRef>(null);
     const [tab, setTab] = useState<EditorTab>("html");
 
@@ -194,21 +201,21 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
       >
         <div className="flex shrink-0 items-center justify-between gap-2 border-b px-3 py-1.5">
           <TabsList
-            aria-label="Editor files"
+            aria-label={t("designer.editor_files")}
             className="min-h-8 w-max gap-0.5 p-0.5"
           >
             <TabsTrigger value="html" className="h-7 px-3 text-xs">
-              HTML
+              {t("designer.editor_html")}
             </TabsTrigger>
             <TabsTrigger value="css" className="h-7 px-3 text-xs">
-              CSS
+              {t("designer.editor_css")}
             </TabsTrigger>
             <TabsTrigger value="readme" className="h-7 px-3 text-xs">
-              README
+              {t("designer.readme")}
             </TabsTrigger>
             {samplePanel !== undefined && (
               <TabsTrigger value="sample" className="h-7 px-3 text-xs">
-                Sample data
+                {t("designer.sampleData")}
               </TabsTrigger>
             )}
           </TabsList>
@@ -241,7 +248,7 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
             theme="dark"
             style={{ fontSize: "13px" }}
             basicSetup={BASIC_SETUP}
-            aria-label="HTML editor"
+            aria-label={t("designer.editor_html_label")}
           />
         </TabsContent>
         <TabsContent value="css" forceMount className={pane}>
@@ -254,7 +261,7 @@ export const EditorPane = forwardRef<EditorPaneHandle, Props>(
             theme="dark"
             style={{ fontSize: "13px" }}
             basicSetup={BASIC_SETUP}
-            aria-label="CSS editor"
+            aria-label={t("designer.editor_css_label")}
           />
         </TabsContent>
         <TabsContent
