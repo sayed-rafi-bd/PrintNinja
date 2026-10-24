@@ -253,10 +253,10 @@ jobs:
           CARGO=$(awk '/^\[package\]/{p=1;next} /^\[/{p=0} p && /^version *=/{gsub(/[" ]/,"",$3); print $3; exit}' src-tauri/Cargo.toml)
           # Cargo.lock stores the same version for the crate
           LOCK=$(awk '/^\[\[package\]\]/{p=0} /name = "printninja"/{p=1;next} p && /^version =/{gsub(/"/,"",$3); print $3; exit}' src-tauri/Cargo.lock)
-          # Settings.tsx fallback literal "vX.Y.Z"
-          SETTINGS=$(grep -o '"v[0-9]\+\.[0-9]\+\.[0-9]\+"' src/pages/Settings.tsx | head -n1 | tr -d '"' | sed 's/^v//')
-          echo "tag=$TAG_VERSION package.json=$PKG tauri.conf.json=$TAURI Cargo.toml=$CARGO Cargo.lock=$LOCK Settings.tsx=$SETTINGS"
-          for v in "$PKG" "$TAURI" "$CARGO" "$LOCK" "$SETTINGS"; do
+          # Layout.tsx topbar fallback literal "vX.Y.Z"
+          LAYOUT=$(grep -o '"v[0-9]\+\.[0-9]\+\.[0-9]\+"' src/components/Layout.tsx | head -n1 | tr -d '"' | sed 's/^v//')
+          echo "tag=$TAG_VERSION package.json=$PKG tauri.conf.json=$TAURI Cargo.toml=$CARGO Cargo.lock=$LOCK Layout.tsx=$LAYOUT"
+          for v in "$PKG" "$TAURI" "$CARGO" "$LOCK" "$LAYOUT"; do
             if [ -z "$v" ]; then
               echo "::error::Could not read a version (empty). Check manifests."
               exit 1

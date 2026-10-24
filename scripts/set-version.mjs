@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Sets the app version in every file the release check compares:
 //   package.json, src-tauri/tauri.conf.json, src-tauri/Cargo.toml,
-//   src-tauri/Cargo.lock, src/pages/Settings.tsx
+//   src-tauri/Cargo.lock, src/components/Layout.tsx
 //
 //   pnpm version:set 1.0.0 [--dry-run]
 //
@@ -19,7 +19,7 @@ const FILES = {
 	tauri: "src-tauri/tauri.conf.json",
 	cargo: "src-tauri/Cargo.toml",
 	lock: "src-tauri/Cargo.lock",
-	settings: "src/pages/Settings.tsx",
+	layout: "src/components/Layout.tsx",
 };
 
 const read = (f) => readFileSync(join(ROOT, f), "utf8");
@@ -113,7 +113,7 @@ const updated = {
 	[FILES.tauri]: replaceOnce(read(FILES.tauri), /("version"\s*:\s*")[^"]+(")/, FILES.tauri),
 	[FILES.cargo]: bumpCargoToml(read(FILES.cargo)),
 	[FILES.lock]: bumpCargoLock(read(FILES.lock)),
-	[FILES.settings]: replaceOnce(read(FILES.settings), /("v)\d+\.\d+\.\d+(")/, FILES.settings),
+	[FILES.layout]: replaceOnce(read(FILES.layout), /("v)\d+\.\d+\.\d+(")/, FILES.layout),
 };
 
 console.log(`Setting ${crate} to ${version}${dryRun ? " (dry run)" : ""}:`);

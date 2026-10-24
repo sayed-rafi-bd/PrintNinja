@@ -19,7 +19,7 @@ const FILES = {
 	tauri: "src-tauri/tauri.conf.json",
 	cargo: "src-tauri/Cargo.toml",
 	lock: "src-tauri/Cargo.lock",
-	settings: "src/pages/Settings.tsx",
+	layout: "src/components/Layout.tsx",
 };
 const RELEASE_BRANCH = "main";
 
@@ -112,13 +112,13 @@ function readVersions(crate) {
 	const lockLines = read(FILES.lock).split("\n");
 	const lockHits = lockVersionLines(lockLines, crate);
 	const lock = lockHits.length === 1 ? lockLines[lockHits[0]].match(/"([^"]+)"/) : null;
-	const settings = read(FILES.settings).match(/"v(\d+\.\d+\.\d+)"/);
+	const layout = read(FILES.layout).match(/"v(\d+\.\d+\.\d+)"/);
 	return {
 		"package.json": JSON.parse(read(FILES.pkg)).version,
 		"tauri.conf.json": JSON.parse(read(FILES.tauri)).version,
 		"Cargo.toml": cargoPackageField(read(FILES.cargo), "version"),
 		"Cargo.lock": lock ? lock[1] : "",
-		"Settings.tsx": settings ? settings[1] : "",
+		"Layout.tsx": layout ? layout[1] : "",
 	};
 }
 
@@ -156,7 +156,7 @@ function applyVersion(version, crate) {
 	write(FILES.tauri, replaceOnce(read(FILES.tauri), /("version"\s*:\s*")[^"]+(")/, version, FILES.tauri));
 	write(FILES.cargo, bumpCargoToml(read(FILES.cargo), version));
 	write(FILES.lock, bumpCargoLock(read(FILES.lock), version, crate));
-	write(FILES.settings, replaceOnce(read(FILES.settings), /("v)\d+\.\d+\.\d+(")/, version, FILES.settings));
+	write(FILES.layout, replaceOnce(read(FILES.layout), /("v)\d+\.\d+\.\d+(")/, version, FILES.layout));
 }
 
 // ---- main ------------------------------------------------------------------
