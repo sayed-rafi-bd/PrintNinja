@@ -29,7 +29,7 @@ The script (`scripts/release.mjs`, needs only Node and git) updates every place 
 - `src-tauri/tauri.conf.json`
 - `src-tauri/Cargo.toml` (`[package]` version)
 - `src-tauri/Cargo.lock` (the crate's own entry)
-- `src/pages/Settings.tsx` (the `"vX.Y.Z"` fallback literal)
+- `src/components/Layout.tsx` (the topbar `"vX.Y.Z"` fallback literal)
 
 Then it commits `release: vX.Y.Z` and creates an annotated tag `vX.Y.Z`. It refuses to run
 if:
@@ -119,7 +119,7 @@ Checks (every push / PR):
 
 Release jobs (tags only):
 - **version-check**: the tag must be `vX.Y.Z`, the tagged commit must be on `main`, and the tag
-  must match `package.json`, `tauri.conf.json`, `Cargo.toml`, `Cargo.lock` and `Settings.tsx`
+  must match `package.json`, `tauri.conf.json`, `Cargo.toml`, `Cargo.lock` and `Layout.tsx`
 - **windows-build**: MSI only (`--bundles msi`, output in `src-tauri/target/release/bundle/msi`)
 - **android-build**: `aarch64` (arm64-v8a) unsigned APK + AAB
 - **github-release**: creates a **draft** GitHub Release with the MSI/APK/AAB attached

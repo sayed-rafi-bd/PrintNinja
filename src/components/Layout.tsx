@@ -323,11 +323,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <span className="truncate text-base font-semibold tracking-tight">
             {appName}
           </span>
-          {appVersion && (
-            <span className="shrink-0 text-xs text-muted-foreground">
-              v{appVersion}
-            </span>
-          )}
+          {/* Topbar version with the committed fallback when the
+              native version is unavailable (e.g. browser dev).
+              Release tooling bumps this literal: scripts/release.mjs,
+              scripts/set-version.mjs and CI version-check all read it. */}
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {appVersion ? `v${appVersion}` : "v3.1.0"}
+          </span>
         </Link>
         {!shortLandscape && (
           <button
