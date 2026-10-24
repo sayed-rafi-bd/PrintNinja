@@ -1,0 +1,45 @@
+{
+  "printScroll": [
+    700,
+    1509,
+    739
+  ],
+  "printScrollEnd": [
+    770,
+    1509,
+    739
+  ],
+  "addDialog": {
+    "w": 390,
+    "h": 844,
+    "top": 0,
+    "bottom": 844,
+    "scrollH": 844,
+    "innerH": 844
+  },
+  "settingsTabs": [
+    "Setup",
+    "General",
+    "Background",
+    "Share",
+    "API and automation",
+    "Data sources",
+    "Retention",
+    "Diagnostics"
+  ],
+  "settingsTabListScroll": {
+    "client": 358,
+    "scroll": 962
+  },
+  "designerUrl": "/template/1",
+  "designerHeading": "Designer",
+  "designerScroll": [
+    700,
+    1585,
+    739
+  ],
+  "landscapeMainHeight": {
+    "client": 342,
+    "vh": 390
+  }
+}

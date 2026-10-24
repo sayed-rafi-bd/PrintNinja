@@ -1,0 +1,362 @@
+{
+  "01-print": {
+    "title": "Print",
+    "path": "/print",
+    "viewport": 390,
+    "horizontalOverflow": 0,
+    "wide": [],
+    "smallTapTargets": 2,
+    "smallExamples": [
+      {
+        "tag": "a",
+        "label": "PrintNinja",
+        "w": 107,
+        "h": 28
+      },
+      {
+        "tag": "button",
+        "label": "",
+        "w": 44,
+        "h": 24
+      }
+    ],
+    "textUnder12px": 0,
+    "navWidth": 0,
+    "hasViewportMeta": true
+  },
+  "02-designer": {
+    "title": "Designer (template editor)",
+    "path": "/",
+    "viewport": 390,
+    "horizontalOverflow": 0,
+    "wide": [],
+    "smallTapTargets": 2,
+    "smallExamples": [
+      {
+        "tag": "a",
+        "label": "PrintNinja",
+        "w": 107,
+        "h": 28
+      },
+      {
+        "tag": "button",
+        "label": "",
+        "w": 44,
+        "h": 24
+      }
+    ],
+    "textUnder12px": 0,
+    "navWidth": 0,
+    "hasViewportMeta": true
+  },
+  "03-templates": {
+    "title": "Templates",
+    "path": "/templates",
+    "viewport": 390,
+    "horizontalOverflow": 0,
+    "wide": [
+      "table.w-full.caption-bottom.text-sm right=703",
+      "thead.[&_tr]:border-b.sticky.top-0 right=703",
+      "tr.border-b.transition-colors.data-[state=selected]:bg-accent right=703",
+      "th.h-[var(--head-h)].px-3.align-middle right=703",
+      "span.sr-only right=691",
+      "tbody.[&_tr:last-child]:border-0 right=703",
+      "tr.border-b.transition-colors.hover:bg-accent/60 right=703",
+      "td.px-3.py-[var(--cell-py)].align-middle right=703"
+    ],
+    "smallTapTargets": 5,
+    "smallExamples": [
+      {
+        "tag": "a",
+        "label": "PrintNinja",
+        "w": 107,
+        "h": 28
+      },
+      {
+        "tag": "button",
+        "label": "Mine (3)",
+        "w": 76,
+        "h": 32
+      },
+      {
+        "tag": "button",
+        "label": "Saved (0)",
+        "w": 84,
+        "h": 32
+      },
+      {
+        "tag": "button",
+        "label": "Community",
+        "w": 98,
+        "h": 32
+      },
+      {
+        "tag": "button",
+        "label": "Sort by Template",
+        "w": 70,
+        "h": 36
+      }
+    ],
+    "textUnder12px": 0,
+    "navWidth": 0,
+    "hasViewportMeta": true
+  },
+  "04-printers": {
+    "title": "Printer setup",
+    "path": "/printers",
+    "viewport": 390,
+    "horizontalOverflow": 0,
+    "wide": [
+      "button.inline-flex.items-center.justify-center right=456"
+    ],
+    "smallTapTargets": 9,
+    "smallExamples": [
+      {
+        "tag": "a",
+        "label": "PrintNinja",
+        "w": 107,
+        "h": 28
+      },
+      {
+        "tag": "button",
+        "label": "All (2)",
+        "w": 62,
+        "h": 32
+      },
+      {
+        "tag": "button",
+        "label": "Network (2)",
+        "w": 100,
+        "h": 32
+      },
+      {
+        "tag": "button",
+        "label": "USB (0)",
+        "w": 72,
+        "h": 32
+      },
+      {
+        "tag": "button",
+        "label": "Bluetooth (0)",
+        "w": 108,
+        "h": 32
+      },
+      {
+        "tag": "button",
+        "label": "System (0)",
+        "w": 93,
+        "h": 32
+      },
+      {
+        "tag": "button",
+        "label": "Sort by Printer",
+        "w": 56,
+        "h": 36
+      },
+      {
+        "tag": "button",
+        "label": "Test print on Virtual Printer ",
+        "w": 42,
+        "h": 44
+      },
+      {
+        "tag": "button",
+        "label": "Test print on Office Laser",
+        "w": 42,
+        "h": 44
+      }
+    ],
+    "textUnder12px": 0,
+    "navWidth": 0,
+    "hasViewportMeta": true
+  },
+  "05-history": {
+    "title": "History",
+    "path": "/history",
+    "viewport": 390,
+    "horizontalOverflow": 0,
+    "wide": [],
+    "smallTapTargets": 4,
+    "smallExamples": [
+      {
+        "tag": "a",
+        "label": "PrintNinja",
+        "w": 107,
+        "h": 28
+      },
+      {
+        "tag": "input",
+        "label": "Select all rows",
+        "w": 20,
+        "h": 20
+      },
+      {
+        "tag": "button",
+        "label": "Sort by Job",
+        "w": 38,
+        "h": 36
+      },
+      {
+        "tag": "button",
+        "label": "Sort by Status",
+        "w": 53,
+        "h": 36
+      }
+    ],
+    "textUnder12px": 0,
+    "navWidth": 0,
+    "hasViewportMeta": true
+  },
+  "06-api-explorer": {
+    "title": "API explorer",
+    "path": "/api-explorer",
+    "viewport": 390,
+    "horizontalOverflow": 0,
+    "wide": [],
+    "smallTapTargets": 1,
+    "smallExamples": [
+      {
+        "tag": "a",
+        "label": "PrintNinja",
+        "w": 107,
+        "h": 28
+      }
+    ],
+    "textUnder12px": 0,
+    "navWidth": 0,
+    "hasViewportMeta": true
+  },
+  "07-settings": {
+    "title": "Settings",
+    "path": "/settings",
+    "viewport": 390,
+    "horizontalOverflow": 0,
+    "wide": [
+      "button.inline-flex.items-center.whitespace-nowrap right=422",
+      "button.inline-flex.items-center.whitespace-nowrap right=602",
+      "svg right=454",
+      "path right=453",
+      "path right=452",
+      "circle right=447",
+      "button.inline-flex.items-center.whitespace-nowrap right=738",
+      "svg right=634"
+    ],
+    "smallTapTargets": 5,
+    "smallExamples": [
+      {
+        "tag": "a",
+        "label": "PrintNinja",
+        "w": 107,
+        "h": 28
+      },
+      {
+        "tag": "button",
+        "label": "Setup",
+        "w": 86,
+        "h": 32
+      },
+      {
+        "tag": "button",
+        "label": "General",
+        "w": 99,
+        "h": 32
+      },
+      {
+        "tag": "button",
+        "label": "Background",
+        "w": 125,
+        "h": 32
+      },
+      {
+        "tag": "button",
+        "label": "Share",
+        "w": 85,
+        "h": 32
+      }
+    ],
+    "textUnder12px": 0,
+    "navWidth": 0,
+    "hasViewportMeta": true
+  },
+  "08-designer-template": {
+    "title": "Designer with a template open",
+    "path": "/template/1",
+    "viewport": 390,
+    "horizontalOverflow": 0,
+    "wide": [],
+    "smallTapTargets": 6,
+    "smallExamples": [
+      {
+        "tag": "a",
+        "label": "PrintNinja",
+        "w": 107,
+        "h": 28
+      },
+      {
+        "tag": "button",
+        "label": "Template visibility: Private",
+        "w": 44,
+        "h": 24
+      },
+      {
+        "tag": "button",
+        "label": "Canvas",
+        "w": 64,
+        "h": 28
+      },
+      {
+        "tag": "button",
+        "label": "Code",
+        "w": 52,
+        "h": 28
+      },
+      {
+        "tag": "button",
+        "label": "README",
+        "w": 72,
+        "h": 28
+      },
+      {
+        "tag": "button",
+        "label": "Sample data",
+        "w": 93,
+        "h": 28
+      }
+    ],
+    "textUnder12px": 0,
+    "navWidth": 0,
+    "hasViewportMeta": true
+  },
+  "_pageErrors": [
+    "SecurityError: Failed to read the 'localStorage' property from 'Window': The document is sandboxed and lacks the 'allow-same-origin' flag.",
+    "SecurityError: Failed to read the 'localStorage' property from 'Window': The document is sandboxed and lacks the 'allow-same-origin' flag.",
+    "SecurityError: Failed to read the 'localStorage' property from 'Window': The document is sandboxed and lacks the 'allow-same-origin' flag.",
+    "SecurityError: Failed to read the 'localStorage' property from 'Window': The document is sandboxed and lacks the 'allow-same-origin' flag.",
+    "SecurityError: Failed to read the 'localStorage' property from 'Window': The document is sandboxed and lacks the 'allow-same-origin' flag.",
+    "SecurityError: Failed to read the 'localStorage' property from 'Window': The document is sandboxed and lacks the 'allow-same-origin' flag."
+  ],
+  "00-signin": {
+    "title": "Sign-in",
+    "path": "/",
+    "viewport": 390,
+    "horizontalOverflow": 0,
+    "wide": [],
+    "smallTapTargets": 0,
+    "smallExamples": [],
+    "textUnder12px": 0,
+    "navWidth": null,
+    "hasViewportMeta": true
+  },
+  "09-onboarding": {
+    "title": "Onboarding",
+    "path": "/",
+    "viewport": 390,
+    "horizontalOverflow": 0,
+    "wide": [],
+    "smallTapTargets": 0,
+    "smallExamples": [],
+    "textUnder12px": 0,
+    "navWidth": null,
+    "hasViewportMeta": true
+  }
+}
