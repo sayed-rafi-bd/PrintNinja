@@ -58,16 +58,34 @@ its own code). Styling comes in three layers: a base stylesheet, compiled
 utility classes detected in the template, and the author's own CSS.
 
 When the user presses Print, the app sends the printer name, the template,
-the page geometry (size, orientation, margins, fit mode), the copy count,
-and either the data itself (test mode) or the data URL (real prints — the
-backend re-fetches it, so the preview fetch is never trusted for output).
+the paper size (chosen in the Print page, or the template's own size when
+left on automatic), the orientation (defaulting to the template's own, still
+flippable per print), margins, fit mode, the copy count, and either the data
+itself (test mode) or the data URL (real prints — the backend re-fetches it,
+so the preview fetch is never trusted for output).
+
+### Design size vs paper size
+
+A template has a *design size*: the page it was authored at, shown in the
+Designer and stored with the template. A print has a *paper size*: the
+physical sheet it lands on, chosen per print and never written back to the
+template. The preview draws the paper sheet and maps the design onto it,
+exactly as the backend will — a mapping label under the preview spells it
+out ("design 80×200 mm → paper 210×297 mm"), and the orientation selector
+swaps the paper, never the design. When the two sizes match, the mapping is
+the identity and the output is byte-for-byte what the old pipeline made.
 
 ## 3. The backend pipeline
 
 The backend works through the same stages for every job:
 
 1. **Resolve content.** Load the template and rebuild its full stylesheet
-   from the three layers. Raw HTML sent via the API defaults to A4.
+   from the three layers. Split the geometry: the design size comes from the
+   template (raw HTML sent via the API defaults to A4), while the paper size
+   is the request's explicit choice first, the design size second, A4 last —
+   so an API or UI caller can print a template on different paper without
+   touching the template. Orientation defaults to the template's stored
+   value, overridable per request. Raw HTML sent via the API defaults to A4.
 2. **Open a job record.** A row is written to the jobs database in the
    *printing* state, stamped with the settings, the data, and the start
    time. It carries an idempotency key stored under a uniqueness constraint:
@@ -79,11 +97,14 @@ The backend works through the same stages for every job:
 4. **Render the template.** The backend engine merges data into pages exactly
    as the preview did — same placeholders, same helpers — so the preview
    guarantee holds.
-5. **Lay out the pages.** Page size, margins, scaling behavior (actual size,
-   fit to width, fit to page, fill, shrink), exact color reproduction, and an
-   optional grayscale conversion are applied.
+5. **Lay out the pages.** The page box is the paper: size, margins, and a
+   design→paper scale derived from the fit mode (actual size, fit to width,
+   fit to page, fill, shrink) — the design is proportionally zoomed onto the
+   paper content box, with no scaling at all when the two match. Exact color
+   reproduction and an optional grayscale conversion are applied on top.
 6. **Produce output.** Either a PDF document or a bitmap image, depending on
-   the printer's language (see §5).
+   the printer's language (see §5) — always rendered at the paper size, so
+   the file's page box and the printed sheet agree.
 7. **Send.** The finished bytes go to the printer through the transport
    matching its type (see §4), once per copy, holding that printer's turn so
    two jobs never interleave on the same machine.
@@ -138,8 +159,10 @@ Those bits are then wrapped in the printer's dialect:
   dots with no command language at all.
 
 Two details matter in practice. First, the label dimensions in those headers
-come from the template's page size — a wrong page size in the Designer
-produces a mis-sized label even when the preview looks perfect. Second,
+describe the paper, not the design: the size headers and the rendered dots
+both use the paper dimensions, so the bytes and the sheet always agree — a
+wrong paper choice in the Print page mis-sizes the label even when the
+preview (which shows the same mapping) warned you. Second,
 copies are a send loop, not a language feature: the finished payload is
 transmitted once per copy.
 
