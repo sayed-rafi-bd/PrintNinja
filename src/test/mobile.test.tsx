@@ -239,6 +239,31 @@ describe("phone Print page", () => {
     expect(screen.getByLabelText("Data URL")).toBeInTheDocument();
     expect(screen.getByLabelText("Pages")).toBeInTheDocument();
   });
+
+  it("caps the preview at 40vh, expands on tap and collapses from the header", async () => {
+    render(
+      <MemoryRouter>
+        <PrintPage />
+      </MemoryRouter>,
+    );
+    await screen.findByTestId("print-action-bar");
+    const region = await screen.findByRole("region", { name: "Print preview" });
+    expect(region).toHaveClass("max-h-[40vh]");
+
+    const expand = screen.getByRole("button", { name: "Tap to expand" });
+    fireEvent.click(expand);
+    expect(region).toHaveClass("max-h-[70vh]");
+    fireEvent.click(screen.getByRole("button", { name: "Show less" }));
+    expect(region).toHaveClass("max-h-[40vh]");
+
+    const toggle = screen.getByRole("button", { name: "Collapse preview" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(toggle);
+    expect(
+      screen.getByRole("button", { name: "Show preview" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(document.getElementById("print-preview-body")).toHaveClass("hidden");
+  });
 });
 
 describe("phone History page", () => {

@@ -45,6 +45,11 @@ export function PrintPage() {
   // Phone-only layout: the sticky action bar below. Desktop keeps the single
   // in-card Print button (jsdom has no matchMedia, so tests see that one too).
   const isPhone = useMediaQuery(PHONE_QUERY);
+  // Phone preview (PLAN.md): collapsible, capped at ~40vh, tap to expand.
+  // Desktop always shows the full preview, so these only matter on phones.
+  const [previewOpen, setPreviewOpen] = useState(true);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
+  const showPreviewBody = !isPhone || previewOpen;
 
   // Fetch printers + templates fresh every time (mount, sync pull,
   // window focus) so a height saved in Designer is visible here.
@@ -751,8 +756,30 @@ export function PrintPage() {
                     : "Choose a template to see a preview."}
                 </p>
               </div>
+              {isPhone && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-expanded={previewOpen}
+                  aria-controls="print-preview-body"
+                  aria-label={previewOpen ? "Collapse preview" : "Show preview"}
+                  onClick={() => setPreviewOpen((v) => !v)}
+                >
+                  <ChevronDown
+                    className={cn(
+                      "h-4 w-4 transition-transform",
+                      previewOpen && "rotate-180",
+                    )}
+                    aria-hidden="true"
+                  />
+                </Button>
+              )}
             </CardHeader>
-            <CardContent>
+            <CardContent
+              id="print-preview-body"
+              className={cn(!showPreviewBody && "hidden")}
+            >
               {previewNotice && !previewError ? (
                 <p className="mb-2 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning">
                   {previewNotice}
@@ -764,7 +791,15 @@ export function PrintPage() {
                 </p>
               ) : previewHtml ? (
                 <div
-                  className="max-h-[60vh] overflow-auto rounded-md border bg-muted p-4"
+                  className={cn(
+                    "overflow-auto rounded-md border bg-muted p-4",
+                    // Phones: ~40vh until tapped, then most of the screen.
+                    isPhone
+                      ? previewExpanded
+                        ? "max-h-[70vh]"
+                        : "max-h-[40vh]"
+                      : "max-h-[60vh]",
+                  )}
                   tabIndex={0}
                   role="region"
                   aria-label="Print preview"
@@ -791,6 +826,17 @@ export function PrintPage() {
                 <p className="py-10 text-center text-sm text-muted-foreground">
                   No preview yet.
                 </p>
+              )}
+              {isPhone && previewHtml && !previewError && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="mt-2 w-full"
+                  aria-pressed={previewExpanded}
+                  onClick={() => setPreviewExpanded((v) => !v)}
+                >
+                  {previewExpanded ? "Show less" : "Tap to expand"}
+                </Button>
               )}
             </CardContent>
           </Card>
