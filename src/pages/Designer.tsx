@@ -53,12 +53,14 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
-import { PanelLeftClose, QrCode } from "lucide-react";
+import { PanelLeftClose, QrCode, Save, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import CodeMirror from "@uiw/react-codemirror";
 import { json } from "@codemirror/lang-json";
@@ -159,6 +161,9 @@ export function DesignerPage() {
     setControlsExpanded(true);
   };
   const [activeTab, setActiveTab] = useState("canvas");
+  // Phone: Templates / Page Setup / Custom input live in a bottom sheet
+  // (PLAN.md phase 3), opened from a single Settings button.
+  const [controlsOpen, setControlsOpen] = useState(false);
   const [readme, setReadme] = useState("");
   const [readmeSaving, setReadmeSaving] = useState(false);
   const [remoteId, setRemoteId] = useState<string | null>(null);
@@ -947,36 +952,84 @@ export function DesignerPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Collapsed, so the canvas is not a long scroll away */}
-          <ControlsAccordion
-            {...controls}
-            showHelpers={false}
-            defaultOpen={[]}
-          />
+          {/* The canvas is the first thing on screen: controls live in a
+              bottom sheet opened from this single button (PLAN.md phase 3). */}
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={() => setControlsOpen(true)}
+          >
+            <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+            {t("designer.settings")}
+          </Button>
+          <Sheet open={controlsOpen} onOpenChange={setControlsOpen}>
+            <SheetContent
+              side="bottom"
+              className="flex max-h-[85dvh] w-full flex-col gap-0 p-0 pb-[env(safe-area-inset-bottom)]"
+            >
+              <DialogHeader className="border-b p-5 pr-12">
+                <DialogTitle>{t("designer.settings")}</DialogTitle>
+                <DialogDescription>
+                  {t("designer.settings_description")}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex-1 overflow-y-auto p-5">
+                <ControlsAccordion
+                  {...controls}
+                  showHelpers={false}
+                  defaultOpen={[]}
+                />
+              </div>
+              <DialogFooter className="gap-2 border-t p-5 sm:space-x-0">
+                <Button onClick={() => setControlsOpen(false)}>Done</Button>
+              </DialogFooter>
+            </SheetContent>
+          </Sheet>
 
           <Tabs
             value={activeTab}
             onValueChange={setActiveTab}
             className="space-y-4"
           >
-            <div className="min-w-0 overflow-x-auto">
-              <TabsList
-                aria-label="Designer views"
-                className="min-h-8 w-max gap-0.5 p-0.5"
-              >
-                <TabsTrigger value="canvas" className="h-7 px-3 text-xs">
-                  {t("designer.canvas")}
-                </TabsTrigger>
-                <TabsTrigger value="code" className="h-7 px-3 text-xs">
-                  {t("designer.code")}
-                </TabsTrigger>
-                <TabsTrigger value="readme" className="h-7 px-3 text-xs">
-                  README
-                </TabsTrigger>
-                <TabsTrigger value="sample-data" className="h-7 px-3 text-xs">
-                  {t("designer.sampleData")}
-                </TabsTrigger>
-              </TabsList>
+            {/* Sticky view tabs + Save, so switching views and saving the
+                tweak never need a scroll-up (PLAN.md phase 3). The header
+                keeps the full toolbar; this is the reachable shortcut. */}
+            <div className="sticky top-0 z-10 -mx-4 bg-background/95 px-4 py-2 backdrop-blur">
+              <div className="flex items-center gap-2">
+                <div className="min-w-0 flex-1 overflow-x-auto">
+                  <TabsList
+                    aria-label="Designer views"
+                    className="min-h-8 w-max gap-0.5 p-0.5"
+                  >
+                    <TabsTrigger value="canvas" className="h-7 px-3 text-xs">
+                      {t("designer.canvas")}
+                    </TabsTrigger>
+                    <TabsTrigger value="code" className="h-7 px-3 text-xs">
+                      {t("designer.code")}
+                    </TabsTrigger>
+                    <TabsTrigger value="readme" className="h-7 px-3 text-xs">
+                      README
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="sample-data"
+                      className="h-7 px-3 text-xs"
+                    >
+                      {t("designer.sampleData")}
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
+                {!isReadOnly({ origin }) && (
+                  <Button
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => void handleSave()}
+                    disabled={offline || pending != null}
+                  >
+                    <Save className="h-4 w-4" aria-hidden="true" />
+                    Save
+                  </Button>
+                )}
+              </div>
             </div>
 
             <TabsContent value={activeTab} className="mt-0 space-y-4">

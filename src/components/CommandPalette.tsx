@@ -88,7 +88,8 @@ export function CommandPalette({
                 >
                   <item.icon className="h-4 w-4" aria-hidden="true" />
                   <span className="flex-1">{t(item.labelKey)}</span>
-                  <kbd className="font-mono text-xs text-muted-foreground">
+                  {/* Letter shortcuts are meaningless on touch: hide on coarse pointers. */}
+                  <kbd className="font-mono text-xs text-muted-foreground [@media(pointer:coarse)]:hidden">
                     G {item.shortcut.toUpperCase()}
                   </kbd>
                 </Command.Item>

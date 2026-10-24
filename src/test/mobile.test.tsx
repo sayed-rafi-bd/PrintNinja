@@ -13,6 +13,9 @@ import { PrintPage } from "@/pages/Print";
 import { HistoryPage } from "@/pages/History";
 import { PrinterSetupPage } from "@/pages/PrinterSetup";
 import { TemplatesPage } from "@/pages/Templates";
+import { SettingsPage } from "@/pages/Settings";
+import { DesignerPage } from "@/pages/Designer";
+import { CanvasWorkspace } from "@/components/designer/CanvasWorkspace";
 import { usePrintStore } from "@/lib/store/printStore";
 import { useHistoryStore, type HistoryJob } from "@/lib/store/historyStore";
 
@@ -33,10 +36,14 @@ const shareMock = vi.hoisted(() => ({
   ServerUnreachableError: class extends Error {},
 }));
 vi.mock("@/lib/share/client", () => shareMock);
-vi.mock("@/lib/share/sync", () => ({
-  downloadToLocal: vi.fn(async () => ({ id: 9, created: true })),
-  listAvailableRemoteTemplates: vi.fn(async () => ({ mine: [], saved: [] })),
-}));
+vi.mock("@/lib/share/sync", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/share/sync")>();
+  return {
+    ...actual,
+    downloadToLocal: vi.fn(async () => ({ id: 9, created: true })),
+    listAvailableRemoteTemplates: vi.fn(async () => ({ mine: [], saved: [] })),
+  };
+});
 const saveMock = vi.hoisted(() => ({
   saveRowToServer: vi.fn(async () => ({})),
   takeServerCopy: vi.fn(async () => ({})),
@@ -619,5 +626,250 @@ describe("phone History cards", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Select row 1" }));
     const bar = await screen.findByText("1 selected");
     expect(bar.parentElement).toHaveClass("sticky");
+  });
+});
+
+// Landscape phone: coarse pointer, short height, desktop width.
+const landscapeMatchMedia = (query: string) =>
+  ({
+    matches: query.includes("max-height: 500px"),
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }) as unknown as MediaQueryList;
+
+describe("landscape phone shell", () => {
+  function renderShell(path = "/printers") {
+    return render(
+      <MemoryRouter initialEntries={[path]}>
+        <Layout>
+          <Routes>
+            <Route
+              path="*"
+              element={
+                <>
+                  <Where />
+                </>
+              }
+            />
+          </Routes>
+        </Layout>
+      </MemoryRouter>,
+    );
+  }
+
+  it("forces the icon rail and swaps the wide search for the icon button", () => {
+    window.matchMedia = landscapeMatchMedia as typeof window.matchMedia;
+    renderShell();
+    // Icon rail instead of the open sidebar.
+    expect(document.querySelector("aside")).toHaveClass("w-14");
+    expect(
+      screen.queryByRole("button", { name: "Collapse sidebar" }),
+    ).toBeNull();
+    // Palette stays reachable through the icon button; the wide field hides.
+    expect(screen.getAllByRole("button", { name: "Search" })).toHaveLength(1);
+  });
+});
+
+describe("phone Designer page", () => {
+  const TEMPLATE_ROW = {
+    id: 1,
+    name: "Receipt",
+    page_w_mm: 80,
+    page_h_mm: 200,
+    orientation: "portrait",
+    html: "<p>hi</p>",
+    css: "",
+    compiled_css: "",
+    compiled_key: "",
+  };
+
+  beforeEach(() => {
+    window.matchMedia = phoneMatchMedia as typeof window.matchMedia;
+    invoke.mockReset();
+    invoke.mockImplementation(async (cmd: string) => {
+      if (
+        cmd === "list_templates" ||
+        cmd === "list_fonts" ||
+        cmd === "list_printers" ||
+        cmd === "list_datasets" ||
+        cmd === "list_profiles"
+      )
+        return [];
+      if (cmd === "get_template") return { ...TEMPLATE_ROW, origin: "own" };
+      return null;
+    });
+  });
+
+  const renderDesigner = () =>
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <DesignerPage />
+      </MemoryRouter>,
+    );
+
+  it("opens controls from a Settings sheet and keeps sections collapsed", async () => {
+    renderDesigner();
+    await screen.findByRole("tablist", { name: "Designer views" });
+    expect(screen.queryByRole("button", { name: "Templates" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const dialog = await screen.findByRole("dialog");
+    for (const name of ["Templates", "Page Setup"]) {
+      expect(within(dialog).getByRole("button", { name })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    }
+    fireEvent.click(within(dialog).getByRole("button", { name: "Page Setup" }));
+    expect(within(dialog).getByLabelText("Width (mm)")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("sticks the view tabs with a reachable Save", async () => {
+    renderDesigner();
+    const tablist = await screen.findByRole("tablist", {
+      name: "Designer views",
+    });
+    expect(tablist.closest("div.sticky")).not.toBeNull();
+    // Header toolbar Save keeps its test id; the sticky shortcut duplicates
+    // the action without one.
+    const saves = screen.getAllByRole("button", { name: "Save" });
+    expect(saves).toHaveLength(2);
+    expect(screen.getByTestId("designer-save")).toBeInTheDocument();
+  });
+
+  it("shows real page dimensions on the canvas toolbar", async () => {
+    renderDesigner();
+    await screen.findByTitle("Canvas preview");
+    expect(screen.getByText(/\d+ × \d+ mm/)).toBeInTheDocument();
+  });
+
+  it("offers a Done button that dismisses the keyboard on the Code tab", async () => {
+    renderDesigner();
+    await screen.findByRole("tablist", { name: "Designer views" });
+    const tab = screen.getByRole("tab", { name: "Code" });
+    fireEvent.mouseDown(tab);
+    fireEvent.click(tab);
+    const done = await screen.findByRole("button", { name: "Done" });
+    (screen.getByRole("tab", { name: "Canvas" }) as HTMLElement).focus();
+    expect(document.activeElement).toHaveTextContent("Canvas");
+    fireEvent.click(done);
+    expect(document.activeElement).toBe(document.body);
+  });
+});
+
+describe("canvas touch zoom", () => {
+  it("pinch scales the page and double-tap toggles fit", () => {
+    render(
+      <CanvasWorkspace
+        html="<p>hi</p>"
+        css=""
+        compiledCss=""
+        data={{}}
+        pageWidthMm={80}
+        pageHeightMm={200}
+      />,
+    );
+    const scroll = screen.getByTestId("canvas-scroll");
+    // Fit in jsdom: the readout shows 100% once (the picker says "Fit").
+    expect(screen.getAllByText("100%")).toHaveLength(1);
+    // Pinch out: 100px apart to 200px apart doubles the zoom. Both the
+    // readout and the picker (now "custom") show 200%.
+    fireEvent.touchStart(scroll, {
+      touches: [
+        { clientX: 0, clientY: 0 },
+        { clientX: 100, clientY: 0 },
+      ],
+    });
+    fireEvent.touchMove(scroll, {
+      touches: [
+        { clientX: 0, clientY: 0 },
+        { clientX: 200, clientY: 0 },
+      ],
+    });
+    fireEvent.touchEnd(scroll, { touches: [] });
+    expect(screen.getAllByText("200%")).toHaveLength(2);
+    // Double-tap returns to fit.
+    const tap = () => {
+      fireEvent.touchStart(scroll, {
+        touches: [{ clientX: 50, clientY: 50 }],
+      });
+      fireEvent.touchEnd(scroll, { touches: [] });
+    };
+    tap();
+    tap();
+    expect(screen.getAllByText("100%")).toHaveLength(1);
+  });
+});
+
+describe("phone Settings page", () => {
+  beforeEach(() => {
+    window.matchMedia = phoneMatchMedia as typeof window.matchMedia;
+    invoke.mockReset();
+    invoke.mockResolvedValue(null);
+    localStorage.clear();
+  });
+
+  const renderSettings = (path = "/settings") =>
+    render(
+      <MemoryRouter initialEntries={[path]}>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+
+  it("lists sections with summaries instead of tabs", () => {
+    renderSettings();
+    expect(
+      screen.queryByRole("tablist", { name: "Settings sections" }),
+    ).toBeNull();
+    for (const name of [
+      "Setup",
+      "General",
+      "Background",
+      "Share",
+      "API and automation",
+      "Data sources",
+      "Retention",
+      "Diagnostics",
+    ]) {
+      expect(
+        screen.getByRole("button", { name: new RegExp(name) }),
+      ).toBeInTheDocument();
+    }
+    expect(screen.getByText("How long jobs are kept")).toBeInTheDocument();
+  });
+
+  it("opens a section with a back arrow and returns to the list", async () => {
+    renderSettings();
+    fireEvent.click(screen.getByRole("button", { name: /Retention/ }));
+    expect(
+      await screen.findByLabelText("Keep history for (days)"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("tablist", { name: "Settings sections" }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /Diagnostics/ }),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("opens an explicit section URL in detail view", async () => {
+    renderSettings("/settings?section=share");
+    expect(
+      await screen.findByRole("button", { name: "Back" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("tablist", { name: "Settings sections" }),
+    ).toBeNull();
   });
 });

@@ -24,6 +24,7 @@ import {
   isActivePath,
 } from "@/lib/shell/nav";
 import { useGlobalShortcuts } from "@/lib/shell/useGlobalShortcuts";
+import { LANDSCAPE_QUERY, useMediaQuery } from "@/lib/hooks/useMediaQuery";
 import { useShareStatus } from "@/lib/shell/useShareStatus";
 import { cacheNow, useSyncStatus } from "@/lib/sync/useSyncStatus";
 import { usePrefs } from "@/lib/prefs/PrefsProvider";
@@ -200,6 +201,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  // Landscape phone (coarse pointer, short height): the desktop layout is
+  // active by width, but there is no room for an open sidebar or the wide
+  // search field — force the icon rail and the palette icon button instead.
+  const shortLandscape = useMediaQuery(LANDSCAPE_QUERY);
+  const rail = collapsed || shortLandscape;
   const [reprintJob, setReprintJob] = useState<HistoryJob | null>(null);
   const [reprinting, setReprinting] = useState(false);
 
@@ -290,17 +296,19 @@ export function Layout({ children }: { children: React.ReactNode }) {
             {appName}
           </span>
         </Link>
-        <button
-          type="button"
-          onClick={openPalette}
-          className="ml-2 hidden h-8 w-full max-w-sm items-center gap-2 rounded-md border border-input bg-card px-2.5 text-sm text-muted-foreground hover:bg-accent md:flex"
-        >
-          <Search className="h-4 w-4" aria-hidden="true" />
-          <span className="flex-1 text-left">{t("shell.search")}</span>
-          <kbd className="rounded border bg-muted px-1.5 font-mono text-xs">
-            {modKey}+K
-          </kbd>
-        </button>
+        {!shortLandscape && (
+          <button
+            type="button"
+            onClick={openPalette}
+            className="ml-2 hidden h-8 w-full max-w-sm items-center gap-2 rounded-md border border-input bg-card px-2.5 text-sm text-muted-foreground hover:bg-accent md:flex"
+          >
+            <Search className="h-4 w-4" aria-hidden="true" />
+            <span className="flex-1 text-left">{t("shell.search")}</span>
+            <kbd className="rounded border bg-muted px-1.5 font-mono text-xs [@media(pointer:coarse)]:hidden">
+              {modKey}+K
+            </kbd>
+          </button>
+        )}
         <div className="ml-auto flex items-center gap-2">
           <ApiIndicator />
           {/* Share/sync state stays visible on phones as a compact icon-only
@@ -309,7 +317,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <Button
             variant="ghost"
             size="icon"
-            className="md:hidden"
+            className={shortLandscape ? undefined : "md:hidden"}
             onClick={openPalette}
             aria-label={t("shell.search")}
           >
@@ -330,11 +338,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <OfflineBanner />
 
       <div className="flex min-h-0 flex-1">
-        {/* Sidebar: grouped by job */}
+        {/* Sidebar: grouped by job. Landscape phones force the icon rail. */}
         <aside
           className={cn(
             "hidden shrink-0 flex-col border-r bg-card transition-[width] duration-150 md:flex",
-            collapsed ? "w-14" : "w-56",
+            rail ? "w-14" : "w-56",
           )}
         >
           <nav
@@ -343,7 +351,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           >
             {NAV_GROUPS.map((group) => (
               <div key={group.id} className="space-y-0.5">
-                {!collapsed ? (
+                {!rail ? (
                   <p className="px-2 pb-1 text-xs font-medium text-muted-foreground">
                     {t(group.labelKey)}
                   </p>
@@ -358,11 +366,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
                       key={item.path}
                       to={item.path}
                       aria-current={active ? "page" : undefined}
-                      aria-label={collapsed ? label : undefined}
-                      title={collapsed ? label : undefined}
+                      aria-label={rail ? label : undefined}
+                      title={rail ? label : undefined}
                       className={cn(
                         "flex h-control items-center gap-3 rounded-md px-2.5 text-sm transition-colors",
-                        collapsed && "justify-center px-0",
+                        rail && "justify-center px-0",
                         active
                           ? "bg-accent font-medium text-accent-foreground"
                           : "text-foreground/80 hover:bg-muted hover:text-foreground",
@@ -372,39 +380,42 @@ export function Layout({ children }: { children: React.ReactNode }) {
                         className="h-4 w-4 shrink-0"
                         aria-hidden="true"
                       />
-                      {!collapsed && label}
+                      {!rail && label}
                     </Link>
                   );
                 })}
               </div>
             ))}
           </nav>
-          <div className="border-t p-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              className={cn(
-                "w-full",
-                collapsed ? "justify-center px-0" : "justify-start gap-2",
-              )}
-              onClick={() => setCollapsed((v) => !v)}
-              aria-label={collapsed ? t("shell.expand") : t("shell.collapse")}
-              title={collapsed ? t("shell.expand") : t("shell.collapse")}
-            >
-              <ChevronRight
+          {/* No room to expand in a short landscape viewport. */}
+          {!shortLandscape && (
+            <div className="border-t p-2">
+              <Button
+                variant="ghost"
+                size="sm"
                 className={cn(
-                  "h-4 w-4 transition-transform",
-                  !collapsed && "rotate-180",
+                  "w-full",
+                  rail ? "justify-center px-0" : "justify-start gap-2",
                 )}
-                aria-hidden="true"
-              />
-              {!collapsed && (
-                <span className="text-muted-foreground">
-                  {t("shell.collapse")}
-                </span>
-              )}
-            </Button>
-          </div>
+                onClick={() => setCollapsed((v) => !v)}
+                aria-label={rail ? t("shell.expand") : t("shell.collapse")}
+                title={rail ? t("shell.expand") : t("shell.collapse")}
+              >
+                <ChevronRight
+                  className={cn(
+                    "h-4 w-4 transition-transform",
+                    !rail && "rotate-180",
+                  )}
+                  aria-hidden="true"
+                />
+                {!rail && (
+                  <span className="text-muted-foreground">
+                    {t("shell.collapse")}
+                  </span>
+                )}
+              </Button>
+            </div>
+          )}
         </aside>
 
         <main

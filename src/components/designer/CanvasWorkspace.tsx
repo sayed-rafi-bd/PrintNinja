@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type TouchEvent as ReactTouchEvent,
+  type TouchList as ReactTouchList,
+} from "react";
 import { AlertTriangle, ZoomIn, ZoomOut } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -94,6 +101,71 @@ export function CanvasWorkspace({
   const selectValue =
     mode === "fit" ? "fit" : isPreset ? String(mode) : "custom";
 
+  // Touch zoom on phones (PLAN.md phase 3): two-finger pinch scales around
+  // the gesture, double-tap toggles 100% / fit. `touch-action: pan-x pan-y`
+  // below keeps one-finger scrolling with the browser while disabling its
+  // own pinch-zoom and tap-zoom, so these handlers own the gesture.
+  const gesture = useRef<{
+    startDist: number;
+    startZoom: number;
+    multi: boolean;
+  } | null>(null);
+  const tap = useRef<{ at: number; x: number; y: number } | null>(null);
+  const lastTapAt = useRef(0);
+  const touchDist = (touches: ReactTouchList) =>
+    Math.hypot(
+      touches[0].clientX - touches[1].clientX,
+      touches[0].clientY - touches[1].clientY,
+    );
+  const onTouchStart = (e: ReactTouchEvent) => {
+    if (e.touches.length === 2) {
+      gesture.current = {
+        startDist: touchDist(e.touches),
+        startZoom: zoom,
+        multi: true,
+      };
+      tap.current = null;
+    } else if (e.touches.length === 1 && !gesture.current) {
+      const t = e.touches[0];
+      tap.current = { at: Date.now(), x: t.clientX, y: t.clientY };
+    } else if (gesture.current) {
+      gesture.current.multi = true;
+      tap.current = null;
+    }
+  };
+  const onTouchMove = (e: ReactTouchEvent) => {
+    const g = gesture.current;
+    if (g && e.touches.length === 2 && g.startDist > 0) {
+      setMode(
+        Math.min(
+          MAX_ZOOM,
+          Math.max(
+            MIN_ZOOM,
+            (g.startZoom * touchDist(e.touches)) / g.startDist,
+          ),
+        ),
+      );
+    }
+  };
+  const onTouchEnd = (e: ReactTouchEvent) => {
+    if (e.touches.length > 0) return;
+    const g = gesture.current;
+    gesture.current = null;
+    // A fast, nearly stationary single tap counts; scrolls do not.
+    const tp = tap.current;
+    tap.current = null;
+    if (g?.multi || !tp) return;
+    const dt = Date.now() - tp.at;
+    if (dt > 250) return;
+    const now = Date.now();
+    if (now - lastTapAt.current < 300) {
+      lastTapAt.current = 0;
+      setMode((m) => (m === "fit" ? 1 : "fit"));
+    } else {
+      lastTapAt.current = now;
+    }
+  };
+
   return (
     <div
       className={cn(
@@ -103,7 +175,15 @@ export function CanvasWorkspace({
       )}
     >
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-3 py-1.5">
-        <span className="text-sm font-medium">{t("designer.canvas")}</span>
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-medium">
+            {t("designer.canvas")}
+          </span>
+          {/* Real dimensions, so a phone author knows the label size at a glance. */}
+          <span className="block text-xs text-muted-foreground">
+            {pageWidthMm} × {pageHeightMm} mm
+          </span>
+        </span>
         <div className="flex items-center gap-1">
           <Select
             value={selectValue}
@@ -172,8 +252,13 @@ export function CanvasWorkspace({
           The stable gutter stops a scrollbar appearing and re-fitting the page in a loop. */}
       <div
         ref={scrollRef}
+        data-testid="canvas-scroll"
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
         className={cn(
-          "flex overflow-auto bg-muted p-4 [scrollbar-gutter:stable]",
+          "flex overflow-auto bg-muted p-4 [scrollbar-gutter:stable] [touch-action:pan-x_pan-y]",
           fill ? "min-h-0 flex-1" : "min-h-[500px]",
         )}
       >

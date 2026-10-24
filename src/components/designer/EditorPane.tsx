@@ -9,9 +9,11 @@ import CodeMirror, {
   type EditorView,
   type ReactCodeMirrorRef,
 } from "@uiw/react-codemirror";
+import { EditorView as CmView } from "@codemirror/view";
 import { css } from "@codemirror/lang-css";
 import { html } from "@codemirror/lang-html";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { ReadmePanel } from "./ReadmePanel";
@@ -32,7 +34,9 @@ interface CodeProps {
 
 /**
  * The HTML and CSS editors stacked one above the other, for the Code tab on a
- * phone, where there is no room for a side-by-side workspace.
+ * phone, where there is no room for a side-by-side workspace. Lines wrap,
+ * the editors grow with the content up to 60vh, and Done dismisses the
+ * soft keyboard (PLAN.md phase 3).
  */
 export function CodeEditors({
   templateName,
@@ -42,39 +46,54 @@ export function CodeEditors({
   onCssChange,
 }: CodeProps) {
   return (
-    <div className="grid grid-cols-1 gap-4">
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">HTML — {templateName}</CardTitle>
-        </CardHeader>
-        <CardContent className="overflow-hidden rounded-md border p-0">
-          <CodeMirror
-            value={htmlCode}
-            height="520px"
-            extensions={[html()]}
-            onChange={onHtmlChange}
-            theme="dark"
-            style={{ fontSize: "13px" }}
-            basicSetup={BASIC_SETUP}
-          />
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">CSS</CardTitle>
-        </CardHeader>
-        <CardContent className="overflow-hidden rounded-md border p-0">
-          <CodeMirror
-            value={cssCode}
-            height="520px"
-            extensions={[css()]}
-            onChange={onCssChange}
-            theme="dark"
-            style={{ fontSize: "13px" }}
-            basicSetup={BASIC_SETUP}
-          />
-        </CardContent>
-      </Card>
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() =>
+            (document.activeElement as HTMLElement | null)?.blur?.()
+          }
+        >
+          Done
+        </Button>
+      </div>
+      <div className="grid grid-cols-1 gap-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">HTML — {templateName}</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-hidden rounded-md border p-0">
+            <CodeMirror
+              value={htmlCode}
+              height="auto"
+              extensions={[html(), CmView.lineWrapping]}
+              onChange={onHtmlChange}
+              theme="dark"
+              style={{ fontSize: "13px", maxHeight: "60vh" }}
+              basicSetup={BASIC_SETUP}
+              aria-label="HTML editor"
+            />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">CSS</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-hidden rounded-md border p-0">
+            <CodeMirror
+              value={cssCode}
+              height="auto"
+              extensions={[css(), CmView.lineWrapping]}
+              onChange={onCssChange}
+              theme="dark"
+              style={{ fontSize: "13px", maxHeight: "60vh" }}
+              basicSetup={BASIC_SETUP}
+              aria-label="CSS editor"
+            />
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

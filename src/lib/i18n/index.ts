@@ -132,6 +132,9 @@ const resources = {
       designer: {
         title: "Designer",
         newTemplate: "New Template",
+        settings: "Settings",
+        settings_description:
+          "Pick the template, page size, or custom input. Changes apply right away.",
         pageSetup: "Page Setup",
         canvas: "Canvas",
         code: "Code",
@@ -245,6 +248,14 @@ const resources = {
       },
       settings_page: {
         title: "Settings",
+        hint_setup: "First-run checklist",
+        hint_general: "Name, logo, and density",
+        hint_background: "Run when the PC starts",
+        hint_share: "Sync templates across PCs",
+        hint_api: "Local API and trusted apps",
+        hint_data: "Where live data may come from",
+        hint_retention: "How long jobs are kept",
+        hint_diagnostics: "Export logs for support",
         fonts: "Fonts",
         api: "API",
         deep_links: "Deep Links",

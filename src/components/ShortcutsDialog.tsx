@@ -14,7 +14,8 @@ function Keys({ keys }: { keys: string[] }) {
       {keys.map((k, i) => (
         <span key={i} className="flex items-center gap-1">
           {i > 0 && <span className="text-xs text-muted-foreground">then</span>}
-          <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-xs">
+          {/* Meaningless on touch: hide on coarse pointers. */}
+          <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-xs [@media(pointer:coarse)]:hidden">
             {k}
           </kbd>
         </span>

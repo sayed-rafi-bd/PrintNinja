@@ -119,6 +119,15 @@
   table {
     font-variant-numeric: tabular-nums;
   }
+  /* iOS Safari auto-zooms into focused fields under 16px. 16px on coarse
+     pointers (phones, tablets) prevents that; desktop keeps text-sm. */
+  @media (pointer: coarse) {
+    input,
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
   /* Visible keyboard focus everywhere, including elements without a ring utility. */
   :focus-visible {
     outline: 2px solid hsl(var(--ring));
