@@ -1,3 +1,4 @@
+import { describeError } from "@/lib/errors";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -48,7 +49,7 @@ export function ChangePasswordForm({
           : t("settings_page.change_password_done"),
       );
     } catch (e) {
-      toast.error(String(e));
+      toast.error(describeError(e));
     } finally {
       setBusy(false);
     }

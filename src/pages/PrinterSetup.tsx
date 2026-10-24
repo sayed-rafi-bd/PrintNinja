@@ -1,3 +1,4 @@
+import { describeError, isAlreadyExists } from "@/lib/errors";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { PageHeader } from "@/components/PageHeader";
@@ -164,7 +165,7 @@ export function PrinterSetupPage() {
       const saved = await agent("list_printers", {});
       setPrinters(saved ?? []);
     } catch (e) {
-      toast.error(t("printers.toast_load_failed", { error: String(e) }));
+      toast.error(t("printers.toast_load_failed", { error: describeError(e) }));
     } finally {
       setLoading(false);
     }
@@ -184,7 +185,9 @@ export function PrinterSetupPage() {
       setSystemPrinters(list ?? []);
       toast.success(t("printers.toast_found_system", { count: list.length }));
     } catch (e) {
-      toast.error(t("printers.toast_discovery_failed", { error: String(e) }));
+      toast.error(
+        t("printers.toast_discovery_failed", { error: describeError(e) }),
+      );
     }
   };
 
@@ -230,7 +233,7 @@ export function PrinterSetupPage() {
         toast.info(t("printers.toast_all_added", { count: skipped }));
       else toast.info(t("printers.toast_none_new"));
     } catch (e) {
-      toast.error(t("printers.toast_scan_failed", { error: String(e) }));
+      toast.error(t("printers.toast_scan_failed", { error: describeError(e) }));
     } finally {
       setScanning(false);
     }
@@ -256,9 +259,9 @@ export function PrinterSetupPage() {
       setForm(blankForm);
       await load();
     } catch (e) {
-      const msg = String(e);
+      const msg = describeError(e);
       toast.error(
-        msg.includes("already exists")
+        isAlreadyExists(e)
           ? msg
           : t("printers.toast_save_failed", { error: msg }),
       );
@@ -271,7 +274,9 @@ export function PrinterSetupPage() {
       setPrinters((prev) => prev.filter((x) => x.id !== p.id));
       toast.success(t("printers.toast_removed", { name: p.name }));
     } catch (e) {
-      toast.error(t("printers.toast_remove_failed", { error: String(e) }));
+      toast.error(
+        t("printers.toast_remove_failed", { error: describeError(e) }),
+      );
     }
   };
 
@@ -281,7 +286,7 @@ export function PrinterSetupPage() {
       await agent("test_printer", { id: p.id });
       toast.success(t("printers.toast_test_sent", { name: p.name }));
     } catch (e) {
-      toast.error(t("printers.toast_test_failed", { error: String(e) }));
+      toast.error(t("printers.toast_test_failed", { error: describeError(e) }));
     } finally {
       setTesting(null);
     }

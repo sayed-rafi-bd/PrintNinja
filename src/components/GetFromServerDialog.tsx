@@ -1,3 +1,4 @@
+import { describeError } from "@/lib/errors";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -55,7 +56,7 @@ export function GetFromServerDialog({
         ...saved.map((t) => ({ ...t, group: "Saved" as const })),
       ]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(describeError(e));
     }
   }, []);
 
@@ -90,7 +91,7 @@ export function GetFromServerDialog({
         if (result.created) added += 1;
         else already += 1;
       } catch (e) {
-        failed.push(e instanceof Error ? e.message : String(e));
+        failed.push(describeError(e));
       }
     }
     setDownloading(false);

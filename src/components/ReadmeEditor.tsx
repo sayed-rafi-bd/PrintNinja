@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { currentLanguage } from "@/lib/i18n";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
@@ -296,8 +297,8 @@ export function ReadmeEditor({
         className={`text-xs ${overCap ? "text-destructive font-medium" : "text-muted-foreground"}`}
       >
         {t("readme.byte_count", {
-          used: bytes.toLocaleString(),
-          max: README_MAX_BYTES.toLocaleString(),
+          used: bytes.toLocaleString(currentLanguage()),
+          max: README_MAX_BYTES.toLocaleString(currentLanguage()),
         })}
         {overCap && t("readme.over_cap")}
       </div>

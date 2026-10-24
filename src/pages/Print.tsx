@@ -1,3 +1,4 @@
+import { describeError } from "@/lib/errors";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { agent } from "@/lib/agent/commands";
@@ -160,7 +161,9 @@ export function PrintPage() {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             data = await res.json();
           } catch (e) {
-            notice = t("print.preview_data_failed", { error: String(e) });
+            notice = t("print.preview_data_failed", {
+              error: describeError(e),
+            });
             data = DEFAULT_MOCK_DATA;
           }
         }
@@ -192,7 +195,9 @@ export function PrintPage() {
       } catch (e) {
         if (!cancelled) {
           setPreviewHtml("");
-          setPreviewError(t("print.preview_unavailable", { error: String(e) }));
+          setPreviewError(
+            t("print.preview_unavailable", { error: describeError(e) }),
+          );
         }
       }
     })();
@@ -204,23 +209,23 @@ export function PrintPage() {
   const loadPrinters = async () => {
     try {
       const list = await refreshSystemPrinters();
-      toast.success(`Found ${list.length} printer(s)`);
+      toast.success(t("printers.toast_found_system", { count: list.length }));
     } catch (e) {
-      toast.error(`Failed: ${e}`);
+      toast.error(t("settings_page.toast_failed", { error: describeError(e) }));
     }
   };
 
   const handlePrint = async () => {
     if (!store.printerId) {
-      toast.error("Please select a printer");
+      toast.error(t("print.blocker_printer"));
       return;
     }
     if (!store.templateId) {
-      toast.error("Please select a template");
+      toast.error(t("print.blocker_template"));
       return;
     }
     if (store.copies < 1) {
-      toast.error("Copies must be at least 1");
+      toast.error(t("print.blocker_copies"));
       return;
     }
 
@@ -265,7 +270,7 @@ export function PrintPage() {
       }
     } catch (e) {
       store.setStatus("failed");
-      store.setError(String(e));
+      store.setError(describeError(e));
     }
   };
 
@@ -285,7 +290,7 @@ export function PrintPage() {
       }
     } catch (e) {
       store.setStatus("failed");
-      store.setError(String(e));
+      store.setError(describeError(e));
     }
   };
 

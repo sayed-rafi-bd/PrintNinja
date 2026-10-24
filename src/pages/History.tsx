@@ -1,3 +1,4 @@
+import { describeError } from "@/lib/errors";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import {
@@ -12,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { currentLanguage } from "@/lib/i18n";
 import { toast } from "sonner";
 import { agent } from "@/lib/agent/commands";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -82,7 +84,7 @@ const fmtTime = (job: HistoryJob) => {
   const raw = job.finished_at || job.started_at;
   if (!raw) return "—";
   const d = new Date(raw);
-  return Number.isNaN(d.getTime()) ? raw : d.toLocaleString();
+  return Number.isNaN(d.getTime()) ? raw : d.toLocaleString(currentLanguage());
 };
 
 export function HistoryPage() {
@@ -115,7 +117,10 @@ export function HistoryPage() {
         const jobs = await agent("list_jobs", {});
         if (!cancelled) store.setJobs(jobs ?? []);
       } catch (e) {
-        if (!cancelled) toast.error(`Failed to load history: ${e}`);
+        if (!cancelled)
+          toast.error(
+            t("history.toast_load_failed", { error: describeError(e) }),
+          );
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -193,7 +198,9 @@ export function HistoryPage() {
       await reprintOne(job);
       toast.success(t("history.toast_reprinted", { id: job.id }));
     } catch (e) {
-      toast.error(t("history.toast_reprint_failed", { error: String(e) }));
+      toast.error(
+        t("history.toast_reprint_failed", { error: describeError(e) }),
+      );
     } finally {
       setConfirm(null);
     }
@@ -203,7 +210,7 @@ export function HistoryPage() {
       await retryOne(job);
       toast.success(t("history.toast_requeued", { id: job.id }));
     } catch (e) {
-      toast.error(t("history.toast_retry_failed", { error: String(e) }));
+      toast.error(t("history.toast_retry_failed", { error: describeError(e) }));
     } finally {
       setConfirm(null);
     }
@@ -255,7 +262,10 @@ export function HistoryPage() {
       setConfirm(null);
     } catch (e) {
       toast.error(
-        t("history.toast_delete_failed", { id: job.id, error: String(e) }),
+        t("history.toast_delete_failed", {
+          id: job.id,
+          error: describeError(e),
+        }),
       );
     } finally {
       setBusy(false);

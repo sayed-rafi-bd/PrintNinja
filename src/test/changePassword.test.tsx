@@ -78,7 +78,7 @@ describe("ChangePasswordForm", () => {
     fill("wrong", "new-password-1", "new-password-1");
     fireEvent.click(screen.getByRole("button", { name: "Change password" }));
     await waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith("Error: 401 Unauthorized"),
+      expect(toast.error).toHaveBeenCalledWith("401 Unauthorized"),
     );
   });
 });

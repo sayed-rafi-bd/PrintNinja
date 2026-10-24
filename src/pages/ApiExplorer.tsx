@@ -1,3 +1,4 @@
+import { describeError } from "@/lib/errors";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -206,7 +207,7 @@ export function ApiExplorerPage() {
   const send = async () => {
     if (!status?.running) return;
     if (selected.needsId && !jobId.trim()) {
-      toast.error("Enter a job id first");
+      toast.error(t("explorer.toast_job_id_required"));
       return;
     }
     let parsed: unknown = undefined;
@@ -238,7 +239,9 @@ export function ApiExplorerPage() {
       const text = await res.text();
       setResponse({ status: res.status, text });
     } catch (e) {
-      toast.error(`Request failed: ${e}`);
+      toast.error(
+        t("explorer.toast_request_failed", { error: describeError(e) }),
+      );
     } finally {
       setBusy(false);
     }
@@ -250,10 +253,12 @@ export function ApiExplorerPage() {
       const port = Number((await readSetting("api_port")) || "17717");
       const lan = (await readSetting("api_lan_access")) === "true";
       await agent("start_api_server", { port, lan_access: lan });
-      toast.success("API server started");
+      toast.success(t("explorer.toast_started"));
       await loadStatus();
     } catch (e) {
-      toast.error(`Failed to start: ${e}`);
+      toast.error(
+        t("settings_page.toast_api_start_failed", { error: describeError(e) }),
+      );
     } finally {
       setStarting(false);
     }

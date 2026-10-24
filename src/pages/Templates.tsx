@@ -1,3 +1,4 @@
+import { describeError } from "@/lib/errors";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ColumnDef, SortingState } from "@tanstack/react-table";
@@ -231,7 +232,7 @@ export function TemplatesPage() {
       toast.success(t("templates.toast_saved_server", { name: tpl.name }));
       await loadMine();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(describeError(e));
     } finally {
       setSyncing(null);
     }
@@ -249,7 +250,7 @@ export function TemplatesPage() {
       );
       await loadMine();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(describeError(e));
     } finally {
       setSyncing(null);
     }
@@ -264,7 +265,7 @@ export function TemplatesPage() {
       await loadMine();
     } catch (e) {
       // The local copy is untouched when the fetch fails, so it still prints.
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(describeError(e));
     } finally {
       setSyncing(null);
     }
@@ -301,7 +302,7 @@ export function TemplatesPage() {
       toast.success(t("templates.toast_saved_local", { name: serverTpl.name }));
       await loadMine();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e), {
+      toast.error(describeError(e), {
         description: t("templates.toast_tap_retry"),
         action: {
           label: t("templates.toast_retry"),
@@ -325,7 +326,7 @@ export function TemplatesPage() {
       // Saving is a network operation: without the server round-trip the
       // copy stays, and the next pull (which still lists it as saved)
       // would bring it right back.
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(describeError(e));
       return;
     }
     // The server confirmed the unsave, so the local copy is forgotten
@@ -337,7 +338,7 @@ export function TemplatesPage() {
       toast.success(t("templates.toast_removed_saved"));
       await loadMine();
     } catch (e) {
-      toast.error(String(e));
+      toast.error(describeError(e));
     }
   };
 
@@ -374,7 +375,9 @@ export function TemplatesPage() {
         ),
       );
     } catch (e) {
-      setPreviewError(`Could not load the preview: ${e}`);
+      setPreviewError(
+        t("print.preview_unavailable", { error: describeError(e) }),
+      );
     }
   };
 

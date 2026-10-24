@@ -1,3 +1,4 @@
+import { describeError } from "@/lib/errors";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -56,7 +57,7 @@ export function ConflictDialog({
       // dialog stays mounted so a queue of N resolves without flashing.
       onResolved();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(describeError(e));
     } finally {
       setBusy(null);
     }
@@ -64,7 +65,7 @@ export function ConflictDialog({
 
   const keepMine = () =>
     run("mine", async () => {
-      if (!serverId) throw new Error("This template was never on the server");
+      if (!serverId) throw new Error(t("templates.err_never_on_server"));
       // Rebase onto the server's current revision so the next Save
       // overwrites cleanly; the other PC's edit stays in version history.
       const remote = await share.fetchRemoteTemplate(serverId);
@@ -77,7 +78,7 @@ export function ConflictDialog({
 
   const takeServer = () =>
     run("theirs", async () => {
-      if (!serverId) throw new Error("This template was never on the server");
+      if (!serverId) throw new Error(t("templates.err_never_on_server"));
       const remote = await share.fetchRemoteTemplate(serverId);
       await agent("cache_resolve_conflict", {
         server_id: serverId,
@@ -101,7 +102,7 @@ export function ConflictDialog({
   const keepBoth = () =>
     run("both", async () => {
       if (!serverId || !conflict)
-        throw new Error("This template was never on the server");
+        throw new Error(t("templates.err_never_on_server"));
       const local = await agent("get_template", { id: conflict.id });
       await agent("create_template", {
         req: {

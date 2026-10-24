@@ -1,3 +1,5 @@
+import i18n from "@/lib/i18n";
+import { describeError } from "@/lib/errors";
 /**
  * Template reads — Get from server and the row helpers behind it.
  *
@@ -86,7 +88,12 @@ export async function downloadToLocal(
       },
     });
   } catch (e) {
-    throw new Error(`Could not add “${remote.name}” on this PC: ${String(e)}`);
+    throw new Error(
+      i18n.t("templates.err_add_local_failed", {
+        name: remote.name,
+        error: describeError(e),
+      }),
+    );
   }
 
   await agent("set_publish_info", {

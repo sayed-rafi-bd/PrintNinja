@@ -1,3 +1,4 @@
+import { describeError } from "@/lib/errors";
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/PageHeader";
 import { ControlsAccordion } from "@/components/designer/ControlsAccordion";
@@ -392,7 +393,7 @@ export function DesignerPage() {
         setConflict({ rowId: currentTemplateDbId, serverId: e.serverId });
         return;
       }
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(describeError(e));
     } finally {
       setPending(null);
     }
@@ -449,7 +450,7 @@ export function DesignerPage() {
       }
       window.dispatchEvent(new Event("sync:pulled"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(describeError(e));
     } finally {
       setPending(null);
     }
@@ -473,7 +474,7 @@ export function DesignerPage() {
       setConflict(null);
       toast.success(t("designer.toast_server_copy"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(describeError(e));
     } finally {
       setPending(null);
     }
@@ -496,7 +497,7 @@ export function DesignerPage() {
         toast.error(t("designer.toast_moved_again"));
         return;
       }
-      toast.error(e instanceof Error ? e.message : String(e));
+      toast.error(describeError(e));
     } finally {
       setPending(null);
     }
@@ -766,7 +767,7 @@ export function DesignerPage() {
       // The README rides along with the next Save; nothing to send here.
       toast.success(t("designer.toast_readme_saved"));
     } catch (e) {
-      toast.error(String(e));
+      toast.error(describeError(e));
     } finally {
       setReadmeSaving(false);
     }
@@ -806,7 +807,7 @@ export function DesignerPage() {
             toast.success(t("designer.toast_dataset_deleted"));
           } catch (e) {
             toast.error(
-              t("designer.toast_delete_failed", { error: String(e) }),
+              t("designer.toast_delete_failed", { error: describeError(e) }),
             );
           }
         })();
@@ -1214,7 +1215,7 @@ export function DesignerPage() {
                 } catch (e) {
                   return (
                     <p className="text-xs text-danger">
-                      {String(e).split("\n")[0]}
+                      {describeError(e).split("\n")[0]}
                     </p>
                   );
                 }
@@ -1252,7 +1253,9 @@ export function DesignerPage() {
                     );
                   } catch (e) {
                     toast.error(
-                      t("designer.toast_add_failed", { error: String(e) }),
+                      t("designer.toast_add_failed", {
+                        error: describeError(e),
+                      }),
                     );
                   }
                 })();
@@ -1289,7 +1292,7 @@ export function DesignerPage() {
               } catch (e) {
                 return (
                   <p className="text-xs text-danger">
-                    {String(e).split("\n")[0]}
+                    {describeError(e).split("\n")[0]}
                   </p>
                 );
               }
@@ -1322,7 +1325,9 @@ export function DesignerPage() {
                     toast.success(t("designer.toast_dataset_updated"));
                   } catch (e) {
                     toast.error(
-                      t("designer.toast_save_failed", { error: String(e) }),
+                      t("designer.toast_save_failed", {
+                        error: describeError(e),
+                      }),
                     );
                   }
                 })();

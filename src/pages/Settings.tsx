@@ -1,3 +1,4 @@
+import { describeError } from "@/lib/errors";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import { AppearanceSettings } from "@/components/AppearanceSettings";
@@ -63,40 +64,55 @@ import { normalizeServiceUrl } from "@/lib/share/session";
 const SECTION_META: Array<{
   key: SettingsSection;
   icon: LucideIcon;
-  label: string;
+  labelKey: string;
   summaryKey: string;
 }> = [
-  { key: "setup", icon: ListChecks, label: "Setup", summaryKey: "hint_setup" },
-  { key: "general", icon: Type, label: "General", summaryKey: "hint_general" },
+  {
+    key: "setup",
+    icon: ListChecks,
+    labelKey: "section_setup",
+    summaryKey: "hint_setup",
+  },
+  {
+    key: "general",
+    icon: Type,
+    labelKey: "section_general",
+    summaryKey: "hint_general",
+  },
   {
     key: "background",
     icon: AppWindow,
-    label: "Background",
+    labelKey: "section_background",
     summaryKey: "hint_background",
   },
-  { key: "share", icon: Globe, label: "Share", summaryKey: "hint_share" },
+  {
+    key: "share",
+    icon: Globe,
+    labelKey: "section_share",
+    summaryKey: "hint_share",
+  },
   {
     key: "api",
     icon: Key,
-    label: "API and automation",
+    labelKey: "section_api",
     summaryKey: "hint_api",
   },
   {
     key: "data",
     icon: Shield,
-    label: "Data sources",
+    labelKey: "section_data",
     summaryKey: "hint_data",
   },
   {
     key: "retention",
     icon: Archive,
-    label: "Retention",
+    labelKey: "section_retention",
     summaryKey: "hint_retention",
   },
   {
     key: "diagnostics",
     icon: Activity,
-    label: "Diagnostics",
+    labelKey: "section_diagnostics",
     summaryKey: "hint_diagnostics",
   },
 ];
@@ -328,7 +344,7 @@ export function SettingsPage() {
       await loadApiStatus();
     } catch (e) {
       toast.error(
-        t("settings_page.toast_api_start_failed", { error: String(e) }),
+        t("settings_page.toast_api_start_failed", { error: describeError(e) }),
       );
     } finally {
       setStarting(false);
@@ -342,7 +358,7 @@ export function SettingsPage() {
       await loadApiStatus();
     } catch (e) {
       toast.error(
-        t("settings_page.toast_api_stop_failed", { error: String(e) }),
+        t("settings_page.toast_api_stop_failed", { error: describeError(e) }),
       );
     }
   };
@@ -375,7 +391,9 @@ export function SettingsPage() {
     } catch (e) {
       // The wrong content (a non-font with a font extension) must read
       // inline, not just in a toast (F10).
-      setFontUploadError(`Upload failed: ${e}`);
+      setFontUploadError(
+        t("designer.custom_font_failed", { error: describeError(e) }),
+      );
     }
   };
 
@@ -491,7 +509,7 @@ export function SettingsPage() {
         t("settings_page.toast_registered", { handle: res.user.handle }),
       );
     } catch (e) {
-      toast.error(String(e));
+      toast.error(describeError(e));
     } finally {
       setShareBusy(false);
     }
@@ -511,7 +529,7 @@ export function SettingsPage() {
         t("settings_page.toast_signed_in", { handle: res.user.handle }),
       );
     } catch (e) {
-      toast.error(String(e));
+      toast.error(describeError(e));
     } finally {
       setShareBusy(false);
     }
@@ -524,7 +542,7 @@ export function SettingsPage() {
       setShareUser(null);
       toast.success(t("settings_page.toast_signed_out"));
     } catch (e) {
-      toast.error(String(e));
+      toast.error(describeError(e));
     } finally {
       setShareBusy(false);
     }
@@ -552,7 +570,9 @@ export function SettingsPage() {
                   aria-hidden="true"
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium">{s.label}</span>
+                  <span className="block text-sm font-medium">
+                    {t(`settings_page.${s.labelKey}`)}
+                  </span>
                   <span className="block truncate text-xs text-muted-foreground">
                     {t(`settings_page.${s.summaryKey}`)}
                   </span>
@@ -584,7 +604,7 @@ export function SettingsPage() {
                 {t("common.back")}
               </Button>
               <span className="truncate text-sm font-medium">
-                {SECTION_META.find((s) => s.key === section)?.label ?? section}
+                {t(`settings_page.section_${section}`, section)}
               </span>
             </div>
           ) : (
@@ -599,7 +619,7 @@ export function SettingsPage() {
                   className="justify-start gap-2 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground data-[state=active]:shadow-none"
                 >
                   <s.icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                  {s.label}
+                  {t(`settings_page.${s.labelKey}`)}
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -665,7 +685,7 @@ export function SettingsPage() {
                             } catch (e) {
                               toast.error(
                                 t("settings_page.toast_failed", {
-                                  error: String(e),
+                                  error: describeError(e),
                                 }),
                               );
                             }
@@ -1371,7 +1391,7 @@ export function SettingsPage() {
                   } catch (e) {
                     toast.error(
                       t("settings_page.toast_reset_failed", {
-                        error: String(e),
+                        error: describeError(e),
                       }),
                     );
                   } finally {

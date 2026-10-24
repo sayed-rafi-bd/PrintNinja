@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AppLogo } from "@/components/AppLogo";
+import { SUPPORTED_LANGUAGES, currentLanguage, setLanguage } from "@/lib/i18n";
 import { usePrefs } from "@/lib/prefs/PrefsProvider";
 import {
   DEFAULT_APP_NAME,
@@ -27,7 +28,9 @@ function readAsDataUrl(file: File): Promise<string> {
 
 /** Density and optional branding. Both apply immediately and are stored in settings. */
 export function AppearanceSettings() {
+  // useTranslation re-renders this component when the language changes.
   const { t } = useTranslation();
+  const language = currentLanguage();
   const { density, appName, logo, setDensity, setAppName, setLogo } =
     usePrefs();
   const [name, setName] = useState(appName);
@@ -72,6 +75,48 @@ export function AppearanceSettings() {
 
   return (
     <>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            {t("settings_page.appearance_language")}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div
+            role="radiogroup"
+            aria-label={t("settings_page.appearance_language")}
+            data-testid="settings-language"
+            className="grid gap-2 sm:grid-cols-2"
+          >
+            {SUPPORTED_LANGUAGES.map((l) => {
+              const selected = language === l.code;
+              return (
+                <button
+                  key={l.code}
+                  type="button"
+                  role="radio"
+                  lang={l.code}
+                  aria-checked={selected}
+                  data-testid={`settings-language-${l.code}`}
+                  onClick={() => void setLanguage(l.code)}
+                  className={cn(
+                    "rounded-md border p-3 text-left font-medium transition-colors",
+                    selected
+                      ? "border-primary bg-accent"
+                      : "border-input bg-card hover:bg-muted",
+                  )}
+                >
+                  {l.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {t("settings_page.appearance_language_hint")}
+          </p>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
