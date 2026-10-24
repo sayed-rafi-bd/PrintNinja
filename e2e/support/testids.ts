@@ -22,6 +22,8 @@ export const testids = {
   syncChip: "sync-chip",
   /** Red topbar alert while the local API is exposed to the LAN. */
   lanIndicator: "lan-indicator",
+  /** Green topbar badge while the local API serves loopback. */
+  apiIndicator: "api-indicator",
   /** Banner over the content while open but offline. */
   offlineBanner: "offline-banner",
   /** Banner on Templates when rows are conflicted. */

@@ -56,8 +56,8 @@ beforeEach(() => {
   mockAgent.mockRejectedValue(new Error("no backend"));
 });
 
-describe("LAN indicator", () => {
-  it("stays hidden when the API server is stopped or loopback-only", async () => {
+describe("API indicator", () => {
+  it("stays hidden when the API server is stopped", async () => {
     mockAgent.mockResolvedValue({
       running: false,
       address: "127.0.0.1",
@@ -69,16 +69,28 @@ describe("LAN indicator", () => {
       expect(mockAgent).toHaveBeenCalledWith("get_api_status", {}),
     );
     expect(screen.queryByTestId("lan-indicator")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("api-indicator")).not.toBeInTheDocument();
+  });
 
+  it("shows a green badge linking to Settings API when loopback-only", async () => {
     mockAgent.mockResolvedValue({
       running: true,
       address: "127.0.0.1",
       port: 17717,
       lan_access: false,
     });
-    window.dispatchEvent(new Event("focus"));
-    await waitFor(() => expect(mockAgent).toHaveBeenCalledTimes(2));
+    renderShell();
+    const link = await screen.findByTestId("api-indicator");
+    expect(link.tagName).toBe("A");
+    expect(link).toHaveAttribute("href", "/settings?section=api");
+    expect(link).toHaveTextContent("API");
     expect(screen.queryByTestId("lan-indicator")).not.toBeInTheDocument();
+    fireEvent.click(link);
+    await waitFor(() =>
+      expect(screen.getByTestId("where")).toHaveTextContent(
+        "/settings?section=api",
+      ),
+    );
   });
 
   it("stays hidden when the status cannot be read", async () => {
