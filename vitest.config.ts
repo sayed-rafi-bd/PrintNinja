@@ -1,9 +1,18 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import { createRequire } from "node:module";
 import path from "path";
+
+const require = createRequire(import.meta.url);
+const pkg = require("./package.json") as { version: string };
 
 export default defineConfig({
   plugins: [react()],
+  // Same baked version as the app build (see vite.config.ts), so web-mode
+  // fallbacks resolve identically under test.
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
