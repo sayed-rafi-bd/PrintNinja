@@ -3,7 +3,7 @@
 //! status reporting live in Tauri commands, so these tests drive the
 //! extracted helpers against a real database.
 
-use printninja_lib::commands::api::{api_status_from_db, bind_addr};
+use printninja_lib::commands::api::{api_autostart_enabled, api_status_from_db, bind_addr};
 use printninja_lib::db::Database;
 use std::sync::{Arc, Mutex};
 
@@ -102,4 +102,17 @@ fn start_api_server_runs_on_the_tokio_reactor() {
     {
     }
     require_async(printninja_lib::commands::api::start_api_server);
+}
+
+/// Auto-start is opt-in: a fresh database never opens a port on its own.
+#[test]
+fn api_autostart_defaults_off_and_round_trips() {
+    let db = test_db();
+    assert!(!with_conn(&db, api_autostart_enabled));
+
+    with_conn(&db, |c| {
+        printninja_lib::commands::settings::write_setting(c, "api_autostart", "true")
+            .expect("write flag")
+    });
+    assert!(with_conn(&db, api_autostart_enabled));
 }

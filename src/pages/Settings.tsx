@@ -68,6 +68,7 @@ export function SettingsPage() {
 
   const [apiPort, setApiPort] = useState("17717");
   const [lanAccess, setLanAccess] = useState(false);
+  const [apiAutostart, setApiAutostart] = useState(false);
   const [apiStatus, setApiStatus] = useState<ApiStatus | null>(null);
   const [starting, setStarting] = useState(false);
 
@@ -155,6 +156,7 @@ export function SettingsPage() {
       const [
         port,
         lan,
+        autostart,
         days,
         max,
         domains,
@@ -166,6 +168,7 @@ export function SettingsPage() {
       ] = await Promise.all([
         readSetting("api_port"),
         readSetting("api_lan_access"),
+        readSetting("api_autostart"),
         readSetting("retention_days"),
         readSetting("max_records"),
         readSetting("allowed_domains"),
@@ -177,6 +180,7 @@ export function SettingsPage() {
       ]);
       if (port) setApiPort(port);
       if (lan) setLanAccess(lan === "true");
+      if (autostart) setApiAutostart(autostart === "true");
       if (days) setRetentionDays(days);
       if (max) setMaxRecords(max);
       if (domains) setAllowedDomains(domains);
@@ -906,6 +910,23 @@ export function SettingsPage() {
                     prints and read templates, jobs and metrics.
                   </p>
                 )}
+
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="api-autostart"
+                    checked={apiAutostart}
+                    onCheckedChange={(v) => {
+                      setApiAutostart(v);
+                      writeSetting("api_autostart", String(v));
+                    }}
+                  />
+                  <Label htmlFor="api-autostart">
+                    Start server when the app starts
+                  </Label>
+                </div>
+                <p className="-mt-3 text-xs text-muted-foreground">
+                  Uses the port and LAN choice above.
+                </p>
 
                 <div className="rounded-md bg-muted p-3">
                   <p className="text-xs font-medium mb-1">curl example</p>
