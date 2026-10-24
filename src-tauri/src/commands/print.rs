@@ -172,12 +172,16 @@ impl JobRenderer for PdfRenderer {
 
 /// Load template HTML/CSS for a job directly from the template row.
 /// The tuple is `(html, css, compiled_css, width_mm, height_mm)`.
+/// Fallback paper when neither the request nor the template names a size: A4.
+pub const DEFAULT_PAPER_W_MM: f64 = 210.0;
+pub const DEFAULT_PAPER_H_MM: f64 = 297.0;
+
 fn resolve_template(
     conn: &rusqlite::Connection,
     template_id: i64,
-) -> AppResult<(String, String, String, f64, f64)> {
+) -> AppResult<(String, String, String, f64, f64, Option<String>)> {
     conn.query_row(
-        "SELECT html, css, compiled_css, page_w_mm, page_h_mm FROM templates WHERE id = ?1",
+        "SELECT html, css, compiled_css, page_w_mm, page_h_mm, orientation FROM templates WHERE id = ?1",
         [template_id],
         |r| {
             let html: String = r.get(0)?;
@@ -185,10 +189,11 @@ fn resolve_template(
             let compiled: String = r.get(2)?;
             let w: i64 = r.get(3)?;
             let h: i64 = r.get(4)?;
-            Ok((html, css, compiled, w as f64, h as f64))
+            let orientation: Option<String> = r.get(5)?;
+            Ok((html, css, compiled, w as f64, h as f64, orientation))
         },
     )
-    .map_err(|_| AppError::NotFound(format!("Template {} not found", template_id)))
+    .map_err(|_| AppError::NotFound(format!("Template {template_id} not found")))
 }
 
 /// Base print stylesheet, byte-identical to `TEMPLATE_BASE_CSS` in
@@ -219,17 +224,51 @@ fn build_template_css(user_css: &str, compiled_css: &str) -> String {
 
 /// Build the final HTML with `@page` size + margins injected so the PDF
 /// renderer honours the layout form (PLANNING.md 7.7 profile settings).
-pub fn apply_layout(html: &str, css: &str, w_mm: f64, h_mm: f64, req: &PrintRequest) -> String {
+/// How much to scale the design to map it onto the paper content box.
+/// Compares content boxes (margins cancel out), so identical design and
+/// paper sizes always yield exactly 1.0 and today's output is untouched.
+fn fit_zoom(
+    fit_mode: &str,
+    design_w: f64,
+    design_h: f64,
+    paper_w: f64,
+    paper_h: f64,
+    mt: f64,
+    mr: f64,
+    mb: f64,
+    ml: f64,
+) -> f64 {
+    let dcw = (design_w - ml - mr).max(1.0);
+    let dch = (design_h - mt - mb).max(1.0);
+    let pcw = (paper_w - ml - mr).max(1.0);
+    let pch = (paper_h - mt - mb).max(1.0);
+    match fit_mode {
+        "actual" => 1.0,
+        "fit-page" => (pcw / dcw).min(pch / dch),
+        "fill" => (pcw / dcw).max(pch / dch),
+        "shrink" => (pcw / dcw).min(pch / dch).min(1.0),
+        _ => pcw / dcw, // fit-width (default)
+    }
+}
+
+pub fn apply_layout(
+    html: &str,
+    css: &str,
+    paper_w_mm: f64,
+    paper_h_mm: f64,
+    design_w_mm: f64,
+    design_h_mm: f64,
+    req: &PrintRequest,
+) -> String {
     let mt = req.margin_top.unwrap_or(5.0);
     let mr = req.margin_right.unwrap_or(5.0);
     let mb = req.margin_bottom.unwrap_or(5.0);
     let ml = req.margin_left.unwrap_or(5.0);
 
-    let (pw, ph) = if req.orientation.as_deref() == Some("landscape") {
-        (h_mm, w_mm)
-    } else {
-        (w_mm, h_mm)
-    };
+    // Paper is already swapped for landscape in resolve_content; the design
+    // size never is. `@page` is the physical sheet.
+    let pw = paper_w_mm;
+    let ph = paper_h_mm;
 
     // Strip any pre-existing @page so we don't end up with two conflicting rules.
     let cleaned_css = strip_at_page(css);
@@ -237,11 +276,33 @@ pub fn apply_layout(html: &str, css: &str, w_mm: f64, h_mm: f64, req: &PrintRequ
     let page_rule =
         format!("@page {{ size: {pw}mm {ph}mm; margin: {mt}mm {mr}mm {mb}mm {ml}mm; }}");
 
-    let fit_rule = match req.fit_mode.as_deref().unwrap_or("fit-width") {
+    let fit_mode = req.fit_mode.as_deref().unwrap_or("fit-width");
+    let fit_rule = match fit_mode {
         "fit-width" => "html,body{width:100%;height:auto;}",
         "fit-page" | "fill" => "html,body{width:100%;height:100%;}",
         "shrink" => "@media print{html,body{-webkit-print-color-adjust:exact;}}",
         _ => "",
+    };
+
+    // Map the design onto the paper: Chromium's `zoom` re-lays-out (unlike
+    // `transform: scale`, which would paginate the unscaled size), so both
+    // the PDF and the screenshot paths see the same mapping. Skipped at
+    // exactly 1.0, keeping byte-identical output for design == paper.
+    let zoom = fit_zoom(
+        fit_mode,
+        design_w_mm,
+        design_h_mm,
+        pw,
+        ph,
+        mt,
+        mr,
+        mb,
+        ml,
+    );
+    let zoom_rule = if (zoom - 1.0).abs() > 1e-9 {
+        format!("body{{zoom:{zoom:.4}}}")
+    } else {
+        String::new()
     };
 
     // The template's own CSS must survive layout injection. It used to be
@@ -257,7 +318,8 @@ pub fn apply_layout(html: &str, css: &str, w_mm: f64, h_mm: f64, req: &PrintRequ
     } else {
         ""
     };
-    let styles = format!("{cleaned_css}\n{page_rule}\n{fit_rule}\n{color_rule}\n{gray_rule}");
+    let styles =
+        format!("{cleaned_css}\n{page_rule}\n{fit_rule}\n{zoom_rule}\n{color_rule}\n{gray_rule}");
 
     if let Some(idx) = html.find("</head>") {
         format!("{}<style>{}</style>{}", &html[..idx], styles, &html[idx..])
@@ -411,7 +473,12 @@ pub async fn run_print_with(
     // state with the real start time. Later stages only update it, so a
     // running job is visible in History and every failure path — fetch,
     // render, send — leaves a row that already carries its own id.
-    let job_id = begin_job(db, &req, copies as i64, (content.w_mm, content.h_mm))?;
+    let job_id = begin_job(
+        db,
+        &req,
+        copies as i64,
+        (content.paper_w_mm, content.paper_h_mm),
+    )?;
 
     run_stages(
         cache_dir,
@@ -461,13 +528,26 @@ pub async fn run_claimed_job(
     };
 
     let content = match replay {
-        Some(rendered) => ResolvedContent {
-            html: rendered,
-            css: String::new(),
-            w_mm: req.page_width_mm.unwrap_or(100.0),
-            h_mm: req.page_height_mm.unwrap_or(150.0),
-            render_template: false,
-        },
+        Some(rendered) => {
+            // A replay prints already-laid-out HTML; design equals paper so
+            // no fit mapping applies, and `@page` is re-injected from the
+            // restored size. Old rows without a stored page get A4.
+            let w = req.page_width_mm.unwrap_or(DEFAULT_PAPER_W_MM);
+            let h = req.page_height_mm.unwrap_or(DEFAULT_PAPER_H_MM);
+            ResolvedContent {
+                html: rendered,
+                css: String::new(),
+                paper_w_mm: w,
+                paper_h_mm: h,
+                design_w_mm: w,
+                design_h_mm: h,
+                orientation: req
+                    .orientation
+                    .clone()
+                    .unwrap_or_else(|| "portrait".to_string()),
+                render_template: false,
+            }
+        }
         None => match resolve_content(db, &req) {
             Ok(c) => c,
             Err(e) => {
@@ -515,9 +595,43 @@ pub async fn run_claimed_job(
 struct ResolvedContent {
     html: String,
     css: String,
-    w_mm: f64,
-    h_mm: f64,
+    /// Physical paper the job lands on: request override → template design
+    /// size → A4 default, already swapped for landscape. Drives `@page` and
+    /// the render size, and is what history stores per job.
+    paper_w_mm: f64,
+    paper_h_mm: f64,
+    /// Size the template was designed at (template row, or the request size
+    /// for raw-HTML prints). Drives the design→paper fit mapping only.
+    design_w_mm: f64,
+    design_h_mm: f64,
+    /// Effective orientation: request → template → portrait.
+    orientation: String,
     render_template: bool,
+}
+
+/// Paper geometry from a request plus an optional template row: request
+/// size wins per axis, then the template's design size, then A4. The paper
+/// is swapped for landscape; the design size never is.
+///
+/// Pure so the precedence matrix is unit-testable without a database.
+fn effective_geometry(
+    req_w: Option<f64>,
+    req_h: Option<f64>,
+    req_orientation: Option<&str>,
+    tpl_w: f64,
+    tpl_h: f64,
+    tpl_orientation: Option<&str>,
+) -> (f64, f64, String) {
+    let base_w = req_w.unwrap_or(tpl_w);
+    let base_h = req_h.unwrap_or(tpl_h);
+    let orientation = req_orientation
+        .unwrap_or_else(|| tpl_orientation.unwrap_or("portrait"))
+        .to_string();
+    if orientation == "landscape" {
+        (base_h, base_w, orientation)
+    } else {
+        (base_w, base_h, orientation)
+    }
 }
 
 /// One job's run: the row it writes (P15) and when it started.
@@ -529,35 +643,44 @@ struct JobRun {
 /// Step 1: the document to print — the pinned template version's HTML and
 /// CSS, or the request's own HTML — plus the page size it prints at.
 fn resolve_content(db: &DbState, req: &PrintRequest) -> AppResult<ResolvedContent> {
-    let (html, css, mut w_mm, mut h_mm) = match req.template_id {
+    let (html, css, design_w, design_h, tpl_orientation) = match req.template_id {
         Some(tid) => {
             let guard = db
                 .lock()
                 .map_err(|_| AppError::Internal("DB lock poisoned".into()))?;
             let conn = guard.connection();
-            let (h, c, compiled, tw, th) = resolve_template(conn, tid)?;
-            (h, build_template_css(&c, &compiled), tw, th)
+            let (h, c, compiled, tw, th, o) = resolve_template(conn, tid)?;
+            (h, build_template_css(&c, &compiled), tw, th, o)
         }
         None => (
             req.html.clone(),
             String::new(),
-            req.page_width_mm.unwrap_or(210.0),
-            req.page_height_mm.unwrap_or(297.0),
+            req.page_width_mm.unwrap_or(DEFAULT_PAPER_W_MM),
+            req.page_height_mm.unwrap_or(DEFAULT_PAPER_H_MM),
+            None,
         ),
     };
 
-    if let (Some(w), Some(h)) = (req.page_width_mm, req.page_height_mm) {
-        if req.template_id.is_none() {
-            w_mm = w;
-            h_mm = h;
-        }
-    }
+    // Paper size is the physical sheet: an explicit request wins per axis,
+    // then the template's design size, then A4. The old code dropped the
+    // request size entirely for template prints.
+    let (paper_w_mm, paper_h_mm, orientation) = effective_geometry(
+        req.page_width_mm,
+        req.page_height_mm,
+        req.orientation.as_deref(),
+        design_w,
+        design_h,
+        tpl_orientation.as_deref(),
+    );
 
     Ok(ResolvedContent {
         html,
         css,
-        w_mm,
-        h_mm,
+        paper_w_mm,
+        paper_h_mm,
+        design_w_mm: design_w,
+        design_h_mm: design_h,
+        orientation,
         render_template: true,
     })
 }
@@ -610,10 +733,12 @@ async fn run_stages(
     let ResolvedContent {
         mut html,
         css,
-        w_mm,
-        h_mm,
+        paper_w_mm,
+        paper_h_mm,
+        design_w_mm,
+        design_h_mm,
+        orientation,
         render_template,
-        ..
     } = content;
     let copies = req.copies.unwrap_or(1).max(1);
 
@@ -764,7 +889,15 @@ async fn run_stages(
 
     // ── 3. Layout ───────────────────────────────────────────────────
     let t_layout = Instant::now();
-    let final_html = apply_layout(&html, &css, w_mm, h_mm, &req);
+    let final_html = apply_layout(
+        &html,
+        &css,
+        paper_w_mm,
+        paper_h_mm,
+        design_w_mm,
+        design_h_mm,
+        &req,
+    );
     let layout_ms = ms(t_layout);
     timings.layout_ms = layout_ms;
 
@@ -795,27 +928,28 @@ async fn run_stages(
     let t_render = Instant::now();
     let rendered: anyhow::Result<(Vec<u8>, &'static str)> = match language {
         crate::transport::PrinterLanguage::Pdf => renderer
-            .render(
-                &final_html,
-                w_mm,
-                h_mm,
-                req.orientation.as_deref().unwrap_or("portrait"),
-            )
+            .render(&final_html, paper_w_mm, paper_h_mm, &orientation)
             .await
             .map(|b| (b, "application/pdf")),
         ref lang => {
-            // 1 CSS px = 1 printer dot: ask for exactly the label's dots so
+            // 1 CSS px = 1 printer dot: ask for exactly the paper's dots so
             // nothing is resampled on the way to the head.
             let (w_px, h_px) = (
-                crate::render::raster::dots_for_mm(w_mm, dpi),
-                crate::render::raster::dots_for_mm(h_mm, dpi),
+                crate::render::raster::dots_for_mm(paper_w_mm, dpi),
+                crate::render::raster::dots_for_mm(paper_h_mm, dpi),
             );
             renderer
                 .rasterize(&final_html, w_px, h_px)
                 .await
                 .and_then(|raster| {
-                    crate::transport::encode_for_language(lang, &raster, w_mm, h_mm, dpi)
-                        .map_err(|e| anyhow::anyhow!(e))
+                    crate::transport::encode_for_language(
+                        lang,
+                        &raster,
+                        paper_w_mm,
+                        paper_h_mm,
+                        dpi,
+                    )
+                    .map_err(|e| anyhow::anyhow!(e))
                 })
         }
     };
@@ -1452,6 +1586,8 @@ mod tests {
             "",
             100.0,
             200.0,
+            100.0,
+            200.0,
             &req(),
         );
         assert!(out.contains("size: 100mm 200mm"), "{}", out);
@@ -1459,12 +1595,97 @@ mod tests {
     }
 
     #[test]
+    fn geometry_request_size_wins_per_axis_over_template() {
+        // Explicit request overrides the template; missing axes fall back.
+        let (w, h, o) = effective_geometry(
+            Some(210.0),
+            None,
+            None,
+            80.0,
+            200.0,
+            Some("portrait"),
+        );
+        assert_eq!((w, h, o.as_str()), (210.0, 200.0, "portrait"));
+    }
+
+    #[test]
+    fn geometry_template_orientation_applies_when_request_omits_it() {
+        let (w, h, o) =
+            effective_geometry(None, None, None, 80.0, 200.0, Some("landscape"));
+        assert_eq!((w, h, o.as_str()), (200.0, 80.0, "landscape"));
+    }
+
+    #[test]
+    fn geometry_request_orientation_beats_template() {
+        let (w, h, o) = effective_geometry(
+            None,
+            None,
+            Some("portrait"),
+            80.0,
+            200.0,
+            Some("landscape"),
+        );
+        assert_eq!((w, h, o.as_str()), (80.0, 200.0, "portrait"));
+    }
+
+    #[test]
+    fn geometry_defaults_to_a4_portrait() {
+        let (w, h, o) = effective_geometry(
+            None,
+            None,
+            None,
+            DEFAULT_PAPER_W_MM,
+            DEFAULT_PAPER_H_MM,
+            None,
+        );
+        assert_eq!((w, h, o.as_str()), (210.0, 297.0, "portrait"));
+    }
+
+    #[test]
+    fn layout_emits_no_zoom_when_design_matches_paper() {
+        let out = apply_layout(
+            "<html><head></head><body>x</body></html>",
+            "",
+            100.0,
+            200.0,
+            100.0,
+            200.0,
+            &req(),
+        );
+        assert!(!out.contains("zoom:"), "{}", out);
+    }
+
+    #[test]
+    fn layout_scales_design_onto_different_paper() {
+        // 80mm design on 210mm paper, fit-width: scale = content-box ratio.
+        let out = apply_layout(
+            "<html><head></head><body>x</body></html>",
+            "",
+            210.0,
+            297.0,
+            80.0,
+            200.0,
+            &req(),
+        );
+        assert!(out.contains("size: 210mm 297mm"), "{}", out);
+        assert!(out.contains("body{zoom:"), "{}", out);
+        let zoom: f64 = out
+            .split("body{zoom:")
+            .nth(1)
+            .and_then(|s| s.split('}').next())
+            .and_then(|s| s.parse().ok())
+            .expect("zoom rule parses");
+        let expected = (210.0 - 6.0 - 8.0) / (80.0 - 6.0 - 8.0);
+        assert!((zoom - expected).abs() < 0.001, "{zoom} vs {expected}");
+    }
+
+    #[test]
     fn layout_injects_grayscale_only_when_enabled() {
-        let out = apply_layout("<head></head>", "", 100.0, 200.0, &req());
+        let out = apply_layout("<head></head>", "", 100.0, 200.0, 100.0, 200.0, &req());
         assert!(!out.contains("grayscale(1)"), "{}", out);
         let mut r = req();
         r.grayscale = Some(true);
-        let out = apply_layout("<head></head>", "", 100.0, 200.0, &r);
+        let out = apply_layout("<head></head>", "", 100.0, 200.0, 100.0, 200.0, &r);
         assert!(out.contains("grayscale(1)"), "{}", out);
     }
 
@@ -1503,10 +1724,18 @@ mod tests {
         }
     }
     #[test]
-    fn layout_swaps_dimensions_in_landscape() {
-        let mut r = req();
-        r.orientation = Some("landscape".into());
-        let out = apply_layout("<head></head>", "", 100.0, 200.0, &r);
+    fn layout_uses_pre_swapped_paper_dimensions() {
+        // Orientation is resolved into the paper size before layout (see
+        // effective_geometry); layout itself just honors the paper box.
+        let out = apply_layout(
+            "<head></head>",
+            "",
+            200.0,
+            100.0,
+            200.0,
+            100.0,
+            &req(),
+        );
         assert!(out.contains("size: 200mm 100mm"), "{}", out);
     }
 
@@ -1561,7 +1790,7 @@ mod tests {
     #[test]
     fn layout_only_one_page_rule() {
         let css = "@page { size: 5mm 5mm; }";
-        let out = apply_layout("<head></head>", css, 100.0, 200.0, &req());
+        let out = apply_layout("<head></head>", css, 100.0, 200.0, 100.0, 200.0, &req());
         assert_eq!(out.matches("@page").count(), 1, "{}", out);
     }
 
@@ -1575,6 +1804,8 @@ mod tests {
             css,
             100.0,
             200.0,
+            100.0,
+            200.0,
             &req(),
         );
         assert!(out.contains(".brand{color:#f00}"), "{}", out);
@@ -1584,7 +1815,7 @@ mod tests {
     #[test]
     fn layout_keeps_template_css_for_fragments() {
         let css = ".brand{color:#f00}";
-        let out = apply_layout("<p>x</p>", css, 100.0, 200.0, &req());
+        let out = apply_layout("<p>x</p>", css, 100.0, 200.0, 100.0, 200.0, &req());
         assert!(out.contains(".brand{color:#f00}"), "{}", out);
     }
 
@@ -1593,6 +1824,8 @@ mod tests {
         let out = apply_layout(
             "<html><body>x</body></html>",
             ".a{color:red}",
+            100.0,
+            200.0,
             100.0,
             200.0,
             &req(),
@@ -1609,7 +1842,7 @@ mod tests {
     fn layout_page_rule_comes_after_user_css() {
         // The injected @page must win over any user @page-ish rule.
         let css = "body{color:red}";
-        let out = apply_layout("<head></head>", css, 100.0, 200.0, &req());
+        let out = apply_layout("<head></head>", css, 100.0, 200.0, 100.0, 200.0, &req());
         let css_at = out.find("color:red").unwrap();
         let page_at = out.find("@page").unwrap();
         assert!(css_at < page_at, "{}", out);
@@ -1618,7 +1851,7 @@ mod tests {
     #[test]
     fn layout_strips_user_page_rule_but_keeps_the_rest() {
         let css = "@page{size:1mm 1mm}.keep{color:blue}";
-        let out = apply_layout("<head></head>", css, 100.0, 200.0, &req());
+        let out = apply_layout("<head></head>", css, 100.0, 200.0, 100.0, 200.0, &req());
         assert_eq!(out.matches("@page").count(), 1, "{}", out);
         assert!(out.contains(".keep{color:blue}"), "{}", out);
     }
@@ -1628,6 +1861,8 @@ mod tests {
         let out = apply_layout(
             "<html><head></head><body><p>hi</p></body></html>",
             "",
+            100.0,
+            200.0,
             100.0,
             200.0,
             &req(),
