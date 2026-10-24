@@ -380,7 +380,9 @@ impl<'a> Page<'a> {
             s,
             "Runtime.evaluate",
             json!({
-                "expression": "document.fonts ? document.fonts.ready.then(() => true) : true",
+                // Each design page lives in its own iframe (render/layout.rs),
+                // and its web fonts load in that frame, not in this document.
+                "expression": "Promise.all([document.fonts ? document.fonts.ready : 0].concat(Array.from(document.querySelectorAll('iframe')).map(f => { try { const d = f.contentDocument; return d && d.fonts ? d.fonts.ready : 0; } catch (e) { return 0; } }))).then(() => true)",
                 "awaitPromise": true,
                 "returnByValue": true
             }),

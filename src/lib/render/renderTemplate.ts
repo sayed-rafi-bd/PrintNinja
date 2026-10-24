@@ -143,11 +143,8 @@ function wrapDocument(
   body: string,
   css: string,
   compiledCss?: string | null,
-  layout?: PreviewLayout,
 ): string {
-  const combined =
-    buildTemplateCss(css, compiledCss) +
-    (layout ? `\n${buildLayoutCss(layout)}` : "");
+  const combined = buildTemplateCss(css, compiledCss);
 
   // If the template is already a full document, inject into it rather than
   // nesting a second <html>.
@@ -187,127 +184,26 @@ export function renderTemplate(
   return wrapDocument(renderBody(html, data), css, compiledCss);
 }
 
-/**
- * Physical-paper layout for a preview document. Mirrors the backend's
- * `apply_layout` (print.rs) rule for rule, so the preview shows exactly what
- * will print: paper is already swapped for landscape; design is the size the
- * template was authored at and never swapped.
- */
-export interface PreviewLayout {
-  paperW: number;
-  paperH: number;
-  designW: number;
-  designH: number;
-  margins: { top: number; right: number; bottom: number; left: number };
-  fitMode: string;
-  grayscale?: boolean;
-}
-
-/** Design→paper scale for one fit mode. Must match `fit_zoom` in print.rs. */
-export function fitZoom(
-  fitMode: string,
-  designW: number,
-  designH: number,
-  paperW: number,
-  paperH: number,
-  margins: PreviewLayout["margins"],
-): number {
-  const dcw = Math.max(1, designW - margins.left - margins.right);
-  const dch = Math.max(1, designH - margins.top - margins.bottom);
-  const pcw = Math.max(1, paperW - margins.left - margins.right);
-  const pch = Math.max(1, paperH - margins.top - margins.bottom);
-  switch (fitMode) {
-    case "actual":
-      return 1;
-    case "fit-page":
-      return Math.min(pcw / dcw, pch / dch);
-    case "fill":
-      return Math.max(pcw / dcw, pch / dch);
-    case "shrink":
-      return Math.min(pcw / dcw, pch / dch, 1);
-    default:
-      return pcw / dcw; // fit-width (default)
-  }
-}
+export { resolvePaper } from "./printLayout";
 
 /**
- * The layout stylesheet: page box, fit rules, design→paper zoom, forced
- * colors, optional grayscale. Byte-comparable with the backend injection —
- * same rule order, same number formatting.
+ * Render one complete design document per record. Each document is laid out
+ * exactly like the Designer canvas — no paper size, no margins, no scaling —
+ * so it can be shown in a frame of the design's own size and then placed on
+ * the sheet by `computePrintLayout`. A single object renders one page, an
+ * array renders one page per element (the print pipeline does the same, see
+ * print.rs step 2), so the preview shows what will print.
  */
-export function buildLayoutCss(layout: PreviewLayout): string {
-  const { top, right, bottom, left } = layout.margins;
-  const page = `@page { size: ${layout.paperW}mm ${layout.paperH}mm; margin: ${top}mm ${right}mm ${bottom}mm ${left}mm; }`;
-  let fit: string;
-  switch (layout.fitMode) {
-    case "fit-width":
-      fit = "html,body{width:100%;height:auto;}";
-      break;
-    case "fit-page":
-    case "fill":
-      fit = "html,body{width:100%;height:100%;}";
-      break;
-    case "shrink":
-      fit = "@media print{html,body{-webkit-print-color-adjust:exact;}}";
-      break;
-    default:
-      fit =
-        layout.fitMode === "actual" ? "" : "html,body{width:100%;height:auto;}";
-  }
-  const zoom = fitZoom(
-    layout.fitMode,
-    layout.designW,
-    layout.designH,
-    layout.paperW,
-    layout.paperH,
-    layout.margins,
-  );
-  const zoomRule =
-    Math.abs(zoom - 1) > 1e-9 ? `body{zoom:${zoom.toFixed(4)}}` : "";
-  const color = "*-webkit-print-color-adjust:exact;print-color-adjust:exact;";
-  const gray = layout.grayscale ? "html{filter:grayscale(1) !important;}" : "";
-  return [page, fit, zoomRule, color, gray].filter(Boolean).join("\n");
-}
-
-/**
- * Paper geometry from a design size plus an optional explicit paper size,
- * mirroring `effective_geometry` in print.rs: explicit wins per axis, then
- * the design size. The paper is swapped for landscape; the design never is.
- */
-export function resolvePaper(
-  designW: number,
-  designH: number,
-  orientation: "portrait" | "landscape",
-  reqW?: number | null,
-  reqH?: number | null,
-): { paperW: number; paperH: number } {
-  const baseW = reqW ?? designW;
-  const baseH = reqH ?? designH;
-  return orientation === "landscape"
-    ? { paperW: baseH, paperH: baseW }
-    : { paperW: baseW, paperH: baseH };
-}
-
-/**
- * Render one page per record: a single object renders one page, an array
- * renders one page per element joined with a page break, wrapped once.
- * Mirrors the print pipeline (print.rs step 2), so the preview shows
- * exactly what will print. Pass `layout` to apply the same paper/fit
- * mapping the backend uses; without it the document has no page box.
- */
-export function renderRecords(
+export function renderDesignPages(
   html: string,
   css: string,
-  data: unknown,
+  records: unknown[],
   /** The template's compiled Tailwind CSS; the shared bundle is used if blank. */
   compiledCss?: string | null,
-  layout?: PreviewLayout,
-): string {
-  const records = Array.isArray(data) ? data : [data];
-  const body = records
-    .map((record) => renderBody(html, record))
-    .join('\n<div style="break-before:page"></div>\n');
-  return wrapDocument(body, css, compiledCss, layout);
+): string[] {
+  return records.map((record) =>
+    wrapDocument(renderBody(html, record), css, compiledCss),
+  );
 }
 
 /**

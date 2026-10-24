@@ -9,6 +9,7 @@ mod cdp;
 #[cfg(any(windows, test))]
 mod edge;
 pub mod handlebars;
+pub mod layout;
 pub mod raster;
 
 pub struct PdfRenderer {
@@ -38,8 +39,9 @@ impl PdfRenderer {
 
     /// Render `html` to a PDF.
     ///
-    /// Page size and orientation arrive in the document's `@page` rule
-    /// (`apply_layout`), so the parameters here are for the log line.
+    /// Page size arrives in the document's `@page` rule (`apply_layout`):
+    /// one sheet per page, margins already applied by the layout, so the
+    /// parameters here are for the log line.
     ///
     /// Failure is an error, never a placeholder (P5). When Edge was missing
     /// or failed — and on every platform without a renderer — this used to

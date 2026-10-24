@@ -128,7 +128,7 @@ Pushing a `v*` tag builds the installers in CI. See [`docs/RELEASE.md`](docs/REL
 
 - [`docs/UI_GUIDE.md`](docs/UI_GUIDE.md): design principles, components and status vocabulary
 - [`docs/ENV.md`](docs/ENV.md): share service environment variables
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`CHANGELOG.md`](CHANGELOG.md)
+- [`CONTRIBUTING.md`](CONTRIBUTING.md)
 
 ## License
 

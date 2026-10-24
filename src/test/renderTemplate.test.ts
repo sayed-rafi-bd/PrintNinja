@@ -1,12 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
-  buildLayoutCss,
-  fitZoom,
-  renderRecords,
+  renderDesignPages,
   renderTemplate,
   resolvePaper,
   wrapWithTailwind,
-  type PreviewLayout,
 } from "@/lib/render/renderTemplate";
 import {
   TEMPLATE_BASE_CSS,
@@ -375,35 +372,41 @@ describe("per-template compiled CSS", () => {
   );
 });
 
-describe("renderRecords", () => {
-  it("renders one page for a single object", () => {
-    const doc = renderRecords("<p>Hi {{name}}</p>", "", { name: "Ana" });
-    expect(doc).toContain("Hi Ana");
-    expect(doc).not.toContain('<div style="break-before:page"></div>');
+describe("renderDesignPages", () => {
+  it("renders one design document for a single object", () => {
+    const pages = renderDesignPages("<p>Hi {{name}}</p>", "", [
+      { name: "Ana" },
+    ]);
+    expect(pages).toHaveLength(1);
+    expect(pages[0]).toContain("Hi Ana");
   });
 
-  it("renders one page per array element with page breaks", () => {
-    const doc = renderRecords("<p>Hi {{name}}</p>", "", [
+  it("renders one complete document per record", () => {
+    const pages = renderDesignPages("<p>Hi {{name}}</p>", "", [
       { name: "Ana" },
       { name: "Bo" },
     ]);
-    expect(doc).toContain("Hi Ana");
-    expect(doc).toContain("Hi Bo");
-    expect(doc.indexOf("Hi Bo")).toBeGreaterThan(doc.indexOf("Hi Ana"));
-    expect(doc).toContain('<div style="break-before:page"></div>');
-    // Wrapped once, not once per record.
-    expect(doc.match(/<!DOCTYPE html>/g)).toHaveLength(1);
+    expect(pages).toHaveLength(2);
+    expect(pages[0]).toContain("Hi Ana");
+    expect(pages[0]).not.toContain("Hi Bo");
+    expect(pages[1]).toContain("Hi Bo");
+    for (const doc of pages) {
+      expect(doc.match(/<!DOCTYPE html>/g)).toHaveLength(1);
+    }
   });
-});
 
-const layout = (over: Partial<PreviewLayout> = {}): PreviewLayout => ({
-  paperW: 210,
-  paperH: 297,
-  designW: 210,
-  designH: 297,
-  margins: { top: 5, right: 5, bottom: 5, left: 5 },
-  fitMode: "fit-width",
-  ...over,
+  it("carries no paper size, margin or zoom: the design is laid out as authored", () => {
+    const [doc] = renderDesignPages("<p>x</p>", "", [{}]);
+    expect(doc).not.toContain("size: ");
+    expect(doc).not.toMatch(/zoom\s*:/);
+    // The one @page in the document is the base reset's.
+    expect(doc.match(/@page/g)).toHaveLength(1);
+  });
+
+  it("keeps the template's own CSS", () => {
+    const [doc] = renderDesignPages("<p>x</p>", ".brand{color:#f00}", [{}]);
+    expect(doc).toContain(".brand{color:#f00}");
+  });
 });
 
 describe("resolvePaper", () => {
@@ -423,62 +426,5 @@ describe("resolvePaper", () => {
       paperW: 210,
       paperH: 200,
     });
-  });
-});
-
-describe("buildLayoutCss", () => {
-  it("emits the paper box first, matching the backend rule order", () => {
-    const css = buildLayoutCss(layout());
-    expect(css).toContain("@page { size: 210mm 297mm;");
-    expect(css.indexOf("@page")).toBeLessThan(css.indexOf("html,body"));
-  });
-
-  it("emits no zoom when design matches paper", () => {
-    expect(buildLayoutCss(layout())).not.toContain("zoom:");
-  });
-
-  it("scales the design onto different paper like the backend", () => {
-    const css = buildLayoutCss(
-      layout({ designW: 80, designH: 200, fitMode: "fit-width" }),
-    );
-    // Same content-box ratio the Rust fit_zoom computes.
-    const expected = (210 - 5 - 5) / (80 - 5 - 5);
-    expect(css).toContain(`body{zoom:${expected.toFixed(4)}}`);
-    expect(css).toContain("@page { size: 210mm 297mm;");
-  });
-
-  it("adds grayscale only when enabled", () => {
-    expect(buildLayoutCss(layout())).not.toContain("grayscale(1)");
-    expect(buildLayoutCss(layout({ grayscale: true }))).toContain(
-      "html{filter:grayscale(1) !important;}",
-    );
-  });
-
-  it("renderRecords applies the layout to the preview document", () => {
-    const doc = renderRecords(
-      "<p>Hi</p>",
-      "",
-      {},
-      null,
-      layout({ designW: 80, designH: 200 }),
-    );
-    expect(doc).toContain("@page { size: 210mm 297mm;");
-    expect(doc).toContain("body{zoom:");
-  });
-});
-
-describe("fitZoom", () => {
-  const m = { top: 5, right: 5, bottom: 5, left: 5 };
-  it("is 1 when design matches paper", () => {
-    expect(fitZoom("fit-width", 80, 200, 80, 200, m)).toBe(1);
-  });
-  it("caps at 1 for shrink on larger paper", () => {
-    expect(fitZoom("shrink", 80, 200, 210, 297, m)).toBe(1);
-  });
-  it("uses the limiting axis for fit-page", () => {
-    expect(fitZoom("fit-page", 80, 200, 210, 297, m)).toBeCloseTo(
-      Math.min((210 - 10) / (80 - 10), (297 - 10) / (200 - 10)),
-      10,
-    );
   });
 });

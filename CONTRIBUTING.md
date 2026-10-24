@@ -91,4 +91,3 @@ This bumps the version in every manifest CI compares (`pnpm version:set` does on
 - [ ] New or changed behaviour has a regression test
 - [ ] `COMPILER_REV` is bumped if compiled template CSS changes
 - [ ] `openapi.json` and `schema.d.ts` are regenerated if the API changed
-- [ ] `CHANGELOG.md` has an entry for user-visible changes

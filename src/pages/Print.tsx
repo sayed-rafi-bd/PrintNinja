@@ -26,7 +26,8 @@ import { DEFAULT_MOCK_DATA } from "@/lib/templates/defaultTemplate";
 import { ensureStarterTemplates } from "@/lib/templates/seedTemplates";
 import type { StarterTemplate } from "@/lib/templates/seedTemplates";
 import { compileTemplateCss } from "@/lib/templates/compileTemplateCss";
-const MM_TO_PX = 3.7795;
+import { PrintPreview } from "@/components/PrintPreview";
+import { resolvePaper } from "@/lib/render/printLayout";
 
 /** Physical paper sheets offered as one-tap presets (mm). */
 const PAPER_PRESETS = [
@@ -42,10 +43,12 @@ export function PrintPage() {
   const [templates, setTemplates] = useState<StarterTemplate[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [previewHtml, setPreviewHtml] = useState<string>("");
+  // One complete design document per record, laid out as in the Designer.
+  // Paper, orientation, fit mode and margins are applied when drawing, so
+  // changing them never re-renders the template.
+  const [previewPages, setPreviewPages] = useState<string[]>([]);
   const [previewError, setPreviewError] = useState<string>("");
   const [previewNotice, setPreviewNotice] = useState<string>("");
-  const [previewPaper, setPreviewPaper] = useState({ w: 210, h: 297 });
   // Version ids already backfilled with compiled CSS this session, so the
   // preview effect does not write a "Compiled Tailwind CSS" version on
   // every render of the same template.
@@ -125,7 +128,7 @@ export function PrintPage() {
   useEffect(() => {
     const template = selectedTemplate;
     if (!template) {
-      setPreviewHtml("");
+      setPreviewPages([]);
       setPreviewError("");
       return;
     }
@@ -136,12 +139,12 @@ export function PrintPage() {
         const css = template.css ?? "";
         if (!html.trim()) {
           if (!cancelled) {
-            setPreviewHtml("");
+            setPreviewPages([]);
             setPreviewError(t("print.preview_empty_template"));
           }
           return;
         }
-        const { renderRecords, resolvePaper } = await import(
+        const { renderDesignPages } = await import(
           "@/lib/render/renderTemplate"
         );
 
@@ -192,7 +195,7 @@ export function PrintPage() {
 
         if (Array.isArray(data) && data.length === 0) {
           if (!cancelled) {
-            setPreviewHtml("");
+            setPreviewPages([]);
             setPreviewError(t("print.preview_empty_data"));
             setPreviewNotice(notice);
           }
@@ -210,41 +213,13 @@ export function PrintPage() {
         }
 
         if (!cancelled) {
-          // Same paper mapping the backend uses: the template's design size
-          // onto the physical sheet (orientation swaps the paper, never the
-          // design), so the preview shows what will print.
-          const designW = template.page_w_mm ?? 80;
-          const designH = template.page_h_mm ?? 200;
-          const { paperW, paperH } = resolvePaper(
-            designW,
-            designH,
-            store.orientation,
-            store.paperW,
-            store.paperH,
-          );
-          setPreviewHtml(
-            renderRecords(html, css, shownData, compiledCss, {
-              paperW,
-              paperH,
-              designW,
-              designH,
-              margins: {
-                top: store.marginTop,
-                right: store.marginRight,
-                bottom: store.marginBottom,
-                left: store.marginLeft,
-              },
-              fitMode: store.fitMode,
-              grayscale: store.grayscale,
-            }),
-          );
-          setPreviewPaper({ w: paperW, h: paperH });
+          setPreviewPages(renderDesignPages(html, css, shownData, compiledCss));
           setPreviewError("");
           setPreviewNotice(notice);
         }
       } catch (e) {
         if (!cancelled) {
-          setPreviewHtml("");
+          setPreviewPages([]);
           setPreviewError(
             t("print.preview_unavailable", { error: describeError(e) }),
           );
@@ -254,22 +229,7 @@ export function PrintPage() {
     return () => {
       cancelled = true;
     };
-  }, [
-    selectedTemplate,
-    dataUrl,
-    useTestData,
-    httpMethod,
-    pageCount,
-    store.orientation,
-    store.paperW,
-    store.paperH,
-    store.marginTop,
-    store.marginRight,
-    store.marginBottom,
-    store.marginLeft,
-    store.fitMode,
-    store.grayscale,
-  ]);
+  }, [selectedTemplate, dataUrl, useTestData, httpMethod, pageCount]);
 
   const loadPrinters = async () => {
     try {
@@ -386,6 +346,16 @@ export function PrintPage() {
   // The paper is per-print only — never written back to the template.
   const effPaperW = store.paperW ?? designW;
   const effPaperH = store.paperH ?? designH;
+  // The physical sheet the preview draws (and the PDF prints on): the same
+  // mapping the backend applies, so orientation swaps the paper, never the
+  // design.
+  const { paperW: previewPaperW, paperH: previewPaperH } = resolvePaper(
+    designW,
+    designH,
+    store.orientation,
+    store.paperW,
+    store.paperH,
+  );
   const paperPreset =
     store.paperW == null && store.paperH == null
       ? "auto"
@@ -967,7 +937,7 @@ export function PrintPage() {
                 <p className="rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning">
                   {previewError}
                 </p>
-              ) : previewHtml ? (
+              ) : previewPages.length > 0 ? (
                 <div
                   className={cn(
                     "overflow-auto rounded-md border bg-muted p-4",
@@ -982,30 +952,29 @@ export function PrintPage() {
                   role="region"
                   aria-label={t("print.preview_region")}
                 >
-                  <div
-                    className="mx-auto bg-white shadow-md"
-                    style={{
-                      width: previewPaper.w * MM_TO_PX,
-                      maxWidth: "100%",
+                  <PrintPreview
+                    pages={previewPages}
+                    designW={designW}
+                    designH={designH}
+                    paperW={previewPaperW}
+                    paperH={previewPaperH}
+                    margins={{
+                      top: store.marginTop,
+                      right: store.marginRight,
+                      bottom: store.marginBottom,
+                      left: store.marginLeft,
                     }}
-                  >
-                    <iframe
-                      srcDoc={previewHtml}
-                      sandbox=""
-                      className="w-full border-0"
-                      style={{
-                        height: previewPaper.h * MM_TO_PX,
-                      }}
-                      title={t("print.preview_region")}
-                    />
-                  </div>
+                    fitMode={store.fitMode}
+                    grayscale={store.grayscale}
+                    title={t("print.preview_region")}
+                  />
                 </div>
               ) : (
                 <p className="py-10 text-center text-sm text-muted-foreground">
                   {t("print.no_preview")}
                 </p>
               )}
-              {isPhone && previewHtml && !previewError && (
+              {isPhone && previewPages.length > 0 && !previewError && (
                 <Button
                   type="button"
                   variant="ghost"

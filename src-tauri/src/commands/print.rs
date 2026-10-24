@@ -2,6 +2,7 @@ use crate::db::DbState;
 use crate::error::{AppError, AppResult};
 use crate::queue::PrintQueue;
 use crate::render::handlebars::TemplateEngine;
+use crate::render::layout::{fit_to_dots, sheets_document, Margins, PAGE_SEPARATOR};
 use crate::render::PdfRenderer;
 #[cfg(windows)]
 use crate::transport::windows_spooler::WindowsSpooler;
@@ -222,35 +223,42 @@ fn build_template_css(user_css: &str, compiled_css: &str) -> String {
     parts.join("\n")
 }
 
-/// Build the final HTML with `@page` size + margins injected so the PDF
-/// renderer honours the layout form (PLANNING.md 7.7 profile settings).
-/// How much to scale the design to map it onto the paper content box.
-/// Compares content boxes (margins cancel out), so identical design and
-/// paper sizes always yield exactly 1.0 and today's output is untouched.
-fn fit_zoom(
-    fit_mode: &str,
-    design_w: f64,
-    design_h: f64,
-    paper_w: f64,
-    paper_h: f64,
-    mt: f64,
-    mr: f64,
-    mb: f64,
-    ml: f64,
-) -> f64 {
-    let dcw = (design_w - ml - mr).max(1.0);
-    let dch = (design_h - mt - mb).max(1.0);
-    let pcw = (paper_w - ml - mr).max(1.0);
-    let pch = (paper_h - mt - mb).max(1.0);
-    match fit_mode {
-        "actual" => 1.0,
-        "fit-page" => (pcw / dcw).min(pch / dch),
-        "fill" => (pcw / dcw).max(pch / dch),
-        "shrink" => (pcw / dcw).min(pch / dch).min(1.0),
-        _ => pcw / dcw, // fit-width (default)
+/// Wrap one record's rendered HTML in the template's stylesheet, as a
+/// complete document laid out exactly like the Designer canvas: no paper
+/// size, no margins, no scaling. The print layout places this document on
+/// the sheet afterwards (`render::layout`), so the template never reflows.
+fn design_document(page_html: &str, css: &str) -> String {
+    let styles = strip_at_page(css);
+    if let Some(idx) = page_html.find("</head>") {
+        format!(
+            "{}<style>{}</style>{}",
+            &page_html[..idx],
+            styles,
+            &page_html[idx..]
+        )
+    } else if let Some(idx) = page_html.find("<body") {
+        format!(
+            "{}<style>{}</style>{}",
+            &page_html[..idx],
+            styles,
+            &page_html[idx..]
+        )
+    } else {
+        // A fragment: give it the same standards-mode document the Designer
+        // preview wraps it in, so both lay it out identically.
+        format!(
+            "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"UTF-8\">\n<style>{styles}</style>\n</head>\n<body>\n{page_html}\n</body>\n</html>"
+        )
     }
 }
 
+/// Build the final printable HTML: every record rendered at the design size
+/// and placed on the paper by the request's fit mode and margins.
+///
+/// `html` is the pipeline's rendered pages joined by [`PAGE_SEPARATOR`].
+/// Paper is already swapped for landscape (`effective_geometry`); the design
+/// size never is. The Print page preview applies the same placement
+/// (`src/lib/render/printLayout.ts`), so it matches what prints.
 pub fn apply_layout(
     html: &str,
     css: &str,
@@ -260,74 +268,27 @@ pub fn apply_layout(
     design_h_mm: f64,
     req: &PrintRequest,
 ) -> String {
-    let mt = req.margin_top.unwrap_or(5.0);
-    let mr = req.margin_right.unwrap_or(5.0);
-    let mb = req.margin_bottom.unwrap_or(5.0);
-    let ml = req.margin_left.unwrap_or(5.0);
-
-    // Paper is already swapped for landscape in resolve_content; the design
-    // size never is. `@page` is the physical sheet.
-    let pw = paper_w_mm;
-    let ph = paper_h_mm;
-
-    // Strip any pre-existing @page so we don't end up with two conflicting rules.
-    let cleaned_css = strip_at_page(css);
-
-    let page_rule =
-        format!("@page {{ size: {pw}mm {ph}mm; margin: {mt}mm {mr}mm {mb}mm {ml}mm; }}");
-
-    let fit_mode = req.fit_mode.as_deref().unwrap_or("fit-width");
-    let fit_rule = match fit_mode {
-        "fit-width" => "html,body{width:100%;height:auto;}",
-        "fit-page" | "fill" => "html,body{width:100%;height:100%;}",
-        "shrink" => "@media print{html,body{-webkit-print-color-adjust:exact;}}",
-        _ => "",
+    let margins = Margins {
+        top: req.margin_top.unwrap_or(5.0),
+        right: req.margin_right.unwrap_or(5.0),
+        bottom: req.margin_bottom.unwrap_or(5.0),
+        left: req.margin_left.unwrap_or(5.0),
     };
-
-    // Map the design onto the paper: Chromium's `zoom` re-lays-out (unlike
-    // `transform: scale`, which would paginate the unscaled size), so both
-    // the PDF and the screenshot paths see the same mapping. Skipped at
-    // exactly 1.0, keeping byte-identical output for design == paper.
-    let zoom = fit_zoom(
+    let fit_mode = req.fit_mode.as_deref().unwrap_or("fit-width");
+    let docs: Vec<String> = html
+        .split(PAGE_SEPARATOR)
+        .map(|page| design_document(page, css))
+        .collect();
+    sheets_document(
+        &docs,
         fit_mode,
         design_w_mm,
         design_h_mm,
-        pw,
-        ph,
-        mt,
-        mr,
-        mb,
-        ml,
-    );
-    let zoom_rule = if (zoom - 1.0).abs() > 1e-9 {
-        format!("body{{zoom:{zoom:.4}}}")
-    } else {
-        String::new()
-    };
-
-    // The template's own CSS must survive layout injection. It used to be
-    // dropped entirely whenever the HTML was a full document (which every
-    // bundled starter template is), so custom styling never reached the
-    // printer. User CSS first so the @page/fit rules win.
-    // Chromium drops background colours/images when printing unless told
-    // otherwise, which looks like "CSS not applied" (shaded headers, table
-    // fills, badges vanish). Force them on for every element.
-    let color_rule = "*{-webkit-print-color-adjust:exact;print-color-adjust:exact;}";
-    let gray_rule = if req.grayscale == Some(true) {
-        "html{filter:grayscale(1) !important;}"
-    } else {
-        ""
-    };
-    let styles =
-        format!("{cleaned_css}\n{page_rule}\n{fit_rule}\n{zoom_rule}\n{color_rule}\n{gray_rule}");
-
-    if let Some(idx) = html.find("</head>") {
-        format!("{}<style>{}</style>{}", &html[..idx], styles, &html[idx..])
-    } else if let Some(idx) = html.find("<body") {
-        format!("{}<style>{}</style>{}", &html[..idx], styles, &html[idx..])
-    } else {
-        format!("<style>{styles}</style>{html}")
-    }
+        paper_w_mm,
+        paper_h_mm,
+        margins,
+        req.grayscale == Some(true),
+    )
 }
 
 /// Remove an existing `@page { ... }` block from user CSS.
@@ -881,7 +842,7 @@ async fn run_stages(
                 }
             }
         }
-        html = pages.join("\n<div style=\"break-before:page\"></div>\n");
+        html = pages.join(PAGE_SEPARATOR);
     }
 
     let template_ms = ms(t_template);
@@ -938,8 +899,11 @@ async fn run_stages(
                 crate::render::raster::dots_for_mm(paper_w_mm, dpi),
                 crate::render::raster::dots_for_mm(paper_h_mm, dpi),
             );
+            // The sheet is laid out in mm; map it onto the dot viewport so
+            // one mm of design is one mm of label at this printer's dpi.
+            let raster_html = fit_to_dots(&final_html, w_px, paper_w_mm);
             renderer
-                .rasterize(&final_html, w_px, h_px)
+                .rasterize(&raster_html, w_px, h_px)
                 .await
                 .and_then(|raster| {
                     crate::transport::encode_for_language(
@@ -1580,21 +1544,6 @@ mod tests {
     }
 
     #[test]
-    fn layout_injects_page_size_and_margins() {
-        let out = apply_layout(
-            "<html><head></head><body>x</body></html>",
-            "",
-            100.0,
-            200.0,
-            100.0,
-            200.0,
-            &req(),
-        );
-        assert!(out.contains("size: 100mm 200mm"), "{}", out);
-        assert!(out.contains("margin: 5mm 6mm 7mm 8mm"), "{}", out);
-    }
-
-    #[test]
     fn geometry_request_size_wins_per_axis_over_template() {
         // Explicit request overrides the template; missing axes fall back.
         let (w, h, o) = effective_geometry(
@@ -1641,52 +1590,172 @@ mod tests {
         assert_eq!((w, h, o.as_str()), (210.0, 297.0, "portrait"));
     }
 
-    #[test]
-    fn layout_emits_no_zoom_when_design_matches_paper() {
-        let out = apply_layout(
-            "<html><head></head><body>x</body></html>",
-            "",
-            100.0,
-            200.0,
-            100.0,
-            200.0,
-            &req(),
-        );
-        assert!(!out.contains("zoom:"), "{}", out);
+    const HTML_DOC: &str = "<!DOCTYPE html><html><head></head><body><p>hi</p></body></html>";
+
+    /// Pull the `srcdoc` of every design frame back out of the final HTML.
+    fn design_docs(out: &str) -> Vec<String> {
+        out.split("srcdoc=\"")
+            .skip(1)
+            .map(|s| {
+                s.split("\"></iframe>")
+                    .next()
+                    .unwrap()
+                    .replace("&quot;", "\"")
+                    .replace("&amp;", "&")
+            })
+            .collect()
     }
 
     #[test]
-    fn layout_scales_design_onto_different_paper() {
-        // 80mm design on 210mm paper, fit-width: scale = content-box ratio.
-        let out = apply_layout(
-            "<html><head></head><body>x</body></html>",
-            "",
-            210.0,
-            297.0,
-            80.0,
-            200.0,
-            &req(),
+    fn layout_page_is_the_paper_with_no_page_margin() {
+        // Margins are applied by the content box, never by `@page`, so the
+        // preview and the PDF cannot disagree about them.
+        let out = apply_layout(HTML_DOC, "", 100.0, 200.0, 100.0, 200.0, &req());
+        assert!(out.contains("@page{size:100mm 200mm;margin:0}"), "{}", out);
+        assert_eq!(out.matches("@page").count(), 1, "{}", out);
+        // req(): margins 5/6/7/8 → content box 86 × 188 at (8, 5).
+        assert!(
+            out.contains("left:8mm;top:5mm;width:86mm;height:188mm"),
+            "{}",
+            out
         );
-        assert!(out.contains("size: 210mm 297mm"), "{}", out);
-        assert!(out.contains("body{zoom:"), "{}", out);
-        let zoom: f64 = out
-            .split("body{zoom:")
-            .nth(1)
-            .and_then(|s| s.split('}').next())
-            .and_then(|s| s.parse().ok())
-            .expect("zoom rule parses");
-        let expected = (210.0 - 6.0 - 8.0) / (80.0 - 6.0 - 8.0);
-        assert!((zoom - expected).abs() < 0.001, "{zoom} vs {expected}");
+    }
+
+    #[test]
+    fn layout_renders_the_design_at_its_own_size_and_scales_the_frame() {
+        // 80 × 200 mm design onto A4, fit-width: the frame stays 80 × 200
+        // (the template never reflows); only the transform changes.
+        let out = apply_layout(HTML_DOC, "", 210.0, 297.0, 80.0, 200.0, &req());
+        assert!(out.contains("@page{size:210mm 297mm;margin:0}"), "{}", out);
+        // content width / design width = (210 - 6 - 8) / 80
+        assert!(
+            out.contains("width:80mm;height:200mm;transform:scale(2.45)"),
+            "{}",
+            out
+        );
+        assert!(!out.contains("zoom"), "{}", out);
+    }
+
+    #[test]
+    fn layout_does_not_scale_when_design_fills_the_content_box() {
+        let mut r = req();
+        r.margin_top = Some(0.0);
+        r.margin_right = Some(0.0);
+        r.margin_bottom = Some(0.0);
+        r.margin_left = Some(0.0);
+        let out = apply_layout(HTML_DOC, "", 100.0, 200.0, 100.0, 200.0, &r);
+        assert!(out.contains("transform:scale(1)"), "{}", out);
+    }
+
+    #[test]
+    fn layout_uses_pre_swapped_paper_dimensions() {
+        // Orientation is resolved into the paper size before layout (see
+        // effective_geometry); the design frame keeps its authored size.
+        let out = apply_layout(HTML_DOC, "", 200.0, 100.0, 100.0, 200.0, &req());
+        assert!(out.contains("@page{size:200mm 100mm;margin:0}"), "{}", out);
+        assert!(out.contains("width:100mm;height:200mm;"), "{}", out);
     }
 
     #[test]
     fn layout_injects_grayscale_only_when_enabled() {
-        let out = apply_layout("<head></head>", "", 100.0, 200.0, 100.0, 200.0, &req());
+        let out = apply_layout(HTML_DOC, "", 100.0, 200.0, 100.0, 200.0, &req());
         assert!(!out.contains("grayscale(1)"), "{}", out);
         let mut r = req();
         r.grayscale = Some(true);
-        let out = apply_layout("<head></head>", "", 100.0, 200.0, 100.0, 200.0, &r);
+        let out = apply_layout(HTML_DOC, "", 100.0, 200.0, 100.0, 200.0, &r);
         assert!(out.contains("grayscale(1)"), "{}", out);
+    }
+
+    #[test]
+    fn layout_keeps_template_css_inside_the_design_document() {
+        // Regression: custom CSS must reach the printer for full documents
+        // and for fragments alike — now inside each design frame.
+        let css = ".brand{color:#f00}";
+        for html in [HTML_DOC, "<p>x</p>", "<html><body>x</body></html>"] {
+            let out = apply_layout(html, css, 100.0, 200.0, 100.0, 200.0, &req());
+            let docs = design_docs(&out);
+            assert_eq!(docs.len(), 1, "{}", out);
+            assert!(docs[0].contains(".brand{color:#f00}"), "{}", docs[0]);
+        }
+    }
+
+    #[test]
+    fn layout_strips_user_page_rules_from_the_design_document() {
+        let css = "@page{size:1mm 1mm}.keep{color:blue}";
+        let out = apply_layout(HTML_DOC, css, 100.0, 200.0, 100.0, 200.0, &req());
+        let docs = design_docs(&out);
+        assert!(!docs[0].contains("@page"), "{}", docs[0]);
+        assert!(docs[0].contains(".keep{color:blue}"), "{}", docs[0]);
+        // The only @page in the whole output is the sheet's own.
+        assert_eq!(out.matches("@page").count(), 1, "{}", out);
+    }
+
+    #[test]
+    fn layout_wraps_a_fragment_in_a_standards_mode_document() {
+        let out = apply_layout("<p>x</p>", "", 100.0, 200.0, 100.0, 200.0, &req());
+        let docs = design_docs(&out);
+        assert!(docs[0].starts_with("<!DOCTYPE html>"), "{}", docs[0]);
+        assert!(docs[0].contains("<body>\n<p>x</p>"), "{}", docs[0]);
+    }
+
+    #[test]
+    fn layout_injects_before_body_when_there_is_no_head() {
+        let out = apply_layout(
+            "<html><body>x</body></html>",
+            ".a{color:red}",
+            100.0,
+            200.0,
+            100.0,
+            200.0,
+            &req(),
+        );
+        let doc = &design_docs(&out)[0];
+        assert!(
+            doc.find("<style").unwrap() < doc.find("<body").unwrap(),
+            "{doc}"
+        );
+    }
+
+    #[test]
+    fn layout_does_not_mutate_the_body_markup() {
+        let out = apply_layout(HTML_DOC, "", 100.0, 200.0, 100.0, 200.0, &req());
+        let doc = &design_docs(&out)[0];
+        assert!(doc.contains("<body><p>hi</p></body>"), "{doc}");
+        assert_eq!(doc.matches("</head>").count(), 1, "{doc}");
+    }
+
+    #[test]
+    fn layout_puts_each_record_on_its_own_sheet() {
+        let pages = ["<p>one</p>", "<p>two</p>", "<p>three</p>"].join(PAGE_SEPARATOR);
+        let out = apply_layout(&pages, "", 100.0, 200.0, 100.0, 200.0, &req());
+        let docs = design_docs(&out);
+        assert_eq!(docs.len(), 3, "{}", out);
+        assert!(docs[0].contains("one") && docs[2].contains("three"));
+        assert_eq!(out.matches("class=\"pn-sheet\"").count(), 3, "{}", out);
+    }
+
+    #[test]
+    fn layout_fit_mode_changes_scale_but_not_the_design_frame() {
+        let scale_for = |mode: &str| {
+            let mut r = req();
+            r.fit_mode = Some(mode.into());
+            r.margin_top = Some(5.0);
+            r.margin_right = Some(5.0);
+            r.margin_bottom = Some(5.0);
+            r.margin_left = Some(5.0);
+            let out = apply_layout(HTML_DOC, "", 210.0, 297.0, 102.0, 102.0, &r);
+            assert!(out.contains("width:102mm;height:102mm;"), "{}", out);
+            out.split("transform:scale(")
+                .nth(1)
+                .and_then(|s| s.split(')').next())
+                .and_then(|s| s.parse::<f64>().ok())
+                .expect("scale parses")
+        };
+        assert_eq!(scale_for("actual"), 1.0);
+        assert_eq!(scale_for("shrink"), 1.0);
+        assert!((scale_for("fit-width") - 200.0 / 102.0).abs() < 1e-3);
+        assert!((scale_for("fit-page") - 200.0 / 102.0).abs() < 1e-3);
+        assert!((scale_for("fill") - 287.0 / 102.0).abs() < 1e-3);
     }
 
     #[test]
@@ -1722,21 +1791,6 @@ mod tests {
                 "expected err for {invalid:?}"
             );
         }
-    }
-    #[test]
-    fn layout_uses_pre_swapped_paper_dimensions() {
-        // Orientation is resolved into the paper size before layout (see
-        // effective_geometry); layout itself just honors the paper box.
-        let out = apply_layout(
-            "<head></head>",
-            "",
-            200.0,
-            100.0,
-            200.0,
-            100.0,
-            &req(),
-        );
-        assert!(out.contains("size: 200mm 100mm"), "{}", out);
     }
 
     #[test]
@@ -1785,90 +1839,6 @@ mod tests {
             format!("{}\n.brand{{color:#f00}}", TEMPLATE_BASE_CSS.trim())
         );
         assert_eq!(build_template_css("", ""), TEMPLATE_BASE_CSS.trim());
-    }
-
-    #[test]
-    fn layout_only_one_page_rule() {
-        let css = "@page { size: 5mm 5mm; }";
-        let out = apply_layout("<head></head>", css, 100.0, 200.0, 100.0, 200.0, &req());
-        assert_eq!(out.matches("@page").count(), 1, "{}", out);
-    }
-
-    #[test]
-    fn layout_keeps_template_css_for_full_documents() {
-        // Regression: the </head> branch built its <style> from the page rule
-        // and fit rule only, silently discarding the template's own CSS.
-        let css = ".brand{color:#f00}";
-        let out = apply_layout(
-            "<!DOCTYPE html><html><head></head><body>x</body></html>",
-            css,
-            100.0,
-            200.0,
-            100.0,
-            200.0,
-            &req(),
-        );
-        assert!(out.contains(".brand{color:#f00}"), "{}", out);
-        assert!(out.contains("size: 100mm 200mm"), "{}", out);
-    }
-
-    #[test]
-    fn layout_keeps_template_css_for_fragments() {
-        let css = ".brand{color:#f00}";
-        let out = apply_layout("<p>x</p>", css, 100.0, 200.0, 100.0, 200.0, &req());
-        assert!(out.contains(".brand{color:#f00}"), "{}", out);
-    }
-
-    #[test]
-    fn layout_injects_before_body_when_there_is_no_head() {
-        let out = apply_layout(
-            "<html><body>x</body></html>",
-            ".a{color:red}",
-            100.0,
-            200.0,
-            100.0,
-            200.0,
-            &req(),
-        );
-        assert!(out.contains(".a{color:red}"), "{}", out);
-        assert!(
-            out.find("<style").unwrap() < out.find("<body").unwrap(),
-            "{}",
-            out
-        );
-    }
-
-    #[test]
-    fn layout_page_rule_comes_after_user_css() {
-        // The injected @page must win over any user @page-ish rule.
-        let css = "body{color:red}";
-        let out = apply_layout("<head></head>", css, 100.0, 200.0, 100.0, 200.0, &req());
-        let css_at = out.find("color:red").unwrap();
-        let page_at = out.find("@page").unwrap();
-        assert!(css_at < page_at, "{}", out);
-    }
-
-    #[test]
-    fn layout_strips_user_page_rule_but_keeps_the_rest() {
-        let css = "@page{size:1mm 1mm}.keep{color:blue}";
-        let out = apply_layout("<head></head>", css, 100.0, 200.0, 100.0, 200.0, &req());
-        assert_eq!(out.matches("@page").count(), 1, "{}", out);
-        assert!(out.contains(".keep{color:blue}"), "{}", out);
-    }
-
-    #[test]
-    fn layout_does_not_mutate_the_body_markup() {
-        let out = apply_layout(
-            "<html><head></head><body><p>hi</p></body></html>",
-            "",
-            100.0,
-            200.0,
-            100.0,
-            200.0,
-            &req(),
-        );
-        assert!(out.contains("<body><p>hi</p></body>"), "{}", out);
-        assert_eq!(out.matches("</head>").count(), 1, "{}", out);
     }
 
     #[test]
