@@ -58,7 +58,7 @@ import { diagnostics } from "@/lib/diagnostics";
 import * as share from "@/lib/share/client";
 import { normalizeServiceUrl } from "@/lib/share/session";
 
-/** Phone list → detail navigation (PLAN.md phase 3): icon, label and a
+/** Phone list → detail navigation: icon, label and a
     one-line summary per section. Labels match the desktop tab strip. */
 const SECTION_META: Array<{
   key: SettingsSection;

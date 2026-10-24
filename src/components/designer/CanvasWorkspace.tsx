@@ -101,7 +101,7 @@ export function CanvasWorkspace({
   const selectValue =
     mode === "fit" ? "fit" : isPreset ? String(mode) : "custom";
 
-  // Touch zoom on phones (PLAN.md phase 3): two-finger pinch scales around
+  // Touch zoom on phones: two-finger pinch scales around
   // the gesture, double-tap toggles 100% / fit. `touch-action: pan-x pan-y`
   // below keeps one-finger scrolling with the browser while disabling its
   // own pinch-zoom and tap-zoom, so these handlers own the gesture.

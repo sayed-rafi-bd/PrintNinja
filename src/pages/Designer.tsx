@@ -162,7 +162,7 @@ export function DesignerPage() {
   };
   const [activeTab, setActiveTab] = useState("canvas");
   // Phone: Templates / Page Setup / Custom input live in a bottom sheet
-  // (PLAN.md phase 3), opened from a single Settings button.
+  // opened from a single Settings button.
   const [controlsOpen, setControlsOpen] = useState(false);
   const [readme, setReadme] = useState("");
   const [readmeSaving, setReadmeSaving] = useState(false);
@@ -953,7 +953,7 @@ export function DesignerPage() {
       ) : (
         <div className="space-y-4">
           {/* The canvas is the first thing on screen: controls live in a
-              bottom sheet opened from this single button (PLAN.md phase 3). */}
+              bottom sheet opened from this single button. */}
           <Button
             variant="outline"
             className="w-full"
@@ -992,7 +992,7 @@ export function DesignerPage() {
             className="space-y-4"
           >
             {/* Sticky view tabs + Save, so switching views and saving the
-                tweak never need a scroll-up (PLAN.md phase 3). The header
+                tweak never need a scroll-up. The header
                 keeps the full toolbar; this is the reachable shortcut. */}
             <div className="sticky top-0 z-10 -mx-4 bg-background/95 px-4 py-2 backdrop-blur">
               <div className="flex items-center gap-2">

@@ -12,7 +12,7 @@ export const PHONE_QUERY = "(max-width: 767px)";
 /**
  * Landscape phone: narrow height with a coarse pointer (about 844×390 CSS
  * px). The shell keys off this as well as width: the sidebar starts
- * collapsed and the wide search field hides (PLAN.md phase 3).
+ * collapsed and the wide search field hides.
  */
 export const LANDSCAPE_QUERY = "(pointer: coarse) and (max-height: 500px)";
 

@@ -82,7 +82,7 @@ export const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
 /**
  * The phone bottom bar has five slots: four primary pages plus a "More"
  * button. Anything not in this list lives behind the More sheet, so the bar
- * never grows past five tap targets (PLAN.md phase 1).
+ * never grows past five tap targets.
  */
 export const MOBILE_PRIMARY_PATHS = [
   "/print",

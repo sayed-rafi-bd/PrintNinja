@@ -23,7 +23,7 @@ const projects = browsers.map((name) => {
   };
 });
 
-// PLAN.md phase 4: the mobile projects run only the phone specs below, on
+// The mobile projects run only the phone specs below, on
 // touch viewports where the coarse-pointer rules and card layouts apply.
 // Desktop projects ignore those specs (see testIgnore above).
 projects.push(

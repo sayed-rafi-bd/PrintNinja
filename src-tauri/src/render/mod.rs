@@ -309,8 +309,8 @@ impl PdfRenderer {
 
         let raster = png_to_raster(&png_path).map_err(|e| anyhow!("screenshot decode: {e}"))?;
 
-        // Keep the newest screenshot next to last-render.pdf for debugging
-        // the hardware checklist; the per-job file is removed either way.
+        // Keep the newest screenshot next to last-render.pdf for debugging;
+        // the per-job file is removed either way.
         let _ = tokio::fs::copy(&png_path, self.cache_dir.join("last-render.png")).await;
         let _ = tokio::fs::remove_file(&png_path).await;
         Ok(raster)

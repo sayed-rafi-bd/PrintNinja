@@ -94,8 +94,8 @@ export function TemplatesPage() {
   }, [search]);
   const [mine, setMine] = useState<TemplateRow[]>([]);
   const [saved, setSaved] = useState<TemplateRow[]>([]);
-  // Controlled sorting for the phone-only sort dropdowns below (PLAN.md
-  // phase 2): desktop keeps header-button sorting on the same state.
+  // Controlled sorting for the phone-only sort dropdowns below: desktop
+  // keeps header-button sorting on the same state.
   const [mineSorting, setMineSorting] = useState<SortingState>([]);
   const [savedSorting, setSavedSorting] = useState<SortingState>([]);
   const [mineSortKey, setMineSortKey] = useState("");
@@ -376,7 +376,7 @@ export function TemplatesPage() {
   const isSaved = (serverId: string) =>
     saved.some((t) => t.remote_id === serverId);
 
-  // Shared by the table cells and the phone cards below (PLAN.md phase 2).
+  // Shared by the table cells and the phone cards below.
   // Every local row carries a server id (minted at creation), so "on the
   // server" means the server has actually seen it: the row records the
   // revision it was last synced at.
@@ -421,7 +421,7 @@ export function TemplatesPage() {
     </div>
   );
 
-  // Phone cards (PLAN.md phase 2): name + summary, status badge and page
+  // Phone cards: name + summary, status badge and page
   // size, kebab menu for actions. Tapping a Mine card opens the Designer
   // via the DataTable's onRowActivate.
   const mineCard = (tpl: TemplateRow) => (

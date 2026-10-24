@@ -45,7 +45,7 @@ export function PrintPage() {
   // Phone-only layout: the sticky action bar below. Desktop keeps the single
   // in-card Print button (jsdom has no matchMedia, so tests see that one too).
   const isPhone = useMediaQuery(PHONE_QUERY);
-  // Phone preview (PLAN.md): collapsible, capped at ~40vh, tap to expand.
+  // Phone preview: collapsible, capped at ~40vh, tap to expand.
   // Desktop always shows the full preview, so these only matter on phones.
   const [previewOpen, setPreviewOpen] = useState(true);
   const [previewExpanded, setPreviewExpanded] = useState(false);
@@ -312,7 +312,7 @@ export function PrintPage() {
 
   // Data URL / Method / Copies / Pages live in the main card for live-data
   // jobs, and move into Advanced options while "Use test data" is on — the
-  // operator changing repeat jobs never touches them (PLAN.md phase 1).
+  // operator changing repeat jobs never touches them.
   const dataFields = (
     <>
       <div className={field}>
@@ -518,7 +518,7 @@ export function PrintPage() {
               </div>
 
               {/* "Use test data" stays put; the fields it replaces move into
-                  Advanced options so the first screen stays short (PLAN.md 1). */}
+                  Advanced options so the first screen stays short. */}
               <div className="flex items-center justify-between">
                 <Label htmlFor="test-data" className="font-normal">
                   Use test data
@@ -844,7 +844,7 @@ export function PrintPage() {
       </div>
 
       {/* Sticky action bar on phones: printer + Print always a thumb-reach
-          away, above the bottom nav (PLAN.md phase 1). */}
+          away, above the bottom nav. */}
       {isPhone && (
         <div
           className="sticky bottom-0 z-10 -mx-4 border-t bg-card/95 px-4 pb-[env(safe-area-inset-bottom)] pt-2 backdrop-blur md:hidden"

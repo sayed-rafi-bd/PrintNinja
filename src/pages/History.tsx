@@ -710,7 +710,7 @@ export function HistoryPage() {
       clear: () => store.setFilter({ dateTo: "" }),
     });
 
-  // Phone card (PLAN.md phase 2): job + status stay visible without
+  // Phone card: job + status stay visible without
   // horizontal scrolling; row actions move into a ⋯ menu; tapping the card
   // opens the details via the DataTable's onRowActivate.
   const historyCard = (job: HistoryJob) => (

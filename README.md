@@ -128,8 +128,6 @@ Pushing a `v*` tag builds the installers in CI. See [`docs/RELEASE.md`](docs/REL
 
 - [`docs/UI_GUIDE.md`](docs/UI_GUIDE.md): design principles, components and status vocabulary
 - [`docs/ENV.md`](docs/ENV.md): share service environment variables
-- [`docs/HARDWARE_CHECKLIST.md`](docs/HARDWARE_CHECKLIST.md): manual printer test pass per release
-- [`docs/mobile-audit/`](docs/mobile-audit/PLAN.md): mobile usability plan and device checklist
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`CHANGELOG.md`](CHANGELOG.md)
 
 ## License

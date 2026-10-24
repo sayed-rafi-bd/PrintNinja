@@ -55,7 +55,7 @@ interface DataTableProps<T> {
   className?: string;
   footer?: ReactNode;
   /**
-   * Phone card layout (PLAN.md phase 2): when provided and the viewport is
+   * Phone card layout: when provided and the viewport is
    * below `md`, rows render as cards instead of a table. Desktop, jsdom and
    * e2e keep the table, so existing queries are unaffected.
    */

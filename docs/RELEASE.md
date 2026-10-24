@@ -132,12 +132,6 @@ The `server/` share service is built, tested and drift-checked by CI
 (`server-check`, `server-image`) but **not** deployed by any workflow.
 It is deployed by hand, see section 7.
 
-## Hardware checklist
-
-Before publishing, run [`docs/HARDWARE_CHECKLIST.md`](HARDWARE_CHECKLIST.md) on
-the Windows machine with the printers attached. CI mocks the wire and the IPP
-responses; real printers, the Windows spooler and USB are only exercised there.
-
 ## 5. Publish
 
 Open the draft release on GitHub. If you sign locally, replace the unsigned files with your signed builds, then publish.

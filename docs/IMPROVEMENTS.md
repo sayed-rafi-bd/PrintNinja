@@ -230,9 +230,8 @@ close-to-tray as user settings; autostart is **opt-in, off by default**.
 - No capability entries needed for these: all plugin use is Rust-side
   (`ManagerExt`), and capabilities only gate frontend-invoked IPC.
   Linux tray needs libayatana-appindicator at runtime (note: stock
-  GNOME needs an extension — documented in HARDWARE_CHECKLIST).
-- Tray show/hide/quit stays a manual HARDWARE_CHECKLIST item (no
-  display in CI).
+  GNOME needs an extension).
+- Tray show/hide/quit stays a manual check (no display in CI).
 
 ### B. Android background (no tray on mobile) — implemented, CI-verified by `android-build`
 
@@ -256,7 +255,7 @@ registered in the app with `.plugin(tauri_plugin_android_print::init())`):
 - Verified here, not just in CI: `cargo check` desktop +
   `aarch64-linux-android`, full `tauri android build --debug --apk`.
   Runtime behavior (swipe-away survival, exemption prompt copy) stays
-  a manual HARDWARE_CHECKLIST item — no emulator in CI.
+  a manual check — no emulator in CI.
 
 ### C. Linux support — packaging is the small half — implemented
 - CI job (`ubuntu-24.04`) installing `libwebkit2gtk-4.1-dev`,
@@ -279,9 +278,9 @@ registered in the app with `.plugin(tauri_plugin_android_print::init())`):
     with `@page` from `apply_layout`); when no Chromium binary is
     found, fail loudly naming the missing renderer.
   - USB/Bluetooth stay Windows-only with clear UI messaging.
-- `docs/HARDWARE_CHECKLIST.md` Appendix L covers CUPS discovery,
-  AppIndicator on KDE vs GNOME, `.deb` install, autostart `.desktop`
-  verification, Chromium-present vs absent print paths.
+- Manual checks cover CUPS discovery, AppIndicator on KDE vs GNOME,
+  `.deb` install, autostart `.desktop` verification, Chromium-present
+  vs absent print paths.
 
 ### E. E2E + CI for this scope
 - Automated gate: Linux build job + existing Vitest/cargo suites;
@@ -290,7 +289,7 @@ registered in the app with `.plugin(tauri_plugin_android_print::init())`):
   persist + apply (autostart toggle writes the mocked entry,
   tray-mode toggles flip window-close behavior in the fake agent),
   Android foreground-service notification contract in the fake agent.
-- Manual gates stay in HARDWARE_CHECKLIST: tray menu on
+- Manual gates stay manual: tray menu on
   Windows/KDE/GNOME, reboot-with-autostart per OS, Android swipe-away
   print, battery-exemption prompt copy.
 

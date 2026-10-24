@@ -36,7 +36,7 @@ interface CodeProps {
  * The HTML and CSS editors stacked one above the other, for the Code tab on a
  * phone, where there is no room for a side-by-side workspace. Lines wrap,
  * the editors grow with the content up to 60vh, and Done dismisses the
- * soft keyboard (PLAN.md phase 3).
+ * soft keyboard.
  */
 export function CodeEditors({
   templateName,

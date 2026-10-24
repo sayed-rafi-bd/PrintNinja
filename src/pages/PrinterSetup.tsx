@@ -316,7 +316,7 @@ export function PrinterSetupPage() {
         header: "Status",
         cell: (c) => {
           const st = c.row.original.status;
-          // Icon + word in both cases (PLAN.md phase 2); unknown states
+          // Icon + word in both cases; unknown states
           // read "Not checked" instead of bare muted text.
           if (st === "online" || st === "offline")
             return <StatusBadge status={st} />;
@@ -397,7 +397,7 @@ export function PrinterSetupPage() {
     [testing, t],
   );
 
-  // Phone card (PLAN.md phase 2): name + address, status chip, a primary
+  // Phone card: name + address, status chip, a primary
   // Test print button, and a ⋯ menu holding Edit and Delete (Delete confirms
   // via the same dialog as the table).
   const printerCard = (p: PrinterRow) => {
@@ -509,7 +509,7 @@ export function PrinterSetupPage() {
       </PageHeader>
 
       <Tabs value={tab} onValueChange={setTab} className="w-full">
-        {/* Edge fade signals the row scrolls on phones (PLAN.md phase 2). */}
+        {/* Edge fade signals the row scrolls on phones. */}
         <TabsList className="[mask-image:linear-gradient(to_right,black_calc(100%-12px),transparent)]">
           {GROUPS.map((g) => (
             <TabsTrigger key={g.key} value={g.key}>

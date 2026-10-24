@@ -4,7 +4,7 @@ import { installAgent } from "../support/fixtures";
 import { apiRegister } from "../support/api";
 import { readStackState } from "../support/stack-state";
 
-// PLAN.md phase 4 ("make it stick"): the phone smoke spec. Runs on the two
+// The phone smoke spec. Runs on the two
 // mobile projects (Pixel 7 at 390x844, small at 360x640), where the
 // coarse-pointer rules and card layouts apply. Every route gets the same
 // four checks: no sideways scrolling, 44px tap targets, a review
