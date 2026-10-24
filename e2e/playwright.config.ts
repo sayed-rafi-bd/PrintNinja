@@ -10,10 +10,38 @@ const browsers = (process.env.E2E_BROWSERS ?? "chromium")
   .filter((name) => name.length > 0);
 const projects = browsers.map((name) => {
   if (name === "firefox") {
-    return { name: "firefox", use: { ...devices["Desktop Firefox"] } };
+    return {
+      name: "firefox",
+      use: { ...devices["Desktop Firefox"] },
+      testIgnore: "**/*.mobile.e2e.ts",
+    };
   }
-  return { name: "chromium", use: { ...devices["Desktop Chrome"] } };
+  return {
+    name: "chromium",
+    use: { ...devices["Desktop Chrome"] },
+    testIgnore: "**/*.mobile.e2e.ts",
+  };
 });
+
+// PLAN.md phase 4: the mobile projects run only the phone specs below, on
+// touch viewports where the coarse-pointer rules and card layouts apply.
+// Desktop projects ignore those specs (see testIgnore above).
+projects.push(
+  {
+    name: "mobile-pixel7",
+    use: { ...devices["Pixel 7"] },
+    testMatch: "**/*.mobile.e2e.ts",
+  },
+  {
+    name: "mobile-small",
+    use: {
+      viewport: { width: 360, height: 640 },
+      isMobile: true,
+      hasTouch: true,
+    },
+    testMatch: "**/*.mobile.e2e.ts",
+  },
+);
 
 export default defineConfig({
   testDir: "./tests",

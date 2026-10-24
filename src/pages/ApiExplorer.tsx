@@ -509,6 +509,7 @@ export function ApiExplorerPage() {
                   <pre
                     data-testid="api-explorer-response"
                     className="max-h-96 overflow-auto rounded-md bg-muted p-3 font-mono text-xs"
+                    tabIndex={0}
                   >
                     {formatResponse(response.text)}
                   </pre>

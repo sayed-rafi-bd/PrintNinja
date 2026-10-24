@@ -39,7 +39,11 @@ function ShareIndicator() {
   if (status.state === "unconfigured") return null;
   if (status.state === "offline") {
     return (
-      <Link to="/settings" title={t("shell.share_offline")}>
+      <Link
+        to="/settings"
+        title={t("shell.share_offline")}
+        className="flex items-center justify-center [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
+      >
         <StatusBadge
           status="offline"
           label={t("shell.share_offline")}
@@ -53,7 +57,7 @@ function ShareIndicator() {
       <Link
         to="/settings"
         title={t("shell.share_signed_out")}
-        className="flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline"
+        className="flex items-center justify-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
       >
         {/* Phone: an amber dot keeps the "not signed in" signal visible in the
             top bar; the word returns from sm up. */}
@@ -107,7 +111,7 @@ function ShareIndicator() {
         aria-label={`${t("shell.sync_now")}: ${detail}`}
         onClick={() => void onCacheNow()}
         disabled={syncing}
-        className="rounded-md hover:opacity-80 disabled:cursor-wait disabled:hover:opacity-100"
+        className="flex items-center justify-center rounded-md hover:opacity-80 disabled:cursor-wait disabled:hover:opacity-100 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
       >
         {syncBadge}
       </button>
@@ -152,6 +156,7 @@ function ApiIndicator() {
         title={`${t("shell.lan_on")} — ${t("shell.lan_on_detail")}`}
         aria-label={`${t("shell.lan_on")}: ${t("shell.lan_on_detail")}`}
         data-testid="lan-indicator"
+        className="flex items-center justify-center [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
       >
         <StatusBadge status="lan" label={t("shell.lan_on")} />
       </Link>
@@ -164,6 +169,7 @@ function ApiIndicator() {
       title={`API server listening on ${where}`}
       aria-label={`API server listening on ${where}`}
       data-testid="api-indicator"
+      className="flex items-center justify-center [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
     >
       <StatusBadge status="api" />
     </Link>
@@ -369,7 +375,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                       aria-label={rail ? label : undefined}
                       title={rail ? label : undefined}
                       className={cn(
-                        "flex h-control items-center gap-3 rounded-md px-2.5 text-sm transition-colors",
+                        "flex h-control items-center gap-3 rounded-md px-2.5 text-sm transition-colors [@media(pointer:coarse)]:min-h-11",
                         rail && "justify-center px-0",
                         active
                           ? "bg-accent font-medium text-accent-foreground"

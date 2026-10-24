@@ -253,6 +253,9 @@ export function CanvasWorkspace({
       <div
         ref={scrollRef}
         data-testid="canvas-scroll"
+        role="region"
+        aria-label="Canvas"
+        tabIndex={0}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}

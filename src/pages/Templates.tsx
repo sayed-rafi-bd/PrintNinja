@@ -1044,7 +1044,12 @@ export function TemplatesPage() {
               {previewError}
             </p>
           ) : previewHtml ? (
-            <div className="max-h-[60vh] overflow-auto rounded-md border bg-muted p-4">
+            <div
+              className="max-h-[60vh] overflow-auto rounded-md border bg-muted p-4"
+              tabIndex={0}
+              role="region"
+              aria-label="Template preview"
+            >
               <div
                 className="mx-auto bg-white shadow-md"
                 style={{
