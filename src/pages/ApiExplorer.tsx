@@ -124,6 +124,12 @@ const PRINT_BODY_EXAMPLE = `{
   "data": { "order": 1042 }
 }`;
 
+const PRINT_URL_EXAMPLE = `{
+  "template": "Receipt",
+  "printer": "Front Desk",
+  "data_url": "https://pos.local/ticket/1042"
+}`;
+
 /** Loopback is always reachable; 0.0.0.0 (LAN mode) is not a destination. */
 function baseUrl(status: ApiStatus): string {
   return `http://127.0.0.1:${status.port}`;
@@ -152,13 +158,6 @@ export function ApiExplorerPage() {
   const [jobId, setJobId] = useState("");
   const [body, setBody] = useState(PRINT_BODY_EXAMPLE);
   const [idempotencyKey, setIdempotencyKey] = useState("");
-  // Print data source: raw JSON body, or template + printer + a URL the
-  // server fetches for its JSON (data_url wins over data server-side).
-  const [printMode, setPrintMode] = useState<"json" | "url">("json");
-  const [printTemplate, setPrintTemplate] = useState("");
-  const [printPrinter, setPrintPrinter] = useState("");
-  const [printDataUrl, setPrintDataUrl] = useState("");
-  const [printHttpMethod, setPrintHttpMethod] = useState<"GET" | "POST">("GET");
   const [busy, setBusy] = useState(false);
   const [starting, setStarting] = useState(false);
   const [response, setResponse] = useState<{
@@ -204,32 +203,8 @@ export function ApiExplorerPage() {
     [selected, jobId],
   );
 
-  const isPrint = selected.path === "/v1/print";
-  const useDataUrl = isPrint && printMode === "url";
-
-  // The exact object the URL form will send: the preview below renders
-  // this, and `send` stringifies it. One source, no drift.
-  // The server fetches the URL for its JSON; it replaces `data` when
-  // both are sent, so the URL form omits `data` entirely.
-  const urlModePayload = useMemo(
-    () => ({
-      template: printTemplate.trim(),
-      printer: printPrinter.trim(),
-      data_url: printDataUrl.trim(),
-      settings:
-        printHttpMethod === "POST" ? { http_method: "POST" } : undefined,
-    }),
-    [printTemplate, printPrinter, printDataUrl, printHttpMethod],
-  );
-
   const canSend =
-    !busy &&
-    !!status?.running &&
-    (!selected.needsId || jobId.trim() !== "") &&
-    (!useDataUrl ||
-      (printTemplate.trim() !== "" &&
-        printPrinter.trim() !== "" &&
-        printDataUrl.trim() !== ""));
+    !busy && !!status?.running && (!selected.needsId || jobId.trim() !== "");
 
   const send = async () => {
     if (!status?.running) return;
@@ -239,15 +214,11 @@ export function ApiExplorerPage() {
     }
     let parsed: unknown = undefined;
     if (selected.hasBody) {
-      if (useDataUrl) {
-        parsed = urlModePayload;
-      } else {
-        try {
-          parsed = JSON.parse(body);
-        } catch {
-          toast.error("Request body is not valid JSON");
-          return;
-        }
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        toast.error("Request body is not valid JSON");
+        return;
       }
     }
     setBusy(true);
@@ -456,125 +427,49 @@ export function ApiExplorerPage() {
 
               {selected.hasBody && (
                 <>
-                  {isPrint && (
+                  {selected.path === "/v1/print" && (
                     <div
                       role="group"
-                      aria-label="Print data source"
-                      className="flex gap-1 rounded-md border p-1"
+                      aria-label="Fill an example body"
+                      className="flex flex-wrap gap-2"
                     >
-                      {(
-                        [
-                          ["json", "Inline JSON"],
-                          ["url", "Data URL"],
-                        ] as const
-                      ).map(([mode, label]) => (
-                        <Button
-                          key={mode}
-                          type="button"
-                          variant={printMode === mode ? "secondary" : "ghost"}
-                          size="sm"
-                          className="flex-1"
-                          onClick={() => setPrintMode(mode)}
-                        >
-                          {label}
-                        </Button>
-                      ))}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setBody(PRINT_BODY_EXAMPLE)}
+                      >
+                        Example: inline data
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setBody(PRINT_URL_EXAMPLE)}
+                      >
+                        Example: data URL
+                      </Button>
                     </div>
                   )}
-                  {useDataUrl ? (
-                    <>
-                      <div className="space-y-1">
-                        <Label htmlFor="api-explorer-template">Template</Label>
-                        <Input
-                          id="api-explorer-template"
-                          placeholder="Template name (case-insensitive)"
-                          value={printTemplate}
-                          onChange={(e) => setPrintTemplate(e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="api-explorer-printer">Printer</Label>
-                        <Input
-                          id="api-explorer-printer"
-                          placeholder="Printer name (case-insensitive)"
-                          value={printPrinter}
-                          onChange={(e) => setPrintPrinter(e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="api-explorer-data-url">Data URL</Label>
-                        <Input
-                          id="api-explorer-data-url"
-                          data-testid="api-explorer-data-url"
-                          inputMode="url"
-                          placeholder="https://pos.local/ticket/1042"
-                          value={printDataUrl}
-                          onChange={(e) => setPrintDataUrl(e.target.value)}
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          The server fetches this URL and prints the returned
-                          JSON. http/https only; failed fetches fail the job.
-                        </p>
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="api-explorer-http-method">
-                          Fetch method
-                        </Label>
-                        <div
-                          id="api-explorer-http-method"
-                          role="group"
-                          aria-label="Fetch method"
-                          className="flex gap-1 rounded-md border p-1"
-                        >
-                          {(["GET", "POST"] as const).map((m) => (
-                            <Button
-                              key={m}
-                              type="button"
-                              variant={
-                                printHttpMethod === m ? "secondary" : "ghost"
-                              }
-                              size="sm"
-                              className="flex-1 font-mono"
-                              onClick={() => setPrintHttpMethod(m)}
-                            >
-                              {m}
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium leading-none">
-                          Request preview
-                        </p>
-                        <pre
-                          aria-label="Request preview"
-                          className="max-h-64 overflow-auto rounded-md bg-muted p-3 font-mono text-xs"
-                        >
-                          {JSON.stringify(urlModePayload, null, 2)}
-                        </pre>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="space-y-1">
-                      <Label htmlFor="api-explorer-body">
-                        Request body (JSON)
-                        {isPrint && (
-                          <span className="font-normal text-muted-foreground">
-                            {" "}
-                            — put `data` here, or switch to Data URL above
-                          </span>
-                        )}
-                      </Label>
-                      <Textarea
-                        id="api-explorer-body"
-                        data-testid="api-explorer-body"
-                        rows={8}
-                        className="font-mono text-xs"
-                        value={body}
-                        onChange={(e) => setBody(e.target.value)}
-                      />
-                    </div>
-                  )}
+                  <div className="space-y-1">
+                    <Label htmlFor="api-explorer-body">
+                      Request body (JSON)
+                    </Label>
+                    <Textarea
+                      id="api-explorer-body"
+                      data-testid="api-explorer-body"
+                      rows={8}
+                      className="font-mono text-xs"
+                      value={body}
+                      onChange={(e) => setBody(e.target.value)}
+                    />
+                    {selected.path === "/v1/print" && (
+                      <p className="text-xs text-muted-foreground">
+                        Either inline `data` or `data_url` (the server fetches
+                        the URL and prints the returned JSON; http/https only).
+                      </p>
+                    )}
+                  </div>
                   <div className="space-y-1">
                     <Label htmlFor="api-explorer-idempotency">
                       Idempotency-Key (optional)
