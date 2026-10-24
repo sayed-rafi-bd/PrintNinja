@@ -2,16 +2,15 @@ import type { StageTimings } from "@/lib/agent/types";
 
 /** The pipeline stages in the order they run, with the label shown for each. */
 export const TIMING_STAGES = [
-  { key: "fetch_ms", label: "Data fetch", short: "Fetch" },
-  { key: "template_ms", label: "Template", short: "Template" },
-  { key: "layout_ms", label: "Layout", short: "Layout" },
-  { key: "render_ms", label: "Render", short: "Render" },
-  { key: "send_ms", label: "Send", short: "Send" },
-  { key: "history_ms", label: "History write", short: "History" },
+  { key: "fetch_ms", labelKey: "timing.stage_fetch" },
+  { key: "template_ms", labelKey: "timing.stage_template" },
+  { key: "layout_ms", labelKey: "timing.stage_layout" },
+  { key: "render_ms", labelKey: "timing.stage_render" },
+  { key: "send_ms", labelKey: "timing.stage_send" },
+  { key: "history_ms", labelKey: "timing.stage_history" },
 ] as const satisfies ReadonlyArray<{
   key: keyof StageTimings;
-  label: string;
-  short: string;
+  labelKey: string;
 }>;
 
 /** Parse a job's stored `timings_json`; null when absent or malformed. */

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -23,7 +24,7 @@ const QUICK_INSERT = [
   "qr",
 ];
 
-async function copyToken(token: string) {
+async function copyToken(token: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(token);
   } catch {
@@ -34,7 +35,6 @@ async function copyToken(token: string) {
     document.execCommand("copy");
     document.body.removeChild(ta);
   }
-  toast.success(`Copied ${token}`);
 }
 
 interface Props {
@@ -59,6 +59,11 @@ export function SampleDataPanel({
   onEdit,
   onDelete,
 }: Props) {
+  const { t } = useTranslation();
+  const copyAndToast = async (token: string) => {
+    await copyToken(token);
+    toast.success(t("designer.copied_token", { token }));
+  };
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
@@ -69,12 +74,12 @@ export function SampleDataPanel({
           onClick={onAdd}
         >
           <Plus className="h-3 w-3" />
-          Add Dataset
+          {t("designer.sample_add")}
         </Button>
       </div>
       {datasets.length === 0 ? (
         <p className="text-xs text-muted-foreground">
-          No datasets yet. Add one to preview and validate templates.
+          {t("designer.sample_empty")}
         </p>
       ) : (
         datasets.map((ds) => {
@@ -92,7 +97,7 @@ export function SampleDataPanel({
                   <input
                     type="radio"
                     name="dataset"
-                    aria-label={`Use dataset ${ds.name}`}
+                    aria-label={t("designer.sample_use", { name: ds.name })}
                     checked={selectedName === ds.name}
                     onChange={() => onSelect(ds.name)}
                   />
@@ -101,7 +106,7 @@ export function SampleDataPanel({
                   </span>
                   {ds.isDefault && (
                     <Badge variant="secondary" className="text-xs">
-                      Default
+                      {t("designer.sample_default")}
                     </Badge>
                   )}
                 </div>
@@ -112,13 +117,13 @@ export function SampleDataPanel({
                     className="h-6 text-xs"
                     onClick={() => onEdit(ds)}
                   >
-                    Edit
+                    {t("common.edit")}
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
                     className="h-6 text-xs"
-                    aria-label={`Delete dataset ${ds.name}`}
+                    aria-label={t("designer.sample_delete", { name: ds.name })}
                     onClick={() => onDelete(ds)}
                     disabled={ds.isDefault}
                   >
@@ -127,15 +132,15 @@ export function SampleDataPanel({
                 </div>
               </div>
               <div className="space-y-1 text-xs text-muted-foreground">
-                <p>Fields:</p>
+                <p>{t("designer.sample_fields")}</p>
                 <div className="flex flex-wrap gap-1">
                   {fields.map((f) => (
                     <button
                       key={f}
                       type="button"
                       className="cursor-pointer rounded-full border px-2 py-0.5 font-mono text-xs hover:bg-muted"
-                      onClick={() => void copyToken(`{{${f}}}`)}
-                      title="Copy to clipboard"
+                      onClick={() => void copyAndToast(`{{${f}}}`)}
+                      title={t("designer.sample_copy")}
                     >
                       {"{{"}
                       {f}
@@ -146,7 +151,7 @@ export function SampleDataPanel({
               </div>
               <details className="text-xs">
                 <summary className="cursor-pointer text-muted-foreground">
-                  View JSON
+                  {t("designer.sample_json")}
                 </summary>
                 <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted p-2 font-mono text-xs">
                   {ds.json}
@@ -158,9 +163,11 @@ export function SampleDataPanel({
       )}
 
       <div className="space-y-2 border-t pt-3">
-        <h3 className="text-xs font-semibold">Quick Insert</h3>
+        <h3 className="text-xs font-semibold">
+          {t("designer.sample_quick_insert")}
+        </h3>
         <p className="text-xs text-muted-foreground">
-          Click a variable chip below to copy it, then paste into the HTML/CSS.
+          {t("designer.sample_quick_hint")}
         </p>
         <div className="flex flex-wrap gap-1">
           {QUICK_INSERT.map((v) => (
@@ -168,7 +175,7 @@ export function SampleDataPanel({
               key={v}
               type="button"
               className="cursor-pointer rounded-full border px-2 py-0.5 font-mono text-xs hover:bg-primary hover:text-primary-foreground"
-              onClick={() => void copyToken(`{{${v}}}`)}
+              onClick={() => void copyAndToast(`{{${v}}}`)}
             >
               {"{{"}
               {v}

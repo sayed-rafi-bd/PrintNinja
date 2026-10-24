@@ -188,7 +188,7 @@ const FIELD_PATH = /^[A-Za-z_][\w]*(?:\.[A-Za-z_]\w*)*$/;
 
 export type BarcodeSnippet =
   | { ok: true; text: string; kind: "helper" | "static" }
-  | { ok: false; error: string };
+  | { ok: false; messageKey: string; messageParams?: Record<string, string> };
 
 /**
  * What the Designer's Insert Barcode dialog puts in the template.
@@ -206,7 +206,7 @@ export function buildBarcodeSnippet(
   fromData: boolean,
 ): BarcodeSnippet {
   const v = value.trim();
-  if (!v) return { ok: false, error: "Value is required" };
+  if (!v) return { ok: false, messageKey: "designer.barcode_err_required" };
   const helper = isHelperSymbology(type);
   const call = (arg: string) =>
     type === "qr" ? `{{qrcode ${arg}}}` : `{{barcode "${type}" ${arg}}}`;
@@ -215,30 +215,31 @@ export function buildBarcodeSnippet(
     if (!helper) {
       return {
         ok: false,
-        error: `${labelFor(type)} can only use a fixed value for now`,
+        messageKey: "designer.barcode_err_fixed",
+        messageParams: { label: labelFor(type) },
       };
     }
     if (!FIELD_PATH.test(v)) {
-      return { ok: false, error: "Enter a data field such as order.id" };
+      return { ok: false, messageKey: "designer.barcode_err_field" };
     }
     return { ok: true, kind: "helper", text: call(v) };
   }
 
-  const error = validateBarcode(type, v);
-  if (error) return { ok: false, error };
+  const errorKey = validateBarcode(type, v);
+  if (errorKey) return { ok: false, messageKey: errorKey };
 
   if (!helper) {
     const html = buildBarcodeHtml({ type, value: v, scaleToWidth: 40 });
     return html
       ? { ok: true, kind: "static", text: html }
-      : { ok: false, error: "Could not generate this barcode" };
+      : { ok: false, messageKey: "designer.barcode_err_gen" };
   }
 
   // A Handlebars string literal can hold either quote, but not both.
   if (v.includes('"') && v.includes("'")) {
     return {
       ok: false,
-      error: "The value cannot contain both ' and \" characters",
+      messageKey: "designer.barcode_err_quotes",
     };
   }
   const literal = v.includes('"') ? `'${v}'` : `"${v}"`;
@@ -248,7 +249,7 @@ export function buildBarcodeSnippet(
 export function validateBarcode(type: string, value: string): string | null {
   const v = value.trim();
 
-  if (!v) return "Value is required";
+  if (!v) return "designer.barcode_err_required";
 
   switch (type) {
     case "code128":
@@ -256,21 +257,27 @@ export function validateBarcode(type: string, value: string): string | null {
     case "code39":
       return /^[0-9A-Z\-\.\ \/\+\%\$]+$/i.test(v)
         ? null
-        : "Code 39 only supports A-Z, 0-9, -, ., space, /, +, %, $";
+        : "designer.barcode_err_c39";
     case "ean13":
-      if (!/^\d{13}$/.test(v)) return "EAN-13 requires exactly 13 digits";
-      return validateEanCheckDigit(v) ? null : "Invalid EAN-13 check digit";
+      if (!/^\d{13}$/.test(v)) return "designer.barcode_err_ean13_len";
+      return validateEanCheckDigit(v)
+        ? null
+        : "designer.barcode_err_ean13_check";
     case "ean8":
-      if (!/^\d{8}$/.test(v)) return "EAN-8 requires exactly 8 digits";
-      return validateEanCheckDigit(v) ? null : "Invalid EAN-8 check digit";
+      if (!/^\d{8}$/.test(v)) return "designer.barcode_err_ean8_len";
+      return validateEanCheckDigit(v)
+        ? null
+        : "designer.barcode_err_ean8_check";
     case "upca":
-      if (!/^\d{12}$/.test(v)) return "UPC-A requires exactly 12 digits";
-      return validateEanCheckDigit(v) ? null : "Invalid UPC-A check digit";
+      if (!/^\d{12}$/.test(v)) return "designer.barcode_err_upca_len";
+      return validateEanCheckDigit(v)
+        ? null
+        : "designer.barcode_err_upca_check";
     case "itf":
       // ITF encodes digit pairs only, so it needs an even count.
       return /^\d+$/.test(v) && v.length % 2 === 0
         ? null
-        : "ITF requires an even number of digits";
+        : "designer.barcode_err_itf";
     case "codabar": {
       // Codabar = optional start letter A-D, digits, optional stop letter
       // A-D, and AT LEAST ONE of the letters must be present. Plain digits
@@ -278,9 +285,7 @@ export function validateBarcode(type: string, value: string): string | null {
       const body = "0-9\\-\\$\\+\\:\\/\\.";
       const shaped = new RegExp(`^[A-Da-d]?[${body}]+[A-Da-d]?$`).test(v);
       const hasLetter = /[A-Da-d]/.test(v);
-      return shaped && hasLetter
-        ? null
-        : "Codabar requires start/stop letters A-D and digits";
+      return shaped && hasLetter ? null : "designer.barcode_err_codabar";
     }
     case "qr":
     case "datamatrix":

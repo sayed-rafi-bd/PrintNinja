@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { TIMING_STAGES } from "@/lib/timings";
 import type { StageTimings } from "@/lib/agent/types";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,7 @@ export function TimingBreakdown({
   variant?: "inline" | "list";
   className?: string;
 }) {
+  const { t } = useTranslation();
   if (variant === "list") {
     const denom = Math.max(
       timings.total_ms,
@@ -34,7 +36,7 @@ export function TimingBreakdown({
               key={s.key}
               className="grid grid-cols-[7rem_1fr_4.5rem] items-center gap-2 text-sm"
             >
-              <span className="text-muted-foreground">{s.label}</span>
+              <span className="text-muted-foreground">{t(s.labelKey)}</span>
               <div
                 className="h-1.5 overflow-hidden rounded-sm bg-muted"
                 aria-hidden="true"
@@ -49,7 +51,7 @@ export function TimingBreakdown({
           );
         })}
         <div className="grid grid-cols-[7rem_1fr_4.5rem] items-center gap-2 border-t pt-1.5 text-sm font-medium">
-          <span>Total</span>
+          <span>{t("common.total")}</span>
           <span />
           <span className="text-right tabular-nums">{timings.total_ms} ms</span>
         </div>
@@ -65,10 +67,12 @@ export function TimingBreakdown({
       )}
       data-testid="timing-breakdown"
     >
-      <span className="font-medium">Total {timings.total_ms} ms</span>
+      <span className="font-medium">
+        {t("common.total")} {timings.total_ms} ms
+      </span>
       {TIMING_STAGES.map((s) => (
         <span key={s.key}>
-          {s.label} {timings[s.key]} ms
+          {t(s.labelKey)} {timings[s.key]} ms
         </span>
       ))}
     </p>

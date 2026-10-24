@@ -42,16 +42,27 @@ export function isValidLogoDataUrl(
   );
 }
 
-export type LogoCheck = { ok: true } | { ok: false; message: string };
+export type LogoCheck =
+  | { ok: true }
+  | {
+      ok: false;
+      /** i18n key for the failure, rendered by the caller with t(). */
+      messageKey: string;
+      messageValues?: Record<string, string | number>;
+    };
 
 export function checkLogoFile(file: { type: string; size: number }): LogoCheck {
   if (!(LOGO_TYPES as readonly string[]).includes(file.type)) {
-    return { ok: false, message: "Use a PNG, JPEG, WebP, or SVG image." };
+    return {
+      ok: false,
+      messageKey: "settings_page.appearance_logo_bad_type",
+    };
   }
   if (file.size > MAX_LOGO_BYTES) {
     return {
       ok: false,
-      message: `The logo must be ${MAX_LOGO_BYTES / 1024} KB or smaller.`,
+      messageKey: "settings_page.appearance_logo_too_big",
+      messageValues: { kb: MAX_LOGO_BYTES / 1024 },
     };
   }
   return { ok: true };

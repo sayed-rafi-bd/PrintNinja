@@ -10,6 +10,7 @@ import { MemoryRouter } from "react-router-dom";
 import axe from "axe-core";
 import "@/lib/i18n";
 import { buildChecklist, parseSection, summarize } from "@/lib/setup/checklist";
+import { t } from "i18next";
 
 const invoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
@@ -54,7 +55,7 @@ const base = {
 
 describe("checklist model", () => {
   it("marks required steps from counts", () => {
-    const items = buildChecklist({ ...base, printers: 2, templates: 5 });
+    const items = buildChecklist({ ...base, printers: 2, templates: 5 }, t);
     expect(items.find((i) => i.id === "printer")?.done).toBe(true);
     expect(items.find((i) => i.id === "test_print")?.done).toBe(false);
     expect(summarize(items)).toMatchObject({
@@ -64,12 +65,15 @@ describe("checklist model", () => {
     });
   });
   it("is complete when all required steps are done, optional ones aside", () => {
-    const items = buildChecklist({
-      ...base,
-      printers: 1,
-      templates: 1,
-      jobs: 1,
-    });
+    const items = buildChecklist(
+      {
+        ...base,
+        printers: 1,
+        templates: 1,
+        jobs: 1,
+      },
+      t,
+    );
     expect(summarize(items).complete).toBe(true);
     expect(
       items.filter((i) => !i.required).every((i) => i.done === false),
@@ -77,7 +81,10 @@ describe("checklist model", () => {
   });
   it("is never complete when status is unknown", () => {
     const s = summarize(
-      buildChecklist({ ...base, printers: null, templates: null, jobs: null }),
+      buildChecklist(
+        { ...base, printers: null, templates: null, jobs: null },
+        t,
+      ),
     );
     expect(s.complete).toBe(false);
     expect(s.unknown).toBe(true);

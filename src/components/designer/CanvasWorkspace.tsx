@@ -181,7 +181,7 @@ export function CanvasWorkspace({
           </span>
           {/* Real dimensions, so a phone author knows the label size at a glance. */}
           <span className="block text-xs text-muted-foreground">
-            {pageWidthMm} × {pageHeightMm} mm
+            {t("designer.canvas_size", { w: pageWidthMm, h: pageHeightMm })}
           </span>
         </span>
         <div className="flex items-center gap-1">
@@ -192,11 +192,14 @@ export function CanvasWorkspace({
               else if (v !== "custom") setMode(Number(v));
             }}
           >
-            <SelectTrigger aria-label="Zoom level" className="h-8 w-24 text-xs">
+            <SelectTrigger
+              aria-label={t("designer.zoom_level")}
+              className="h-8 w-24 text-xs"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="fit">Fit</SelectItem>
+              <SelectItem value="fit">{t("designer.zoom_fit")}</SelectItem>
               {ZOOM_PRESETS.map((p) => (
                 <SelectItem key={p} value={String(p)}>
                   {Math.round(p * 100)}%
@@ -211,8 +214,8 @@ export function CanvasWorkspace({
             variant="ghost"
             size="icon"
             className="h-8 w-8"
-            aria-label="Zoom out"
-            title="Zoom out"
+            aria-label={t("designer.zoom_out")}
+            title={t("designer.zoom_out")}
             disabled={zoom <= MIN_ZOOM + 0.001}
             onClick={() => setMode(stepZoom(zoom, -1))}
           >
@@ -225,8 +228,8 @@ export function CanvasWorkspace({
             variant="ghost"
             size="icon"
             className="h-8 w-8"
-            aria-label="Zoom in"
-            title="Zoom in"
+            aria-label={t("designer.zoom_in")}
+            title={t("designer.zoom_in")}
             disabled={zoom >= MAX_ZOOM - 0.001}
             onClick={() => setMode(stepZoom(zoom, 1))}
           >
@@ -244,7 +247,10 @@ export function CanvasWorkspace({
             aria-hidden="true"
           />
           <span className="min-w-0 break-words">
-            <strong className="font-semibold">Template error:</strong> {error}
+            <strong className="font-semibold">
+              {t("designer.template_error")}
+            </strong>{" "}
+            {error}
           </span>
         </div>
       )}
@@ -254,7 +260,7 @@ export function CanvasWorkspace({
         ref={scrollRef}
         data-testid="canvas-scroll"
         role="region"
-        aria-label="Canvas"
+        aria-label={t("designer.canvas")}
         tabIndex={0}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}

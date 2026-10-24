@@ -54,19 +54,23 @@ export function DesignerToolbar({
           data-testid="designer-save"
         >
           <Save className="h-4 w-4" aria-hidden="true" />
-          Save
+          {t("common.save")}
         </Button>
       )}
       {readOnly ? (
-        <span className="text-xs text-muted-foreground">Read-only</span>
+        <span className="text-xs text-muted-foreground">
+          {t("designer.read_only")}
+        </span>
       ) : !remoteId ? (
         <span className="text-xs text-muted-foreground">
-          Only on this computer
+          {t("designer.only_local")}
         </span>
       ) : (
         <div className="flex items-center gap-2">
           <Label htmlFor="template-visibility" className="text-xs">
-            {published ? "Public" : "Private"}
+            {published
+              ? t("designer.visibility_public")
+              : t("designer.visibility_private")}
           </Label>
           <Switch
             id="template-visibility"
@@ -74,7 +78,11 @@ export function DesignerToolbar({
             checked={published}
             disabled={busy}
             onCheckedChange={(v) => onVisibilityChange(v)}
-            aria-label={`Template visibility: ${published ? "Public" : "Private"}`}
+            aria-label={t("designer.visibility_toggle", {
+              state: published
+                ? t("designer.visibility_public")
+                : t("designer.visibility_private"),
+            })}
           />
         </div>
       )}

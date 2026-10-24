@@ -30,6 +30,7 @@ import { useShareStatus } from "@/lib/shell/useShareStatus";
 import { cacheNow, useSyncStatus } from "@/lib/sync/useSyncStatus";
 import { usePrefs } from "@/lib/prefs/PrefsProvider";
 import { agent } from "@/lib/agent/commands";
+import { getAppVersion } from "@/lib/appUpdate";
 import { cn } from "@/lib/utils";
 
 function ShareIndicator() {
@@ -215,6 +216,18 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const rail = collapsed || shortLandscape;
   const [reprintJob, setReprintJob] = useState<HistoryJob | null>(null);
   const [reprinting, setReprinting] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
+
+  // The version lives in the topbar only; Settings shows no footer.
+  useEffect(() => {
+    let cancelled = false;
+    void getAppVersion().then((v) => {
+      if (!cancelled && v && v !== "0.0.0") setAppVersion(v);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -239,20 +252,25 @@ export function Layout({ children }: { children: React.ReactNode }) {
     onGoto: goto,
   });
 
-  // Printing is physical, so the palette asks before sending the last job again.
-  const askReprintLast = async () => {
+  // Printing is physical, so the palette asks before sending a job again.
+  const askReprintJob = async (id?: number) => {
     try {
       const jobs = await agent("list_jobs");
-      const last = [...jobs].sort((a, b) => b.id - a.id)[0];
-      if (!last) {
+      const job =
+        id == null
+          ? [...jobs].sort((a, b) => b.id - a.id)[0]
+          : jobs.find((j) => j.id === id);
+      if (!job) {
         toast.info(t("shell.reprint_none"));
         return;
       }
-      setReprintJob(last);
+      setReprintJob(job);
     } catch {
       toast.error(t("shell.reprint_failed"));
     }
   };
+
+  const askReprintLast = () => askReprintJob();
 
   const confirmReprint = async () => {
     if (!reprintJob) return;
@@ -302,6 +320,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <span className="truncate text-base font-semibold tracking-tight">
             {appName}
           </span>
+          {appVersion && (
+            <span className="shrink-0 text-xs text-muted-foreground">
+              v{appVersion}
+            </span>
+          )}
         </Link>
         {!shortLandscape && (
           <button
@@ -539,6 +562,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         onOpenChange={setPaletteOpen}
         onNavigate={(p) => navigate(p)}
         onReprintLast={askReprintLast}
+        onReprintJob={(id) => void askReprintJob(id)}
       />
       <ShortcutsDialog open={helpOpen} onOpenChange={setHelpOpen} />
       <ConfirmDialog

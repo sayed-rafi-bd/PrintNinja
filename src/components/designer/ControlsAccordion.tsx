@@ -22,7 +22,8 @@ import { HelpersPanel } from "./HelpersPanel";
 import { CustomInputPanel } from "./CustomInputPanel";
 
 export interface PagePreset {
-  label: string;
+  /** i18n key for the preset name shown on its button. */
+  labelKey: string;
   width: number;
   height: number;
 }
@@ -89,7 +90,7 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
       className="rounded-lg border bg-card px-3"
     >
       <AccordionItem value="templates">
-        <AccordionTrigger>Templates</AccordionTrigger>
+        <AccordionTrigger>{t("designer.templates")}</AccordionTrigger>
         <AccordionContent className="space-y-1">
           {templates.map((tpl) => {
             const active = tpl.id === currentTemplateId;
@@ -130,7 +131,7 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
               <Label htmlFor="designer-width" className="text-xs">
-                Width (mm)
+                {t("designer.width_mm")}
               </Label>
               <Input
                 id="designer-width"
@@ -141,7 +142,7 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
             </div>
             <div className="space-y-1">
               <Label htmlFor="designer-height" className="text-xs">
-                Height (mm)
+                {t("designer.height_mm")}
               </Label>
               <Input
                 id="designer-height"
@@ -152,11 +153,11 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
             </div>
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">Presets</Label>
+            <Label className="text-xs">{t("designer.presets")}</Label>
             <div className="flex flex-wrap gap-1">
               {PAGE_PRESETS.map((preset) => (
                 <Button
-                  key={preset.label}
+                  key={preset.labelKey}
                   variant="outline"
                   size="sm"
                   className="h-7 text-xs"
@@ -165,7 +166,7 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
                     setPageHeight(preset.height);
                   }}
                 >
-                  {preset.label}
+                  {t(preset.labelKey)}
                 </Button>
               ))}
             </div>
@@ -180,7 +181,10 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
                 setOrientation(v as "portrait" | "landscape")
               }
             >
-              <SelectTrigger id="designer-orientation" aria-label="Orientation">
+              <SelectTrigger
+                id="designer-orientation"
+                aria-label={t("designer.orientation")}
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -198,7 +202,7 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
 
       {showHelpers && (
         <AccordionItem value="helpers">
-          <AccordionTrigger>Helpers</AccordionTrigger>
+          <AccordionTrigger>{t("designer.helpers")}</AccordionTrigger>
           <AccordionContent>
             <HelpersPanel onInsert={onInsertHelper} />
           </AccordionContent>
@@ -207,7 +211,7 @@ export function ControlsAccordion<T extends { id: number; name: string }>({
 
       {onBarcode && (
         <AccordionItem value="custom">
-          <AccordionTrigger>Custom input</AccordionTrigger>
+          <AccordionTrigger>{t("designer.custom_input")}</AccordionTrigger>
           <AccordionContent>
             <CustomInputPanel onBarcode={onBarcode} />
           </AccordionContent>

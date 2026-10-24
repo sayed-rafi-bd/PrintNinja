@@ -126,7 +126,7 @@ describe("app shell", () => {
     renderShell("/history");
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     const input = await screen.findByPlaceholderText(
-      "Search pages, templates, actions",
+      "Search pages, templates, printers, jobs, settings",
     );
     fireEvent.change(input, { target: { value: "printers" } });
     fireEvent.click(await screen.findByRole("option", { name: /Printers/ }));

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { t } from "i18next";
+import "@/lib/i18n";
 import { validatePrinterForm } from "@/lib/printerSchema";
 
 const base = {
@@ -31,12 +33,12 @@ describe("validatePrinterForm", () => {
   });
 
   it("checks IPP addresses are http(s) URLs", () => {
-    expect(
-      validatePrinterForm({ ...base, address: "192.168.1.50:9100" }),
-    ).toMatchObject({ ok: false, error: expect.stringMatching(/http/) });
-    expect(
-      validatePrinterForm({ ...base, address: "ftp://x/y" }),
-    ).toMatchObject({ ok: false });
+    const r = validatePrinterForm({ ...base, address: "192.168.1.50:9100" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(t(r.messageKey)).toMatch(/http/);
+    expect(validatePrinterForm({ ...base, address: "ftp://x/y" }).ok).toBe(
+      false,
+    );
   });
 
   it("checks raw TCP addresses are host:port", () => {
@@ -53,7 +55,7 @@ describe("validatePrinterForm", () => {
     ]) {
       const r = validatePrinterForm({ ...tcp, address: bad });
       expect(r).toMatchObject({ ok: false });
-      if (!r.ok) expect(r.error).toMatch(/host:port/);
+      if (!r.ok) expect(t(r.messageKey)).toMatch(/host:port/);
     }
   });
 

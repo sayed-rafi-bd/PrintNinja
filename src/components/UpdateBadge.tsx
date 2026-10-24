@@ -1,6 +1,7 @@
 import { Download } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { openExternalUrl, useUpdateCheck } from "@/lib/appUpdate";
+import { isWebMode } from "@/lib/settings";
 
 /**
  * Topbar pill, shown only when a newer release exists. Opens the release
@@ -19,6 +20,10 @@ export function UpdateBadge() {
       title={label}
       aria-label={label}
       onClick={(e) => {
+        // Web builds: let the anchor open the tab natively. Calling
+        // window.open from an async continuation loses the click gesture
+        // and trips the popup blocker.
+        if (isWebMode()) return;
         // Tauri webviews do not open external anchors on their own.
         e.preventDefault();
         void openExternalUrl(update.url);

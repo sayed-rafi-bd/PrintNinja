@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { isAndroid } from "@/lib/android/background";
@@ -24,6 +25,7 @@ export function AndroidBackgroundControls({
   onRefresh,
   onRequestExemption,
 }: AndroidBackgroundControlsProps) {
+  const { t } = useTranslation();
   useEffect(() => {
     if (isAndroidBackground()) {
       void onRefresh();
@@ -41,26 +43,36 @@ export function AndroidBackgroundControls({
     <div className="space-y-3 rounded-md border p-3">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <p className="text-sm font-medium">Print service</p>
+          <p className="text-sm font-medium">
+            {t("settings_page.background_service")}
+          </p>
           <p className="text-xs text-muted-foreground">
-            Keeps the print queue running after the app is swiped away. Stop it
-            from its notification.
+            {t("settings_page.background_service_hint")}
           </p>
         </div>
         <Badge variant={running ? "success" : "secondary"}>
-          {running == null ? "…" : running ? "running" : "stopped"}
+          {running == null
+            ? "…"
+            : running
+              ? t("settings_page.background_running")
+              : t("settings_page.background_stopped")}
         </Badge>
       </div>
       <div className="flex items-center justify-between gap-2">
         <div>
-          <p className="text-sm font-medium">Ignore battery optimizations</p>
+          <p className="text-sm font-medium">
+            {t("settings_page.background_battery")}
+          </p>
           <p className="text-xs text-muted-foreground">
-            Otherwise Doze and app standby defer prints. Opens the system
-            screen; your choice, never automatic.
+            {t("settings_page.background_battery_hint")}
           </p>
         </div>
         <Badge variant={exempt ? "success" : "secondary"}>
-          {exempt == null ? "…" : exempt ? "allowed" : "not allowed"}
+          {exempt == null
+            ? "…"
+            : exempt
+              ? t("settings_page.background_allowed")
+              : t("settings_page.background_not_allowed")}
         </Badge>
       </div>
       <div className="flex gap-2">
@@ -71,10 +83,12 @@ export function AndroidBackgroundControls({
           onClick={onRequestExemption}
           data-testid="settings-battery-exemption"
         >
-          {busy ? "Working…" : "Request exemption"}
+          {busy
+            ? t("settings_page.background_working")
+            : t("settings_page.background_request")}
         </Button>
         <Button variant="ghost" size="sm" disabled={busy} onClick={onRefresh}>
-          Refresh status
+          {t("settings_page.background_refresh")}
         </Button>
       </div>
     </div>

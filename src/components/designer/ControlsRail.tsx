@@ -25,35 +25,41 @@ interface Props {
  */
 export function ControlsRail({ onOpenSection, onExpand }: Props) {
   const { t } = useTranslation();
-  const sections: { id: ControlsSection; label: string; Icon: LucideIcon }[] = [
-    { id: "templates", label: "Templates", Icon: FileText },
-    { id: "page", label: t("designer.pageSetup"), Icon: Ruler },
-    { id: "helpers", label: "Helpers", Icon: Wand2 },
-    { id: "custom", label: "Custom input", Icon: Blocks },
+  const sections: {
+    id: ControlsSection;
+    labelKey: string;
+    Icon: LucideIcon;
+  }[] = [
+    { id: "templates", labelKey: "designer.templates", Icon: FileText },
+    { id: "page", labelKey: "designer.pageSetup", Icon: Ruler },
+    { id: "helpers", labelKey: "designer.helpers", Icon: Wand2 },
+    { id: "custom", labelKey: "designer.custom_input", Icon: Blocks },
   ];
   const button =
     "flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11";
   return (
     <nav
-      aria-label="Designer controls (collapsed)"
+      aria-label={t("designer.controls_collapsed")}
       className="flex w-12 flex-col items-center gap-1 rounded-lg border bg-card py-2"
     >
       <button
         type="button"
-        aria-label="Expand controls"
-        title="Expand controls"
+        aria-label={t("designer.expand_controls")}
+        title={t("designer.expand_controls")}
         onClick={onExpand}
         className={button}
       >
         <PanelLeftOpen className="h-4 w-4" aria-hidden="true" />
       </button>
       <div className="my-1 h-px w-6 bg-border" />
-      {sections.map(({ id, label, Icon }) => (
+      {sections.map(({ id, labelKey, Icon }) => (
         <button
           key={id}
           type="button"
-          aria-label={`Open ${label}`}
-          title={label}
+          aria-label={t("designer.open_section", {
+            section: t(labelKey),
+          })}
+          title={t(labelKey)}
           onClick={() => onOpenSection(id)}
           className={cn(button)}
         >
