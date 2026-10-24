@@ -207,6 +207,21 @@ export function ApiExplorerPage() {
   const isPrint = selected.path === "/v1/print";
   const useDataUrl = isPrint && printMode === "url";
 
+  // The exact object the URL form will send: the preview below renders
+  // this, and `send` stringifies it. One source, no drift.
+  // The server fetches the URL for its JSON; it replaces `data` when
+  // both are sent, so the URL form omits `data` entirely.
+  const urlModePayload = useMemo(
+    () => ({
+      template: printTemplate.trim(),
+      printer: printPrinter.trim(),
+      data_url: printDataUrl.trim(),
+      settings:
+        printHttpMethod === "POST" ? { http_method: "POST" } : undefined,
+    }),
+    [printTemplate, printPrinter, printDataUrl, printHttpMethod],
+  );
+
   const canSend =
     !busy &&
     !!status?.running &&
@@ -225,15 +240,7 @@ export function ApiExplorerPage() {
     let parsed: unknown = undefined;
     if (selected.hasBody) {
       if (useDataUrl) {
-        // The server fetches this URL for its JSON; it replaces `data`
-        // when both are sent, so the URL form omits `data` entirely.
-        parsed = {
-          template: printTemplate.trim(),
-          printer: printPrinter.trim(),
-          data_url: printDataUrl.trim(),
-          settings:
-            printHttpMethod === "POST" ? { http_method: "POST" } : undefined,
-        };
+        parsed = urlModePayload;
       } else {
         try {
           parsed = JSON.parse(body);
@@ -534,6 +541,17 @@ export function ApiExplorerPage() {
                             </Button>
                           ))}
                         </div>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                          Request preview
+                        </p>
+                        <pre
+                          aria-label="Request preview"
+                          className="max-h-64 overflow-auto rounded-md bg-muted p-3 font-mono text-xs"
+                        >
+                          {JSON.stringify(urlModePayload, null, 2)}
+                        </pre>
                       </div>
                     </>
                   ) : (
