@@ -727,8 +727,10 @@ async fn an_array_payload_prints_one_page_per_record() {
     let html = renderer.html.lock().unwrap().clone().expect("rendered");
     assert!(html.contains("Hello Ana!"), "first record page");
     assert!(html.contains("Hello Bo!"), "second record page");
-    assert!(
-        html.contains(r#"<div style="break-before:page"></div>"#),
+    // Final HTML is the sheets document: one paper-sized sheet per record.
+    assert_eq!(
+        html.matches("class=\"pn-sheet\"").count(),
+        2,
         "records are page-separated"
     );
 }
@@ -780,10 +782,10 @@ async fn a_single_object_with_records_prints_n_pages() {
 
     let html = renderer.html.lock().unwrap().clone().expect("rendered");
     assert_eq!(html.matches("Hello Ana!").count(), 3);
+    // Final HTML is the sheets document: one paper-sized sheet per page.
     assert_eq!(
-        html.matches(r#"<div style="break-before:page"></div>"#)
-            .count(),
-        2,
+        html.matches("class=\"pn-sheet\"").count(),
+        3,
         "pages are page-separated"
     );
 }

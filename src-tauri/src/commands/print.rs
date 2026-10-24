@@ -907,11 +907,7 @@ async fn run_stages(
                 .await
                 .and_then(|raster| {
                     crate::transport::encode_for_language(
-                        lang,
-                        &raster,
-                        paper_w_mm,
-                        paper_h_mm,
-                        dpi,
+                        lang, &raster, paper_w_mm, paper_h_mm, dpi,
                     )
                     .map_err(|e| anyhow::anyhow!(e))
                 })
@@ -1546,34 +1542,20 @@ mod tests {
     #[test]
     fn geometry_request_size_wins_per_axis_over_template() {
         // Explicit request overrides the template; missing axes fall back.
-        let (w, h, o) = effective_geometry(
-            Some(210.0),
-            None,
-            None,
-            80.0,
-            200.0,
-            Some("portrait"),
-        );
+        let (w, h, o) = effective_geometry(Some(210.0), None, None, 80.0, 200.0, Some("portrait"));
         assert_eq!((w, h, o.as_str()), (210.0, 200.0, "portrait"));
     }
 
     #[test]
     fn geometry_template_orientation_applies_when_request_omits_it() {
-        let (w, h, o) =
-            effective_geometry(None, None, None, 80.0, 200.0, Some("landscape"));
+        let (w, h, o) = effective_geometry(None, None, None, 80.0, 200.0, Some("landscape"));
         assert_eq!((w, h, o.as_str()), (200.0, 80.0, "landscape"));
     }
 
     #[test]
     fn geometry_request_orientation_beats_template() {
-        let (w, h, o) = effective_geometry(
-            None,
-            None,
-            Some("portrait"),
-            80.0,
-            200.0,
-            Some("landscape"),
-        );
+        let (w, h, o) =
+            effective_geometry(None, None, Some("portrait"), 80.0, 200.0, Some("landscape"));
         assert_eq!((w, h, o.as_str()), (80.0, 200.0, "portrait"));
     }
 

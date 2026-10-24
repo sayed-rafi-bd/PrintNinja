@@ -604,7 +604,6 @@ pub fn shared() -> &'static PersistentEdge {
 }
 
 impl PersistentEdge {
-
     /// The running browser, started (or restarted after a crash) if needed.
     /// Jobs that arrive during a start wait for it on the state lock rather
     /// than each starting their own.
