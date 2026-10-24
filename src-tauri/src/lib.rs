@@ -200,6 +200,33 @@ pub fn run() {
             let queue = queue::PrintQueue::new();
             app.manage(queue.clone());
 
+            // Auto-start the local API server when the user asked for it
+            // (Settings → API, off by default). Spawned: `bind_addr` needs
+            // the Tokio reactor, and a busy port must only log — never
+            // abort startup.
+            {
+                let autostart = db_state
+                    .lock()
+                    .ok()
+                    .map(|guard| commands::api::api_autostart_enabled(guard.connection()))
+                    .unwrap_or(false);
+                if autostart {
+                    let handle = app.handle().clone();
+                    let db = db_state.clone();
+                    let q = queue.clone();
+                    tauri::async_runtime::spawn(async move {
+                        match commands::api::launch_server(handle, db, q, None, None).await {
+                            Ok(addr) => {
+                                tracing::info!("API server auto-started on {addr}")
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "API server auto-start failed")
+                            }
+                        }
+                    });
+                }
+            }
+
             // One worker consumes the queued rows reprint and retry write
             // (P3). It replaced a channel whose
             // receiver only logged what it admitted (P8): the database is

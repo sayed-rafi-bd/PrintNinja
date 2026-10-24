@@ -89,21 +89,26 @@ function ShareIndicator() {
   );
 }
 
-/** Red topbar alert while the local API is exposed to the LAN.
- * Loopback serving stays silent; LAN mode links straight to the toggle
- * that turns it off (Settings → API and automation). */
-function LanIndicator() {
+/** Topbar badge while the local API server runs. LAN exposure stays a
+ * red alert; loopback serving shows a green badge with the bind address.
+ * Both link to Settings → API, where the server stops and LAN turns off. */
+function ApiIndicator() {
   const { t } = useTranslation();
   const location = useLocation();
-  const [lanOn, setLanOn] = useState(false);
+  const [status, setStatus] = useState<{
+    running: boolean;
+    address: string;
+    port: number;
+    lan_access: boolean;
+  } | null>(null);
   useEffect(() => {
     let cancelled = false;
     const check = async () => {
       try {
-        const status = await agent("get_api_status", {});
-        if (!cancelled) setLanOn(!!status?.running && !!status?.lan_access);
+        const s = await agent("get_api_status", {});
+        if (!cancelled) setStatus(s);
       } catch {
-        if (!cancelled) setLanOn(false);
+        if (!cancelled) setStatus(null);
       }
     };
     void check();
@@ -113,15 +118,28 @@ function LanIndicator() {
       window.removeEventListener("focus", check);
     };
   }, [location.pathname]);
-  if (!lanOn) return null;
+  if (!status?.running) return null;
+  if (status.lan_access) {
+    return (
+      <Link
+        to="/settings?section=api"
+        title={`${t("shell.lan_on")} — ${t("shell.lan_on_detail")}`}
+        aria-label={`${t("shell.lan_on")}: ${t("shell.lan_on_detail")}`}
+        data-testid="lan-indicator"
+      >
+        <StatusBadge status="lan" label={t("shell.lan_on")} />
+      </Link>
+    );
+  }
+  const where = `${status.address}:${status.port}`;
   return (
     <Link
       to="/settings?section=api"
-      title={`${t("shell.lan_on")} — ${t("shell.lan_on_detail")}`}
-      aria-label={`${t("shell.lan_on")}: ${t("shell.lan_on_detail")}`}
-      data-testid="lan-indicator"
+      title={`API server listening on ${where}`}
+      aria-label={`API server listening on ${where}`}
+      data-testid="api-indicator"
     >
-      <StatusBadge status="lan" label={t("shell.lan_on")} />
+      <StatusBadge status="api" />
     </Link>
   );
 }
@@ -258,7 +276,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </kbd>
         </button>
         <div className="ml-auto flex items-center gap-2">
-          <LanIndicator />
+          <ApiIndicator />
           <div className="hidden sm:block">
             <ShareIndicator />
           </div>

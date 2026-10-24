@@ -213,6 +213,7 @@ const resources = {
         withdrawn: "Withdrawn",
         online: "Online",
         offline: "Offline",
+        api: "API",
         lan: "LAN",
       },
       pages: {

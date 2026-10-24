@@ -52,6 +52,12 @@ fn bool_from_settings(db: &DbState, key: &str, default: bool) -> bool {
         .unwrap_or(default)
 }
 
+/// Whether the API server starts with the app (Settings → API).
+/// Opt-in, off by default — an open port must never be a surprise.
+pub fn api_autostart_enabled(conn: &rusqlite::Connection) -> bool {
+    bool_from_conn(conn, "api_autostart", false)
+}
+
 #[tauri::command]
 pub fn get_api_status(_app: AppHandle, db: State<DbState>) -> AppResult<ApiStatus> {
     let guard = db
@@ -110,6 +116,26 @@ pub async fn start_api_server(
     app: AppHandle,
     db: State<'_, DbState>,
     queue: State<'_, crate::queue::PrintQueue>,
+    port: Option<u16>,
+    lan_access: Option<bool>,
+) -> AppResult<String> {
+    launch_server(
+        app,
+        db.inner().clone(),
+        queue.inner().clone(),
+        port,
+        lan_access,
+    )
+    .await
+}
+
+/// The whole start-up path, callable without an IPC context so the app
+/// itself can auto-start the server at boot (Settings → API). Stays
+/// `async`: `bind_addr` needs the Tokio reactor.
+pub async fn launch_server(
+    app: AppHandle,
+    db: DbState,
+    queue: crate::queue::PrintQueue,
     port: Option<u16>,
     lan_access: Option<bool>,
 ) -> AppResult<String> {
@@ -175,8 +201,8 @@ pub async fn start_api_server(
         .app_cache_dir()
         .map_err(|e| AppError::Internal(format!("No cache dir: {e}")))?;
     let state = crate::api::routes::ApiState {
-        db: db.inner().clone(),
-        queue: std::sync::Arc::new(queue.inner().clone()),
+        db: db.clone(),
+        queue: std::sync::Arc::new(queue),
         cache_dir,
     };
     let router = crate::api::routes::router_with_state(state, lan);

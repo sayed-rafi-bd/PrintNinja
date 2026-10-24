@@ -22,6 +22,8 @@ export const testids = {
   syncChip: "sync-chip",
   /** Red topbar alert while the local API is exposed to the LAN. */
   lanIndicator: "lan-indicator",
+  /** Green topbar badge while the local API serves loopback. */
+  apiIndicator: "api-indicator",
   /** Banner over the content while open but offline. */
   offlineBanner: "offline-banner",
   /** Banner on Templates when rows are conflicted. */
@@ -85,8 +87,6 @@ export const testids = {
   apiExplorerBody: "api-explorer-body",
   /** API Explorer: optional Idempotency-Key field. */
   apiExplorerIdempotency: "api-explorer-idempotency",
-  /** API Explorer: data_url field for URL-driven prints. */
-  apiExplorerDataUrl: "api-explorer-data-url",
   /** API Explorer: send the built request. */
   apiExplorerSend: "api-explorer-send",
   /** API Explorer: pretty-printed response. */
